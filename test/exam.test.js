@@ -214,11 +214,17 @@ test('focus changes are counted', async () => {
   assert.equal(db.prepare('SELECT focus_losses FROM assessments WHERE id = ?').get(a.id).focus_losses, 2);
 });
 
-test('combined assessment draws from each chosen section', async () => {
+test('combined assessment: one link, IQ first, General only after IQ is passed', async () => {
   const a = await newLink({ assessment_type: 'COMBINED', counts: { IQ: 3, GENERAL: 2, CALCULATION: 0, ESSAY: 0 } });
   const r = await startExam(a.token);
-  const bySection = r.data.questions.reduce((m, q) => ({ ...m, [q.section]: (m[q.section] || 0) + 1 }), {});
-  assert.deepEqual(bySection, { IQ: 3, GENERAL: 2 });
+  assert.deepEqual([...new Set(r.data.questions.map((q) => q.section))], ['IQ']);
+  const rows = db.prepare('SELECT id, correct_answer FROM assessment_questions WHERE assessment_id = ?').all(a.id);
+  const passed = await candidate.post(exam(a.token, '/submit'), { answers: Object.fromEntries(rows.map((q) => [q.id, q.correct_answer])) });
+  assert.equal(passed.data.state, 'next_test');
+  const next = await candidate.post(exam(a.token, '/continue'));
+  assert.equal(next.data.state, 'in_progress');
+  assert.deepEqual([...new Set(next.data.questions.map((q) => q.section))], ['GENERAL']);
+  assert.equal(next.data.questions.length, 2);
 });
 
 test('identical wording is never shown twice, even if the bank has copies', async () => {

@@ -28,15 +28,20 @@ test.after(stop);
 async function sit(name, type, counts, correctFraction) {
   const link = await admin.post('/api/admin/assessments', { assessment_type: type, counts, time_limit_minutes: 30, link_expiry_minutes: 60 });
   assert.equal(link.status, 201, JSON.stringify(link.data));
-  await candidate.post(`/api/exam/${link.data.token}/start`, { ...CANDIDATE, name });
-  const rows = db.prepare('SELECT id, section, correct_answer, option_order FROM assessment_questions WHERE assessment_id = ? ORDER BY position').all(link.data.id);
-  const answers = {};
-  rows.forEach((q, i) => {
-    if (q.section === 'ESSAY') { answers[q.id] = 'I am hard-working.'; return; }
-    const right = i < Math.round(rows.filter((r) => r.section !== 'ESSAY').length * correctFraction);
-    answers[q.id] = right ? q.correct_answer : (JSON.parse(q.option_order).length ? (q.correct_answer === 'A' ? 'B' : 'A') : '0');
-  });
-  await candidate.post(`/api/exam/${link.data.token}/submit`, { answers });
+  let state = (await candidate.post(`/api/exam/${link.data.token}/start`, { ...CANDIDATE, name })).data;
+  // One link, tests one after another: answer the running test, submit, continue.
+  while (state.state === 'in_progress') {
+    const ids = state.questions.map((q) => q.id);
+    const rows = db.prepare('SELECT id, section, correct_answer, option_order FROM assessment_questions WHERE assessment_id = ? ORDER BY position').all(link.data.id).filter((q) => ids.includes(q.id));
+    const answers = {};
+    rows.forEach((q, i) => {
+      if (q.section === 'ESSAY') { answers[q.id] = 'I am hard-working.'; return; }
+      const right = i < Math.round(rows.length * correctFraction);
+      answers[q.id] = right ? q.correct_answer : (JSON.parse(q.option_order).length ? (q.correct_answer === 'A' ? 'B' : 'A') : '0');
+    });
+    state = (await candidate.post(`/api/exam/${link.data.token}/submit`, { answers })).data;
+    if (state.state === 'next_test') state = (await candidate.post(`/api/exam/${link.data.token}/continue`)).data;
+  }
   return db.prepare('SELECT * FROM assessments WHERE id = ?').get(link.data.id);
 }
 
@@ -74,7 +79,11 @@ test('essay makes the result Pending until HR enters marks', async () => {
   const expectedMax = r.data.calc_max + 10;
   const expectedPoints = r.data.calc_max + 5;
   assert.equal(r.data.test_score, Math.round((expectedPoints / expectedMax) * 1000) / 10);
-  assert.equal(r.data.result, r.data.test_score >= 60 ? 'Pass' : 'Not Pass');
+  // The essay is its own test: 5 / 10 = 50% is below the 60% pass mark.
+  assert.equal(r.data.result, 'Not Pass');
+  const again = await admin.put(`/api/admin/assessments/${a.id}/essay-marks`, { marks: { [essay.id]: 8 } });
+  assert.equal(again.data.result, 'Pass', 'calculation passed and essay 8 / 10 = 80%');
+  await admin.put(`/api/admin/assessments/${a.id}/essay-marks`, { marks: { [essay.id]: 5 } });
 });
 
 test('short-answer calculation is compared ignoring spaces and commas', () => {

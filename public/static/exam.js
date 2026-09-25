@@ -29,6 +29,16 @@ const TEXT = {
     phone_required: 'Please enter your phone number.',
     no_questions: 'This assessment has no questions yet.\nPlease contact HR.',
     sections: { IQ: 'IQ Test', GENERAL: 'General Test', CALCULATION: 'Calculation Test', ESSAY: 'Essay Test' },
+    progress_title: 'Assessment Progress',
+    tests_intro: 'This assessment has {n} tests, taken one by one. Each test has its own time limit, and you must pass each test to continue to the next one.',
+    test_line: '{name}: {q} questions, {m} minutes',
+    passed: '{name} Passed',
+    next_test: 'Next Test',
+    continue: 'Continue',
+    next_rules: 'You have {m} minutes for {n} questions. The timer starts when you press Continue.',
+    time_up_test: 'Time is up for this test. Your answers were submitted automatically.',
+    submit_test: 'Submit Test',
+    stopped: 'Thank you.\nYou did not meet the required score for this assessment.\nPlease contact HR.',
   },
   lo: {
     title: 'ການທົດສອບ',
@@ -56,6 +66,16 @@ const TEXT = {
     phone_required: 'ກະລຸນາປ້ອນເບີໂທລະສັບ.',
     no_questions: 'ການທົດສອບນີ້ຍັງບໍ່ມີຄຳຖາມ.\nກະລຸນາຕິດຕໍ່ຝ່າຍບຸກຄະລາກອນ (HR).',
     sections: { IQ: 'ແບບທົດສອບ IQ', GENERAL: 'ແບບທົດສອບທົ່ວໄປ', CALCULATION: 'ແບບທົດສອບການຄິດໄລ່', ESSAY: 'ແບບທົດສອບການຂຽນ' },
+    progress_title: 'ຄວາມຄືບໜ້າຂອງການປະເມີນ',
+    tests_intro: 'ການປະເມີນນີ້ມີ {n} ແບບທົດສອບ, ເຮັດເທື່ອລະອັນ. ແຕ່ລະແບບທົດສອບມີເວລາຂອງຕົນເອງ ແລະ ທ່ານຕ້ອງຜ່ານແຕ່ລະແບບທົດສອບຈຶ່ງຈະໄປແບບທົດສອບຕໍ່ໄປໄດ້.',
+    test_line: '{name}: {q} ຄຳຖາມ, {m} ນາທີ',
+    passed: 'ທ່ານຜ່ານ{name}ແລ້ວ',
+    next_test: 'ແບບທົດສອບຕໍ່ໄປ',
+    continue: 'ສືບຕໍ່',
+    next_rules: 'ທ່ານມີເວລາ {m} ນາທີ ສຳລັບ {n} ຄຳຖາມ. ເວລາຈະເລີ່ມນັບເມື່ອທ່ານກົດສືບຕໍ່.',
+    time_up_test: 'ໝົດເວລາສຳລັບແບບທົດສອບນີ້. ຄຳຕອບຂອງທ່ານໄດ້ຖືກສົ່ງອັດຕະໂນມັດ.',
+    submit_test: 'ສົ່ງແບບທົດສອບ',
+    stopped: 'ຂອບໃຈ.\nທ່ານບໍ່ໄດ້ຄະແນນຕາມທີ່ກຳນົດສຳລັບການປະເມີນນີ້.\nກະລຸນາຕິດຕໍ່ຝ່າຍບຸກຄະລາກອນ (HR).',
   },
 };
 
@@ -83,6 +103,8 @@ function h(tag, attrs, ...children) {
   return el;
 }
 const fill = (s, vars) => s.replace(/\{(\w+)\}/g, (_, k) => vars[k]);
+// English only: "1 questions" -> "1 question".
+const fillCount = (str, vars) => fill(str, vars).replace(/\b1 questions\b/g, '1 question');
 
 async function call(method, path, body) {
   const res = await fetch('/api/exam/' + encodeURIComponent(token) + path, {
@@ -101,9 +123,40 @@ function setLanguage(lang) {
   document.title = 'LALCO - ' + T.title;
 }
 
-function bigMessage(text) {
+function bigMessage(text, tests) {
   stopTimer();
-  root.replaceChildren(h('div', { class: 'card big-message' }, text));
+  root.replaceChildren(h('div', { class: 'card big-message' }, text), tests && tests.length > 1 ? progressBox(tests) : null);
+}
+
+// ✓ done · → now / next · ○ later · ✗ not passed
+function progressBox(tests) {
+  const mark = { done: '✓', current: '→', next: '→', upcoming: '○', failed: '✗' };
+  return h('div', { class: 'card progress-box' }, h('div', { class: 'progress' }, T.progress_title),
+    tests.map((t) => h('div', { class: 'progress-item ' + t.status }, h('span', { class: 'mark' }, mark[t.status] || '○'), T.sections[t.section])));
+}
+
+// Between tests: the last one was passed; the next opens when the candidate is ready.
+function renderNext(data) {
+  stopTimer();
+  submitting = false;
+  exam = null;
+  const button = h('button', { type: 'button' }, T.continue);
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    try {
+      const r = await call('POST', '/continue');
+      if (r.status === 400) { button.disabled = false; return bigMessage(T[r.data.error] || T.error); }
+      show(r.data);
+    } catch { button.disabled = false; bigMessage(T.error); }
+  });
+  root.replaceChildren(
+    h('div', { class: 'card center' },
+      data.auto_submitted ? h('p', { class: 'message error' }, T.time_up_test) : null,
+      h('h1', { class: 'passed' }, '✓ ' + fill(T.passed, { name: T.sections[data.passed_section] })),
+      h('p', {}, h('span', { class: 'muted' }, T.next_test + ': '), h('strong', {}, T.sections[data.next_section])),
+      h('p', { class: 'message ok' }, fillCount(T.next_rules, { m: data.time_limit_minutes, n: data.question_count })),
+      button),
+    progressBox(data.tests));
 }
 
 // Handles any server reply that carries a state.
@@ -112,8 +165,11 @@ function show(data) {
   switch (data.state) {
     case 'ready': return renderStart(data);
     case 'in_progress': return renderExam(data);
-    // "exam" is set when the candidate sat the test in this page.
-    case 'submitted': return bigMessage(!exam ? T.already_submitted : data.auto_submitted ? T.auto_submitted : T.submitted);
+    case 'next_test': return renderNext(data);
+    // A test was not passed, so the assessment stopped there.
+    case 'submitted': if (data.outcome === 'stopped') return bigMessage(T.stopped, data.tests);
+      // "exam" is set when the candidate sat the test in this page.
+      return bigMessage(!exam ? T.already_submitted : data.auto_submitted ? T.auto_submitted : T.submitted, data.tests);
     case 'expired': return bigMessage(T.expired);
     case 'disabled': return bigMessage(T.disabled);
     case 'not_found': return bigMessage(T.not_found);
@@ -139,7 +195,9 @@ function renderStart(data) {
       input('phone', { required: true, type: 'tel', autocomplete: 'tel' }),
       h('div', { class: 'field' }, h('label', { for: 'graduate_from' }, T.graduate_from), grad),
       input('high_school'), input('college'), input('university'), input('school_name'), input('subject'), input('gpa')),
-    h('p', { class: 'message ok section-gap' }, fill(T.rules, { m: data.time_limit_minutes, n: data.question_count })),
+    (data.tests || []).length > 1 ? h('div', { class: 'message ok section-gap' }, fill(T.tests_intro, { n: data.tests.length }),
+      h('ol', {}, data.tests.map((t) => h('li', {}, fillCount(T.test_line, { name: T.sections[t.section], q: t.question_count, m: t.minutes }))))) : null,
+    h('p', { class: 'message ok section-gap' }, fillCount(T.rules, { m: data.time_limit_minutes, n: data.question_count })),
     button);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -164,10 +222,13 @@ function renderExam(data) {
     questions: data.questions,
     answers: Object.fromEntries(data.questions.map((q) => [q.id, q.answer ?? ''])),
     deadline: Date.now() + data.remaining_seconds * 1000,
-    current: exam ? exam.current : 0,
+    current: exam && exam.section === data.section ? exam.current : 0,
     candidateName: data.candidate ? data.candidate.name : '',
-    isIq: data.assessment_type === 'IQ',
+    section: data.section,
+    isIq: data.section === 'IQ',
+    tests: data.tests || [],
   };
+  submitting = false;
   startTimer();
   drawQuestion();
 }
@@ -235,8 +296,7 @@ function drawQuestion() {
   const last = exam.current === qs.length - 1;
   root.replaceChildren(
     h('div', { class: 'exam-head' },
-      h('div', {}, exam.isIq ? h('div', { class: 'exam-title' }, T.iq_title) : null, h('strong', {}, exam.candidateName),
-        exam.isIq ? null : h('div', { class: 'progress' }, T.sections[q.section] || '')),
+      h('div', {}, h('div', { class: 'exam-title' }, exam.isIq ? T.iq_title : T.sections[exam.section]), h('strong', {}, exam.candidateName)),
       h('div', { id: 'timer', class: 'timer' })),
     offline,
     h('div', { class: 'card' },
@@ -252,7 +312,8 @@ function drawQuestion() {
         class: (i === exam.current ? 'current' : '') + (exam.answers[item.id] ? ' answered' : ''),
         onclick: () => go(i),
       }, i + 1)))),
-    h('div', { class: 'center' }, h('button', { type: 'button', id: 'submit', onclick: () => submit(false) }, T.submit)));
+    h('div', { class: 'center' }, h('button', { type: 'button', id: 'submit', onclick: () => submit(false) }, exam.tests.length > 1 ? T.submit_test : T.submit)),
+    exam.tests.length > 1 ? progressBox(exam.tests) : null);
   // Refresh the timer text immediately so it never flashes empty.
   const left = Math.max(0, Math.round((exam.deadline - Date.now()) / 1000));
   document.getElementById('timer').textContent = `${T.time_remaining}: ${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`;

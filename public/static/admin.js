@@ -49,7 +49,7 @@ const TYPE_LABEL = { IQ: 'IQ Test', GENERAL: 'General Test', CALCULATION: 'Calcu
 const TYPE_SECTIONS = { IQ: ['IQ'], GENERAL: ['GENERAL'], CALCULATION: ['CALCULATION'], ESSAY: ['ESSAY'], COMBINED: ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'] };
 const LANG_LABEL = { en: 'English', lo: 'Lao' };
 const STATE_LABEL = {
-  ready: ['Waiting', 'neutral'], in_progress: ['In progress', 'pending'], submitted: ['Submitted', 'pass'],
+  ready: ['Waiting', 'neutral'], in_progress: ['In progress', 'pending'], next_test: ['Between tests', 'pending'], submitted: ['Submitted', 'pass'],
   expired: ['Link expired', 'fail'], disabled: ['Disabled', 'fail'],
 };
 
@@ -562,19 +562,23 @@ async function renderAssessments() {
     api('GET', '/settings'), api('GET', '/candidates'), api('GET', '/questions/counts'), api('GET', '/assessments')]);
   const counts = questionData;
 
-  const typeSelect = select('assessment_type', Object.entries(TYPE_LABEL), 'IQ');
-  const countsBox = h('div', { class: 'grid wide' });
-  const drawCounts = () => {
-    countsBox.replaceChildren(...TYPE_SECTIONS[typeSelect.value].map((s) => {
-      const def = s === 'IQ' ? IQ_DEFAULT : typeSelect.value === 'COMBINED' ? (s === 'ESSAY' ? 1 : 10) : 20;
-      const input = h('input', { name: 'count_' + s, type: 'number', min: 0, max: counts[s], value: Math.min(counts[s], def) });
-      const quick = s === 'IQ' ? h('div', { class: 'row small section-gap-sm' }, 'Quick:', [10, 15, 18, 20, 30].map((n) =>
-        h('button', { type: 'button', class: 'secondary small', disabled: n > counts[s], onclick: () => { input.value = n; } }, String(n)))) : null;
-      return h('div', { class: 'field' }, field(`${SECTION_LABEL[s]} questions (bank has ${counts[s]})`, input), quick);
+  // One link holds all chosen tests, always in this order: IQ -> General -> Calculation -> Essay.
+  const TESTS = ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'];
+  const DEFAULT_COUNT = { IQ: IQ_DEFAULT, GENERAL: 10, CALCULATION: 10, ESSAY: 1 };
+  const testsBox = h('div', { class: 'wide tests-box' },
+    h('label', {}, 'Tests Included (taken one by one in this order; the candidate must pass each test to continue)'),
+    TESTS.map((sec, i) => {
+      const has = counts[sec] > 0;
+      const check = h('input', { type: 'checkbox', name: 'test_' + sec, checked: has, disabled: !has });
+      const count = h('input', { name: 'count_' + sec, type: 'number', min: 1, max: counts[sec], value: Math.min(counts[sec], DEFAULT_COUNT[sec]) || '', class: 'inline-input small-num', disabled: !has });
+      const minutes = h('input', { name: 'minutes_' + sec, type: 'number', min: 1, max: 600, value: settings.default_time_minutes, class: 'inline-input small-num', disabled: !has });
+      const quick = sec === 'IQ' && has ? h('span', { class: 'small' }, ' Quick: ', [10, 15, 18, 20, 30].map((n) =>
+        h('button', { type: 'button', class: 'secondary small', disabled: n > counts[sec], onclick: () => { count.value = n; } }, String(n)))) : null;
+      return h('div', { class: 'test-row' },
+        h('label', { class: 'test-name' }, check, ` ${i + 1}. ${TYPE_LABEL[sec]}`),
+        has ? h('span', { class: 'row small' }, count, 'questions', minutes, 'minutes', quick, h('span', { class: 'muted' }, `(bank has ${counts[sec]})`))
+          : h('span', { class: 'muted small' }, 'No active questions in the bank yet'));
     }));
-  };
-  typeSelect.addEventListener('change', drawCounts);
-  drawCounts();
 
   const expirySelect = select('expiry_choice', EXPIRY_CHOICES, EXPIRY_CHOICES.some(([v]) => v === settings.default_link_expiry_minutes) ? settings.default_link_expiry_minutes : 'custom');
   const customExpiry = h('input', { name: 'expiry_custom', type: 'number', min: 1, value: settings.default_link_expiry_minutes });
@@ -586,32 +590,36 @@ async function renderAssessments() {
   const output = h('div');
   const form = h('form', { class: 'grid' },
     field('Candidate', select('candidate_id', [['', 'New candidate (fills in their own details)'], ...candidates.map((c) => [c.id, `${c.name}${c.phone ? ' - ' + c.phone : ''}`])], '')),
-    field('Assessment Type', typeSelect),
     field('Language', select('language', Object.entries(LANG_LABEL), settings.default_language)),
-    field('Assessment Time (minutes)', h('input', { name: 'time_limit_minutes', type: 'number', min: 1, max: 600, value: settings.default_time_minutes })),
     field('Link expires in', expirySelect),
     customField,
-    countsBox,
-    h('p', { class: 'muted small wide' }, 'Each candidate gets a different random set of questions from the bank, and answer options are shuffled. IQ questions go from Easy to Hard (for 18: questions 1-7 Easy, 8-12 Medium, 13-18 Hard).'),
-    h('div', { class: 'wide' }, h('button', { type: 'submit' }, 'Generate Link')));
+    testsBox,
+    h('p', { class: 'muted small wide' }, `The candidate gets ONE link, enters their details once, then takes the tests in order. Each test has its own timer. A test is passed at ${settings.pass_mark}% (Settings); if a test is not passed the assessment stops. Questions are random for each candidate and answers are shuffled. IQ: Level 1 → 2 → 3 (18 questions = 6 / 6 / 6, maximum 36 marks).`),
+    h('div', { class: 'wide' }, h('button', { type: 'submit' }, 'Generate Assessment Link')));
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const v = formValues(form);
+    const tests = TESTS.filter((sec) => v['test_' + sec]);
     const body = {
       candidate_id: v.candidate_id || null,
-      assessment_type: v.assessment_type,
+      tests,
       language: v.language,
-      time_limit_minutes: Number(v.time_limit_minutes),
       link_expiry_minutes: Number(v.expiry_choice === 'custom' ? v.expiry_custom : v.expiry_choice),
-      counts: Object.fromEntries(TYPE_SECTIONS[v.assessment_type].map((s) => [s, Number(v['count_' + s] || 0)])),
+      counts: Object.fromEntries(tests.map((sec) => [sec, Number(v['count_' + sec] || 0)])),
+      minutes: Object.fromEntries(tests.map((sec) => [sec, Number(v['minutes_' + sec] || 0)])),
     };
+    if (!tests.length) return output.replaceChildren(message('Please tick at least one test.'));
     try {
       const a = await api('POST', '/assessments', body);
       const url = examUrl(a.token);
       const input = h('input', { value: url, readonly: true });
-      const copy = h('button', { type: 'button', onclick: () => copyText(url, copy) }, 'Copy link');
-      output.replaceChildren(h('div', { class: 'message ok' }, `Link created. It must be opened before ${fmtDateTime(a.link_expires_at)}.`),
+      const copy = h('button', { type: 'button', onclick: () => copyText(url, copy) }, 'Copy Link');
+      const who = v.candidate_id ? (candidates.find((c) => String(c.id) === String(v.candidate_id)) || {}).name : 'New candidate (fills in their own details)';
+      output.replaceChildren(h('div', { class: 'message ok' },
+        h('strong', {}, 'Assessment Created'), h('br'), `Candidate: ${who}`, h('br'),
+        `Tests: ${a.stages.map((st) => TYPE_LABEL[st.section]).join(' → ')}`, h('br'),
+        `The link must be opened before ${fmtDateTime(a.link_expires_at)}.`),
         h('div', { class: 'link-box' }, input, copy));
       input.select();
       refreshList();
@@ -625,6 +633,14 @@ async function renderAssessments() {
     h('h1', {}, 'Assessments'),
     h('div', { class: 'card' }, h('h2', {}, 'Create Assessment'), form, output),
     h('div', { class: 'card' }, h('h2', {}, 'Assessment Links'), listBox));
+}
+
+// "✓ IQ → ✗ General → ○ Calculation" for the admin tables.
+function testsChain(stages) {
+  return (stages || []).map((st) => {
+    const mark = st.status === 'IN_PROGRESS' ? '▶ ' : st.status !== 'SUBMITTED' ? '○ ' : st.result === 'Pass' ? '✓ ' : st.result === 'Not Pass' ? '✗ ' : '… ';
+    return mark + SECTION_LABEL[st.section];
+  }).join(' → ');
 }
 
 function assessmentTable(list, showCandidate) {
@@ -642,13 +658,13 @@ function assessmentTable(list, showCandidate) {
     } catch (ex) { alert(ex.message); }
   };
   return h('div', { class: 'table-wrap' }, h('table', {},
-    h('thead', {}, h('tr', {}, [showCandidate ? 'Candidate' : null, 'Type', 'Language', 'Time', 'Status', 'Link expires', 'Score', 'Result', 'Actions'].filter(Boolean).map((t) => h('th', {}, t)))),
+    h('thead', {}, h('tr', {}, [showCandidate ? 'Candidate' : null, 'Tests', 'Language', 'Time', 'Status', 'Link expires', 'Score', 'Result', 'Actions'].filter(Boolean).map((t) => h('th', {}, t)))),
     h('tbody', {}, list.map((a) => {
       const copy = h('button', { class: 'secondary small', type: 'button', onclick: () => copyText(examUrl(a.token), copy) }, 'Copy link');
       const canUse = a.state === 'ready' || a.state === 'disabled' || a.state === 'expired';
       return h('tr', {},
         showCandidate ? h('td', {}, a.candidate_id ? h('a', { href: '#/candidates/' + a.candidate_id }, a.candidate_name || 'Candidate') : h('span', { class: 'muted' }, 'Not started')) : null,
-        h('td', {}, TYPE_LABEL[a.assessment_type]), h('td', {}, LANG_LABEL[a.language]), h('td', {}, a.time_limit_minutes + ' min'),
+        h('td', { class: 'small' }, testsChain(a.stages)), h('td', {}, LANG_LABEL[a.language]), h('td', {}, a.time_limit_minutes + ' min'),
         h('td', {}, stateBadge(a.state), a.auto_submitted ? h('div', { class: 'muted small' }, 'Auto-submitted') : null),
         h('td', { class: 'small' }, a.status === 'NOT_STARTED' ? fmtDateTime(a.link_expires_at) : '-'),
         h('td', {}, a.test_score == null ? '-' : a.test_score + '%'),
@@ -665,7 +681,7 @@ function assessmentTable(list, showCandidate) {
 }
 
 async function renderAssessment(id) {
-  const { assessment: a, iq, candidate, questions } = await api('GET', '/assessments/' + id);
+  const { assessment: a, stages, iq, candidate, questions } = await api('GET', '/assessments/' + id);
   const essayInputs = [];
   const count = { correct: 0, wrong: 0, missed: 0 };
   const submitted = a.status === 'SUBMITTED';
@@ -727,10 +743,22 @@ async function renderAssessment(id) {
       h('tr', {}, h('th', {}, 'Test Score'), h('td', {}, a.test_score == null ? '-' : a.test_score + '%')),
       h('tr', {}, h('th', {}, 'Result'), h('td', {}, a.status === 'SUBMITTED' ? resultBadge(a.result) : '-'))))));
 
+  const stageStatus = (st) => (st.status === 'IN_PROGRESS' ? 'In progress' : st.status === 'NOT_STARTED' ? (a.status === 'SUBMITTED' ? 'Not taken' : 'Not started') : 'Finished');
+  const stagesCard = h('div', { class: 'card' }, h('h2', {}, 'Tests in this link'),
+    h('div', { class: 'table-wrap' }, h('table', {},
+      h('thead', {}, h('tr', {}, ['#', 'Test', 'Questions', 'Time', 'Status', 'Started', 'Finished', 'Score', '%', 'Result'].map((t) => h('th', {}, t)))),
+      h('tbody', {}, stages.map((st) => h('tr', {},
+        h('td', {}, st.position), h('td', {}, TYPE_LABEL[st.section]), h('td', {}, st.question_count), h('td', {}, st.time_limit_minutes + ' min'),
+        h('td', {}, stageStatus(st), st.auto_submitted ? h('div', { class: 'muted small' }, 'time ran out') : null),
+        h('td', { class: 'small' }, fmtDateTime(st.started_at)), h('td', { class: 'small' }, fmtDateTime(st.submitted_at)),
+        h('td', {}, st.status === 'SUBMITTED' ? `${st.points} / ${st.max}` : '-'), h('td', {}, st.status === 'SUBMITTED' ? st.percent + '%' : '-'),
+        h('td', {}, st.status === 'SUBMITTED' ? resultBadge(st.result) : '-')))))));
+
   view().replaceChildren(
     h('p', {}, h('a', { href: '#/assessments' }, '< All assessments')),
     h('h1', {}, 'Assessment review'),
     card,
+    stagesCard,
     h('div', { class: 'card' }, h('div', { class: 'row between' }, h('h2', {}, 'Answers'), submitted ? summary : null, saveEssays),
       h('div', { class: 'table-wrap' }, h('table', {},
         h('thead', {}, h('tr', {}, ['#', 'Type', 'Question', 'Candidate answer', 'Correct answer', 'Status'].map((t) => h('th', {}, t)))),

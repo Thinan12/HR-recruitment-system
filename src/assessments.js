@@ -100,25 +100,36 @@ function inactiveCounts() {
 
 class InputError extends Error {}
 
+// One link can hold several tests. They always run in the order
+// IQ -> General -> Calculation -> Essay; only the ones chosen are included.
 function createAssessment(input) {
   const settings = getSettings();
-  const type = String(input.assessment_type || '').toUpperCase();
-  if (!TYPES[type]) throw new InputError('Please choose an assessment type.');
+  let tests;
+  if (Array.isArray(input.tests)) {
+    tests = SECTIONS.filter((sec) => input.tests.map((t) => String(t).toUpperCase()).includes(sec));
+  } else {
+    const type = String(input.assessment_type || '').toUpperCase();
+    if (!TYPES[type]) throw new InputError('Please choose at least one test.');
+    tests = TYPES[type];
+  }
 
   const available = activeCounts();
   const sections = {};
-  for (const s of TYPES[type]) {
-    const n = Number(input.counts?.[s] ?? 0);
+  const minutes = {};
+  for (const sec of tests) {
+    const n = Number(input.counts?.[sec] ?? 0);
     if (!Number.isInteger(n) || n < 0 || n > 500) throw new InputError('Number of questions must be a whole number.');
     if (n === 0) continue;
-    if (n > available[s]) throw new InputError(`Only ${available[s]} active ${label(s)} questions are in the question bank.`);
-    sections[s] = n;
+    if (n > available[sec]) throw new InputError(`Only ${available[sec]} active ${label(sec)} questions are in the question bank.`);
+    const m = Number(input.minutes?.[sec] || input.time_limit_minutes || settings.default_time_minutes);
+    if (!Number.isInteger(m) || m < 1 || m > 600) throw new InputError(`Time for the ${label(sec)} test must be between 1 and 600 minutes.`);
+    sections[sec] = n;
+    minutes[sec] = m;
   }
-  if (Object.keys(sections).length === 0) throw new InputError('Please choose at least 1 question.');
+  const included = Object.keys(sections);
+  if (included.length === 0) throw new InputError('Please choose at least one test with at least 1 question.');
 
-  const time = Number(input.time_limit_minutes || settings.default_time_minutes);
   const expiry = Number(input.link_expiry_minutes || settings.default_link_expiry_minutes);
-  if (!Number.isInteger(time) || time < 1 || time > 600) throw new InputError('Assessment time must be between 1 and 600 minutes.');
   if (!Number.isInteger(expiry) || expiry < 1 || expiry > 60 * 24 * 90) throw new InputError('Link expiry must be between 1 minute and 90 days.');
   const language = LANGUAGES.includes(input.language) ? input.language : settings.default_language;
 
@@ -129,11 +140,42 @@ function createAssessment(input) {
   }
 
   const created = now();
-  const info = db.prepare(`INSERT INTO assessments
-    (token, candidate_id, assessment_type, sections, time_limit_minutes, link_expiry_minutes, link_expires_at, language, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(newToken(), candidateId, type, JSON.stringify(sections), time, expiry, addMinutes(created, expiry), language, created);
-  return getAssessment(info.lastInsertRowid);
+  const type = included.length === 1 ? included[0] : 'COMBINED';
+  const total = included.reduce((sum, sec) => sum + minutes[sec], 0);
+  const id = db.transaction(() => {
+    const aid = db.prepare(`INSERT INTO assessments
+      (token, candidate_id, assessment_type, sections, time_limit_minutes, link_expiry_minutes, link_expires_at, language, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(newToken(), candidateId, type, JSON.stringify(sections), total, expiry, addMinutes(created, expiry), language, created).lastInsertRowid;
+    const addStage = db.prepare('INSERT INTO assessment_stages (assessment_id, position, section, question_count, time_limit_minutes) VALUES (?, ?, ?, ?, ?)');
+    included.forEach((sec, i) => addStage.run(aid, i + 1, sec, sections[sec], minutes[sec]));
+    return aid;
+  })();
+  return getAssessment(id);
+}
+
+// The tests of an assessment, in order. Links made before tests were split
+// into steps get their steps here, matching what already happened.
+function stagesOf(a) {
+  const rows = db.prepare('SELECT * FROM assessment_stages WHERE assessment_id = ? ORDER BY position').all(a.id);
+  if (rows.length) return rows;
+  const sections = JSON.parse(a.sections || '{}');
+  const cols = { IQ: 'iq', GENERAL: 'general', CALCULATION: 'calc', ESSAY: 'essay' };
+  const passMark = getSettings().pass_mark;
+  const add = db.prepare(`INSERT OR IGNORE INTO assessment_stages
+    (assessment_id, position, section, question_count, time_limit_minutes, status, started_at, deadline_at, submitted_at, auto_submitted, points, max, percent, result)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const list = SECTIONS.filter((sec) => sections[sec]);
+  list.forEach((sec, i) => {
+    const points = a[cols[sec] + '_points'];
+    const max = a[cols[sec] + '_max'];
+    const percent = max ? round1((points / max) * 100) : null;
+    const result = a.status !== 'SUBMITTED' ? 'Pending' : list.length === 1 ? a.result
+      : sec === 'ESSAY' && a.essay_pending ? 'Pending' : percent != null && percent >= passMark ? 'Pass' : 'Not Pass';
+    add.run(a.id, i + 1, sec, sections[sec], a.time_limit_minutes, a.status, a.started_at, a.deadline_at, a.submitted_at, a.auto_submitted,
+      a.status === 'SUBMITTED' ? points : null, a.status === 'SUBMITTED' ? max : null, a.status === 'SUBMITTED' ? percent : null, result);
+  });
+  return db.prepare('SELECT * FROM assessment_stages WHERE assessment_id = ? ORDER BY position').all(a.id);
 }
 
 function getAssessment(id) {
@@ -145,13 +187,14 @@ function label(section) {
 }
 
 // What the candidate link can do right now.
-// NOT_STARTED links expire at link_expires_at; once started the exam deadline applies.
+// NOT_STARTED links expire at link_expires_at; once started the test deadline applies.
+// 'next_test' = a test was passed and the next one has not been opened yet.
 function linkState(a) {
   if (!a) return 'not_found';
   if (a.status === 'SUBMITTED') return 'submitted';
   if (!a.enabled) return 'disabled';
   if (a.status === 'NOT_STARTED' && Date.now() > Date.parse(a.link_expires_at)) return 'expired';
-  if (a.status === 'IN_PROGRESS') return 'in_progress';
+  if (a.status === 'IN_PROGRESS') return stagesOf(a).some((st) => st.status === 'IN_PROGRESS') ? 'in_progress' : 'next_test';
   return 'ready';
 }
 
@@ -167,6 +210,42 @@ function cleanCandidateInfo(body) {
   return info;
 }
 
+const insertQuestion = db.prepare(`INSERT INTO assessment_questions
+  (assessment_id, question_id, position, section, question_text, ${SNAPSHOT_COLS.join(', ')}, correct_answer, option_order, max_marks, difficulty)
+  VALUES (@assessment_id, @question_id, @position, @section, @question_text, ${SNAPSHOT_COLS.map((c) => '@' + c).join(', ')},
+    @correct_answer, @option_order, @max_marks, @difficulty)`);
+
+// Opens one test: draws its random questions (never repeating one already used
+// in this assessment), shuffles the answers and starts its timer.
+function openStage(a, stage) {
+  const stamp = now();
+  const used = new Set(db.prepare('SELECT * FROM assessment_questions WHERE assessment_id = ?').all(a.id).map(questionKey));
+  let position = db.prepare('SELECT COALESCE(MAX(position), 0) AS p FROM assessment_questions WHERE assessment_id = ?').get(a.id).p;
+  const pool = [];
+  for (const q of shuffle(db.prepare(`SELECT * FROM questions WHERE section = ? AND ${USABLE}`).all(stage.section))) {
+    const key = questionKey(q);
+    if (used.has(key)) continue;
+    used.add(key);
+    pool.push(q);
+  }
+  const picked = stage.section === 'IQ' ? pickProgressive(pool, stage.question_count) : pool.slice(0, stage.question_count);
+  if (picked.length === 0) throw new InputError('no_questions');
+  for (const q of picked) {
+    const letters = LETTERS.filter((L) => q['option_' + L.toLowerCase()] || q['option_' + L.toLowerCase() + '_image']);
+    insertQuestion.run({
+      ...Object.fromEntries(SNAPSHOT_COLS.map((c) => [c, q[c]])),
+      assessment_id: a.id, question_id: q.id, position: ++position, section: stage.section, question_text: q.question_text,
+      correct_answer: q.correct_answer, option_order: JSON.stringify(shuffle(letters)),
+      max_marks: stage.section === 'IQ' ? levelMarks(q) : q.marks, difficulty: q.difficulty,
+    });
+  }
+  const deadline = addMinutes(stamp, stage.time_limit_minutes);
+  const res = db.prepare("UPDATE assessment_stages SET status = 'IN_PROGRESS', started_at = ?, deadline_at = ? WHERE id = ? AND status = 'NOT_STARTED'")
+    .run(stamp, deadline, stage.id);
+  if (res.changes !== 1) throw new InputError('already_started');
+  db.prepare('UPDATE assessments SET deadline_at = ? WHERE id = ?').run(deadline, a.id);
+}
+
 const startTx = db.transaction((a, info) => {
   const stamp = now();
   let candidateId = a.candidate_id;
@@ -179,46 +258,33 @@ const startTx = db.transaction((a, info) => {
     candidateId = db.prepare(`INSERT INTO candidates (${cols}, created_at, updated_at) VALUES (${vals}, @stamp, @stamp)`)
       .run({ ...info, stamp }).lastInsertRowid;
   }
-
-  // Random, non-repeating selection per section, then shuffled answer order.
-  const sections = JSON.parse(a.sections);
-  const insert = db.prepare(`INSERT INTO assessment_questions
-    (assessment_id, question_id, position, section, question_text, ${SNAPSHOT_COLS.join(', ')}, correct_answer, option_order, max_marks, difficulty)
-    VALUES (@assessment_id, @question_id, @position, @section, @question_text, ${SNAPSHOT_COLS.map((c) => '@' + c).join(', ')},
-      @correct_answer, @option_order, @max_marks, @difficulty)`);
-  let position = 0;
-  const used = new Set(); // never show the same question twice, even if the bank has copies
-  for (const section of SECTIONS) {
-    if (!sections[section]) continue;
-    const pool = [];
-    for (const q of shuffle(db.prepare(`SELECT * FROM questions WHERE section = ? AND ${USABLE}`).all(section))) {
-      const key = questionKey(q);
-      if (used.has(key)) continue;
-      used.add(key);
-      pool.push(q);
-    }
-    const picked = section === 'IQ' ? pickProgressive(pool, sections[section]) : pool.slice(0, sections[section]);
-    for (const q of picked) {
-      const letters = LETTERS.filter((L) => q['option_' + L.toLowerCase()] || q['option_' + L.toLowerCase() + '_image']);
-      insert.run({
-        ...Object.fromEntries(SNAPSHOT_COLS.map((c) => [c, q[c]])),
-        assessment_id: a.id, question_id: q.id, position: ++position, section, question_text: q.question_text,
-        correct_answer: q.correct_answer, option_order: JSON.stringify(shuffle(letters)), max_marks: section === 'IQ' ? levelMarks(q) : q.marks, difficulty: q.difficulty,
-      });
-    }
-  }
-  if (position === 0) throw new InputError('no_questions');
-
   // Only one start can win, even if the candidate double-clicks.
-  const res = db.prepare(`UPDATE assessments SET status = 'IN_PROGRESS', candidate_id = ?, started_at = ?, deadline_at = ?
-    WHERE id = ? AND status = 'NOT_STARTED'`)
-    .run(candidateId, stamp, addMinutes(stamp, a.time_limit_minutes), a.id);
+  const res = db.prepare(`UPDATE assessments SET status = 'IN_PROGRESS', candidate_id = ?, started_at = ?
+    WHERE id = ? AND status = 'NOT_STARTED'`).run(candidateId, stamp, a.id);
   if (res.changes !== 1) throw new InputError('already_started');
+  openStage(a, stagesOf(a)[0]); // the candidate's details are entered once; the first test starts now
 });
 
 function startAssessment(a, body) {
   const info = cleanCandidateInfo(body);
   startTx(a, info);
+}
+
+// Opens the next test, only after every earlier test was passed. The server
+// decides which test is next; the candidate cannot choose or skip one.
+const continueTx = db.transaction((a) => {
+  const fresh = getAssessment(a.id);
+  if (!fresh || fresh.status !== 'IN_PROGRESS') return false;
+  const stages = stagesOf(fresh);
+  if (stages.some((st) => st.status === 'IN_PROGRESS')) return false;
+  const next = stages.find((st) => st.status === 'NOT_STARTED');
+  if (!next || stages.some((st) => st.status === 'SUBMITTED' && st.result === 'Not Pass')) return false;
+  openStage(fresh, next);
+  return true;
+});
+
+function continueAssessment(a) {
+  return continueTx(a);
 }
 
 // ---- answering -------------------------------------------------------------
@@ -229,7 +295,9 @@ function isPastDeadline(a, graceMs = 0) {
 
 function saveAnswer(a, aqId, answer) {
   const value = answer == null ? null : String(answer).slice(0, 20000);
-  return db.prepare('UPDATE assessment_questions SET answer = ? WHERE id = ? AND assessment_id = ?').run(value, Number(aqId), a.id).changes === 1;
+  return db.prepare(`UPDATE assessment_questions SET answer = ? WHERE id = ? AND assessment_id = ?
+    AND section IN (SELECT section FROM assessment_stages WHERE assessment_id = ? AND status = 'IN_PROGRESS')`)
+    .run(value, Number(aqId), a.id, a.id).changes === 1;
 }
 
 // ---- scoring -------------------------------------------------------------
@@ -268,7 +336,23 @@ function scoreAssessment(assessmentId) {
   const totalMax = SECTIONS.reduce((s, k) => s + totals[k].max, 0);
   const testScore = totalMax > 0 ? round1((totalPoints / totalMax) * 100) : 0;
   const passMark = getSettings().pass_mark;
-  const result = essayPending > 0 ? 'Pending' : testScore >= passMark ? 'Pass' : 'Not Pass';
+  // Each finished test: score, percentage and PASS / NOT PASS (an essay stays
+  // Pending until HR marks it). The assessment passes only if every test passed.
+  const a = getAssessment(assessmentId);
+  const stages = stagesOf(a);
+  const setStage = db.prepare('UPDATE assessment_stages SET points = ?, max = ?, percent = ?, result = ? WHERE id = ?');
+  for (const st of stages) {
+    if (st.status !== 'SUBMITTED') continue;
+    const qs = questions.filter((q) => q.section === st.section);
+    const marks = qs.map((q) => gradeQuestion(q));
+    const points = marks.reduce((sum, m) => sum + (m || 0), 0);
+    const max = qs.reduce((sum, q) => sum + q.max_marks, 0);
+    const percent = max > 0 ? round1((points / max) * 100) : 0;
+    st.result = marks.some((m) => m == null) ? 'Pending' : percent >= passMark ? 'Pass' : 'Not Pass';
+    setStage.run(points, max, percent, st.result, st.id);
+  }
+  const result = stages.some((st) => st.status === 'SUBMITTED' && st.result === 'Not Pass') ? 'Not Pass'
+    : stages.every((st) => st.status === 'SUBMITTED' && st.result === 'Pass') ? 'Pass' : 'Pending';
   const sec = (s) => (totals[s].max > 0 ? [totals[s].points, totals[s].max] : [null, null]);
 
   // IQ result per level: questions asked, answered correctly, marks earned and possible.
@@ -293,13 +377,29 @@ function scoreAssessment(assessmentId) {
       iqCorrect, iq.length || null, iq.length ? JSON.stringify(breakdown) : null, assessmentId);
 }
 
-// Marks the assessment submitted exactly once and scores it.
-// Returns false if it was already submitted (or never started).
+// Finishes the running test exactly once and scores it. If it was not passed
+// the assessment stops; if it was the last test the assessment is complete;
+// otherwise the candidate may continue to the next test.
+// Returns false if no test was running (already finished, or never started).
 const finalize = db.transaction((assessmentId, auto) => {
-  const res = db.prepare(`UPDATE assessments SET status = 'SUBMITTED', submitted_at = ?, auto_submitted = ?
-    WHERE id = ? AND status = 'IN_PROGRESS'`).run(now(), auto ? 1 : 0, assessmentId);
-  if (res.changes !== 1) return false;
+  const a = getAssessment(assessmentId);
+  if (!a || a.status !== 'IN_PROGRESS') return false;
+  stagesOf(a);
+  const stamp = now();
+  const res = db.prepare(`UPDATE assessment_stages SET status = 'SUBMITTED', submitted_at = ?, auto_submitted = ?
+    WHERE assessment_id = ? AND status = 'IN_PROGRESS'`).run(stamp, auto ? 1 : 0, assessmentId);
+  if (res.changes === 0) return false;
+  if (auto) db.prepare('UPDATE assessments SET auto_submitted = 1 WHERE id = ?').run(assessmentId);
   scoreAssessment(assessmentId);
+  const stages = stagesOf(a);
+  const stopped = stages.some((st) => st.status === 'SUBMITTED' && st.result === 'Not Pass');
+  const more = stages.some((st) => st.status === 'NOT_STARTED');
+  if (stopped || !more) {
+    db.prepare("UPDATE assessments SET status = 'SUBMITTED', submitted_at = ? WHERE id = ?").run(stamp, assessmentId);
+    scoreAssessment(assessmentId);
+  } else {
+    db.prepare('UPDATE assessments SET deadline_at = NULL WHERE id = ?').run(assessmentId);
+  }
   return true;
 });
 
@@ -380,6 +480,7 @@ function regenerateLink(id) {
 }
 
 module.exports = {
+  stagesOf, continueAssessment,
   SECTIONS, TYPES, LANGUAGES, LETTERS, DIFFICULTIES, LEVEL_MARKS, InputError, label, questionKey, difficultyLevel, levelSplit, pickProgressive, syncIqLevels,
   activeCounts, inactiveCounts, createAssessment, getAssessment, linkState, startAssessment, saveAnswer,
   isPastDeadline, submitAssessment, finalize, finalizeExpired, scoreAssessment, setEssayMarks, rescoreAll, regenerateLink,

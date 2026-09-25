@@ -210,3 +210,16 @@ table.kv th { width: 200px; background: transparent; }
 .iq-main { font-size: 18px; color: var(--primary); }
 .iq-levels { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
 .iq-level { border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; min-width: 140px; font-size: 14px; }
+.tests-box { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; display: grid; gap: 10px; }
+.test-row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.test-name { min-width: 190px; color: var(--text); font-size: 15px; font-weight: 600; margin: 0; }
+.test-name input { width: auto; }
+.small-num { width: 80px; }
+.progress-box { margin-top: 12px; }
+.progress-item { display: flex; gap: 10px; align-items: center; padding: 4px 0; font-size: 15px; }
+.progress-item .mark { width: 20px; text-align: center; font-weight: 700; }
+.progress-item.done .mark { color: var(--pass); }
+.progress-item.current, .progress-item.next { font-weight: 700; color: var(--primary); }
+.progress-item.upcoming { color: var(--muted); }
+.progress-item.failed .mark { color: var(--fail); }
+.passed { color: var(--pass); }

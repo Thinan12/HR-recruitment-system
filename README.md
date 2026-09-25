@@ -52,21 +52,12 @@ Options may also be on one line (`A. Red  B. Blue  C. Green  D. Chair`).
 
 ### How an assessment works
 
-1. On **Assessments**, choose the candidate (or "New candidate"), the test type, language (English / Lao), the time limit and how long the link stays valid. Then press **Generate Link**.
-2. Send the link to the candidate. They enter their details and press Start.
-3. Each candidate gets a **different random set** of questions, with the answer options shuffled. The same question never appears twice in one test.
-4. The timer is enforced by the server. When time runs out the test is **submitted automatically**, even if the candidate closed the browser. Late answers are refused.
-5. On **Assessments → View**, HR sees every question with the answer the candidate chose (and the letter they saw on screen), the correct answer, and **Correct / Wrong / Not answered**, with totals at the top.
+1. On **Assessments → Create Assessment**, choose the candidate (or "New candidate"), the language and how long the link stays valid, then tick the **Tests Included** — IQ, General, Calculation, Essay — with the number of questions and minutes for each. Press **Generate Assessment Link**.
+2. The candidate gets **one link** for all the chosen tests. They enter their details once, then take the tests **one by one, always in the order IQ → General → Calculation → Essay** (only the ticked ones). A progress list shows ✓ done, → current, ○ still to come.
+3. Each test has **its own timer**, enforced by the server; when it runs out the test is submitted automatically. A test is **passed** when its score reaches the pass mark (Settings, default 60%). After a pass the candidate sees "Passed — Next Test — Continue"; if a test is **not passed the assessment stops** and the candidate sees "You did not meet the required score… Please contact HR." The Essay is last and waits for HR marking.
+4. The server decides which test comes next: refreshing, a second tab or a changed address cannot skip or reopen a test. Each candidate gets a different random set of questions, with shuffled answers.
+5. On **Assessments → View**, HR sees each test (status, times, score, %, PASS / NOT PASS) and every answer: chosen option (and the letter the candidate saw), the correct answer, Correct / Wrong / Not answered.
 6. A link can be used only once. An unused link stops working at its expiry time, or whenever you press **Disable**.
-
-### The LALCO IQ test
-
-- The IQ bank and the General (recruitment) bank are separate. **IQ Test**, **General Test** and **Combined Assessment** links draw from them.
-- An IQ link has **18 questions by default** (quick choices 10 / 15 / 18 / 20 / 30, or any number).
-- Every IQ question has a **level**, and the level alone sets its marks: **Level 1 — Easy = 1 mark**, **Level 2 — Medium = 2 marks**, **Level 3 — Hard = 3 marks** (a Marks value in an imported file is ignored for IQ; no level given = Level 2).
-- Questions are split evenly across the levels and shown Level 1 first, then 2, then 3, random within each level: 18 → 6 / 6 / 6 (maximum 36 marks), 10 → 3 / 3 / 4, 15 → 5 / 5 / 5, 20 → 7 / 6 / 7, 30 → 10 / 10 / 10. Candidates never see the level or the marks.
-- The **IQ Test Score** is the weighted marks, e.g. **21 / 36 (58.3%)**. Correct answers (e.g. 11 / 18) and each level's correct answers and marks are shown next to it on Results, the candidate page, the review page, the dashboard and the PDF / Word / Excel exports. It is a test score, not a clinical IQ; no IQ-number conversion is applied.
-- **Original LALCO IQ bank:** 45 original questions (15 Easy, 15 Medium, 15 Hard) covering number patterns, sequences, visual patterns and matrices, odd one out, logical relationships, spatial reasoning (rotation, reflection), mathematical reasoning and abstract patterns. The pictures are drawn by `scripts/lalco-iq-bank.js`, which also loads the bank: `node scripts/lalco-iq-bank.js https://your-site <admin-password>` (running it twice adds nothing). `node scripts/lalco-iq-bank.js --preview <folder>` writes the pictures to a folder for checking.
 
 ### Scores
 
@@ -82,7 +73,7 @@ Node.js 24 LTS, Express, SQLite (`better-sqlite3`), plain HTML/JS frontend (no b
 ```
 npm install
 ADMIN_PASSWORD=choose-a-password npm start    # http://localhost:3000
-npm test                                       # 65 tests, uses temporary databases
+npm test                                       # 72 tests, uses temporary databases
 ```
 
 ```
@@ -101,7 +92,7 @@ public/
 test/              node:test suites and Word-generated fixtures
 ```
 
-**Database tables:** `admins`, `settings`, `candidates` (incl. interview and final decision), `questions`, `assessments` (link, timer and scores), `assessment_questions` (each candidate's questions, copied from the bank so later edits never change a past result), `images` (question and option pictures).
+**Database tables:** `admins`, `settings`, `candidates` (incl. interview and final decision), `questions`, `assessments` (link and scores), `assessment_stages` (the tests inside one link: order, timer, score, result), `assessment_questions` (each candidate's questions, copied from the bank so later edits never change a past result), `images` (question and option pictures).
 
 ### Railway
 

@@ -126,6 +126,28 @@ CREATE TABLE IF NOT EXISTS assessment_questions (
 );
 CREATE INDEX IF NOT EXISTS idx_aq_assessment ON assessment_questions(assessment_id, position);
 
+-- The tests inside one assessment link, taken one by one in this order:
+-- IQ -> General -> Calculation -> Essay. A test starts only after the one
+-- before it was passed; each has its own time limit, score and result.
+CREATE TABLE IF NOT EXISTS assessment_stages (
+  id INTEGER PRIMARY KEY,
+  assessment_id INTEGER NOT NULL REFERENCES assessments(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  section TEXT NOT NULL,
+  question_count INTEGER NOT NULL,
+  time_limit_minutes INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'NOT_STARTED',
+  started_at TEXT,
+  deadline_at TEXT,
+  submitted_at TEXT,
+  auto_submitted INTEGER NOT NULL DEFAULT 0,
+  points REAL,
+  max REAL,
+  percent REAL,
+  result TEXT NOT NULL DEFAULT 'Pending',
+  UNIQUE (assessment_id, section)
+);
+
 -- Pictures for questions and answer options (PNG / JPEG / GIF / WebP only).
 -- Never deleted with a question, so past assessments keep showing them.
 CREATE TABLE IF NOT EXISTS images (
