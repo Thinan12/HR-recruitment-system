@@ -1,12 +1,13 @@
 const app = require('./app');
 const { ensureFirstAdmin } = require('./auth');
-const { finalizeExpired, scoreAssessment } = require('./assessments');
-const { db, DB_PATH } = require('./db');
+const { finalizeExpired, syncIqLevels } = require('./assessments');
+const { DB_PATH } = require('./db');
 
 ensureFirstAdmin();
 
-// Results submitted before the IQ "correct / total" score existed get it now (once).
-for (const { id } of db.prepare("SELECT id FROM assessments WHERE status = 'SUBMITTED' AND iq_max IS NOT NULL AND iq_total IS NULL").all()) scoreAssessment(id);
+// IQ marks follow the question level (1 / 2 / 3); bring existing data in line.
+const recalculated = syncIqLevels();
+if (recalculated) console.log(`Recalculated the IQ result of ${recalculated} assessment(s).`);
 
 // Submit assessments whose time ran out while the candidate was away.
 finalizeExpired();

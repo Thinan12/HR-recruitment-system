@@ -184,6 +184,32 @@ window.addEventListener('hashchange', () => { if (!$('app').classList.contains('
 })();
 
 // ---------------------------------------------------------------------------
+// IQ result (weighted: Level 1 = 1 mark, Level 2 = 2, Level 3 = 3)
+// ---------------------------------------------------------------------------
+
+const LEVEL_NAMES = { Easy: 'Level 1 — Easy', Medium: 'Level 2 — Medium', Hard: 'Level 3 — Hard' };
+const LEVEL_MARK = { Easy: 1, Medium: 2, Hard: 3 };
+const levelOf = (r, n) => (r.iq_levels || []).find((l) => l.level === n);
+const levelMarksCell = (r, n) => { const l = levelOf(r, n); return l ? l.marks_text : '-'; };
+const levelCell = (r, n) => {
+  const l = levelOf(r, n);
+  return l ? h('div', {}, h('div', {}, l.correct_text + ' correct'), h('div', { class: 'muted small' }, l.marks_text + ' marks')) : '-';
+};
+
+// The full IQ TEST RESULT block used on the candidate and review pages.
+function iqResultBlock(r) {
+  if (!r || !r.iq_text) return h('span', {}, '-');
+  return h('div', { class: 'iq-result' },
+    h('div', { class: 'iq-row' }, h('span', { class: 'muted' }, 'Correct Answers'), h('strong', {}, r.iq_correct_text || '-')),
+    h('div', { class: 'iq-row' }, h('span', { class: 'muted' }, 'IQ Test Score'), h('strong', { class: 'iq-main' }, r.iq_text)),
+    h('div', { class: 'iq-row' }, h('span', { class: 'muted' }, 'IQ Percentage'), h('strong', {}, r.iq_score + '%')),
+    h('div', { class: 'iq-levels' }, (r.iq_levels || []).map((l) => h('div', { class: 'iq-level' },
+      h('div', { class: 'small' }, h('strong', {}, l.label)),
+      h('div', {}, l.correct_text + ' correct'),
+      h('div', {}, l.marks_text + ' marks')))));
+}
+
+// ---------------------------------------------------------------------------
 // Dashboard
 // ---------------------------------------------------------------------------
 
@@ -192,9 +218,11 @@ async function renderDashboard() {
   const stat = (label, value, sub, cls) => h('div', { class: 'stat ' + (cls || '') }, h('div', { class: 'label' }, label), h('div', { class: 'value' }, value), sub ? h('div', { class: 'sub' }, sub) : null);
   const recent = d.recent.length
     ? h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, h('th', {}, 'Candidate'), h('th', {}, 'IQ'), h('th', {}, 'Test Score'), h('th', {}, 'Result'), h('th', {}, 'Date'))),
+      h('thead', {}, h('tr', {}, ['Candidate', 'IQ Test Score', 'IQ %', 'Level 1', 'Level 2', 'Level 3', 'Result', 'Date'].map((t) => h('th', {}, t)))),
       h('tbody', {}, d.recent.map((c) => h('tr', { class: 'clickable', onclick: () => { location.hash = '#/candidates/' + c.id; } },
-        h('td', {}, c.name), h('td', {}, fmt(c.iq_score)), h('td', {}, fmt(c.test_score)), h('td', {}, resultBadge(c.overall_result)), h('td', {}, fmtDate(c.last_test_date)))))))
+        h('td', {}, c.name), h('td', {}, c.iq_text ? h('strong', {}, c.iq_text) : '-'), h('td', {}, c.iq_text ? c.iq_score + '%' : '-'),
+        h('td', {}, levelMarksCell(c, 1)), h('td', {}, levelMarksCell(c, 2)), h('td', {}, levelMarksCell(c, 3)),
+        h('td', {}, resultBadge(c.overall_result)), h('td', {}, fmtDate(c.last_test_date)))))))
     : h('p', { class: 'muted' }, 'No completed assessments yet. Start by uploading questions, then create an assessment link.');
 
   view().replaceChildren(
@@ -204,7 +232,7 @@ async function renderDashboard() {
       stat('Passed', d.passed),
       stat('Not Passed', d.not_passed),
       stat('Average Test Score', d.average_test_score == null ? '-' : d.average_test_score + '%'),
-      stat('Highest IQ Test Score', d.highest_iq ? d.highest_iq.iq_text : '-', d.highest_iq ? `${d.highest_iq.name} (${d.highest_iq.iq_score}%)` : 'No IQ results yet', 'highlight'),
+      stat('Highest IQ Test Score', d.highest_iq ? d.highest_iq.iq_text : '-', d.highest_iq ? `IQ Percentage ${d.highest_iq.iq_score}% · ${d.highest_iq.name}` : 'No IQ results yet', 'highlight'),
       stat('Completed Assessments', d.completed_assessments),
       stat('Pending Assessments', d.pending_assessments)),
     h('div', { class: 'card' },
@@ -229,9 +257,9 @@ async function renderCandidates() {
   const load = async () => {
     const list = await api('GET', '/candidates?q=' + encodeURIComponent(search.value));
     body.replaceChildren(list.length ? h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, ['Name', 'Phone', 'Graduate From', 'IQ', 'Test Score', 'Interview', 'Final Result', 'Added'].map((t) => h('th', {}, t)))),
+      h('thead', {}, h('tr', {}, ['Name', 'Phone', 'Graduate From', 'IQ Test Score', 'Test Score', 'Interview', 'Final Result', 'Added'].map((t) => h('th', {}, t)))),
       h('tbody', {}, list.map((c) => h('tr', { class: 'clickable', onclick: () => { location.hash = '#/candidates/' + c.id; } },
-        h('td', {}, c.name), h('td', {}, fmt(c.phone)), h('td', {}, fmt(c.graduate_from)), h('td', {}, fmt(c.iq_score)),
+        h('td', {}, c.name), h('td', {}, fmt(c.phone)), h('td', {}, fmt(c.graduate_from)), h('td', {}, c.iq_text ? `${c.iq_text} (${c.iq_score}%)` : '-'),
         h('td', {}, fmt(c.test_score)), h('td', {}, fmt(c.interview_score)), h('td', {}, resultBadge(c.overall_result)), h('td', {}, fmtDate(c.created_at)))))))
       : h('p', { class: 'muted' }, 'No candidates found. Candidates are added automatically when they start an assessment, or you can add one here.'));
   };
@@ -274,7 +302,7 @@ async function renderCandidate(id) {
       : text(name, c[name])))),
     h('h2', { class: 'section-gap' }, 'Assessment Results'),
     h('div', { class: 'table-wrap' }, h('table', { class: 'kv' }, h('tbody', {},
-      h('tr', {}, h('th', {}, 'IQ Test Result'), h('td', {}, c.iq_text == null ? '-' : `${c.iq_text} correct (${c.iq_score}%)`, c.iq_breakdown ? h('div', { class: 'muted small' }, breakdownText(c.iq_breakdown)) : null)),
+      h('tr', {}, h('th', {}, 'IQ Test Result'), h('td', {}, iqResultBlock(c))),
       h('tr', {}, h('th', {}, 'Test Score'), h('td', {}, c.test_score == null ? '-' : c.test_score + '%')),
       h('tr', {}, h('th', {}, 'General Test'), h('td', {}, c.general_score == null ? '-' : c.general_score + '%')),
       h('tr', {}, h('th', {}, 'Calculation Test'), h('td', {}, c.calc_score == null ? '-' : c.calc_score + '%')),
@@ -383,12 +411,12 @@ async function renderQuestions() {
     tabs.replaceChildren(...[['', `All (${total})`], ...Object.keys(SECTION_LABEL).map((s) => [s, `${SECTION_LABEL[s]} (${counts[s]})`])]
       .map(([s, label]) => h('button', { type: 'button', class: s === questionSection ? 'active' : '', onclick: () => { questionSection = s; load(); } }, label)));
     body.replaceChildren(questions.length ? h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, ['Question', 'Type', 'Category', 'Difficulty', 'Correct Answer', 'Marks', 'Status', ''].map((t) => h('th', {}, t)))),
+      h('thead', {}, h('tr', {}, ['Question', 'Type', 'Area', 'Level', 'Correct Answer', 'Marks', 'Status', ''].map((t) => h('th', {}, t)))),
       h('tbody', {}, questions.map((q) => h('tr', {},
         h('td', { class: 'question-cell' }, h('div', { class: 'pre' }, q.question_text), q.image_id ? h('div', { class: 'thumb-row' }, thumb(q.image_id)) : null),
-        h('td', {}, SECTION_LABEL[q.section]), h('td', {}, fmt(q.category)), h('td', {}, fmt(q.difficulty)),
+        h('td', {}, SECTION_LABEL[q.section]), h('td', {}, fmt(q.category)), h('td', { class: 'nowrap' }, LEVEL_NAMES[q.difficulty] || fmt(q.difficulty)),
         h('td', {}, q.section === 'ESSAY' ? 'HR marks' : /^[A-E]$/.test(q.correct_answer) ? optionContent(q, q.correct_answer) : q.correct_answer),
-        h('td', {}, q.marks),
+        h('td', { class: 'nowrap' }, q.marks + (q.marks === 1 ? ' mark' : ' marks')),
         h('td', {}, h('span', { class: 'badge ' + (q.status === 'Active' ? 'pass' : 'neutral') }, q.status)),
         h('td', { class: 'nowrap' },
           h('button', { class: 'secondary small', type: 'button', onclick: () => editQuestion(q, load) }, 'Edit'), ' ',
@@ -460,10 +488,10 @@ function showPreview(container, p, onDone) {
       h('thead', {}, h('tr', {}, h('th', {}, 'Row'), h('th', {}, 'Question'), h('th', {}, 'Problem'))),
       h('tbody', {}, invalid.slice(0, 50).map((r) => h('tr', {}, h('td', {}, r.row), h('td', { class: 'question-cell' }, fmt(r.question.question_text).slice(0, 160)), h('td', {}, r.errors.join(' ')))))))) : null,
     valid.length ? h('div', {}, h('h2', { class: 'section-gap' }, 'First questions'), h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, ['Question', 'Type', 'Options', 'Answer', 'Marks'].map((t) => h('th', {}, t)))),
+      h('thead', {}, h('tr', {}, ['Question', 'Type', 'Level', 'Options', 'Answer', 'Marks'].map((t) => h('th', {}, t)))),
       h('tbody', {}, valid.slice(0, 5).map((q) => h('tr', {},
         h('td', { class: 'question-cell' }, h('div', { class: 'pre' }, q.question_text), q.image_id ? h('div', { class: 'thumb-row' }, thumb(q.image_id)) : null),
-        h('td', {}, SECTION_LABEL[q.section]),
+        h('td', {}, SECTION_LABEL[q.section]), h('td', { class: 'nowrap' }, LEVEL_NAMES[q.difficulty] || fmt(q.difficulty)),
         h('td', { class: 'small' }, h('div', { class: 'thumb-row' }, LETTERS.filter((l) => q['option_' + l] || q['option_' + l + '_image'])
           .map((l) => optionContent(q, l.toUpperCase())))),
         h('td', {}, q.correct_answer), h('td', {}, q.marks))))))) : null,
@@ -471,13 +499,22 @@ function showPreview(container, p, onDone) {
 }
 
 function editQuestion(q, onSaved) {
-  q = q || { section: questionSection || 'IQ', marks: 1, status: 'Active' };
+  q = q || { section: questionSection || 'IQ', marks: 1, status: 'Active', difficulty: 'Medium' };
   let showError = () => {};
+  const known = ['Easy', 'Medium', 'Hard'];
+  const levelSelect = select('difficulty', [['', '-'], ...known.map((k) => [k, LEVEL_NAMES[k]]), ...(q.difficulty && !known.includes(q.difficulty) ? [[q.difficulty, q.difficulty]] : [])], q.difficulty || '');
+  const marksInput = h('input', { name: 'marks', type: 'number', min: 0.5, max: 100, step: 0.5, value: q.marks });
+  // IQ questions: marks come from the level (1 / 2 / 3) and cannot be typed.
+  const syncMarks = () => {
+    const isIq = form.elements.section.value === 'IQ';
+    marksInput.disabled = isIq;
+    if (isIq) { if (!levelSelect.value) levelSelect.value = 'Medium'; marksInput.value = LEVEL_MARK[levelSelect.value] || 2; }
+  };
   const form = h('form', { class: 'grid' },
     field('Type', select('section', Object.entries(SECTION_LABEL), q.section)),
-    field('Category', h('input', { name: 'category', value: q.category || '', placeholder: 'e.g. Number pattern' })),
-    field('Difficulty', h('input', { name: 'difficulty', value: q.difficulty || '', placeholder: 'e.g. Easy' })),
-    field('Marks', h('input', { name: 'marks', type: 'number', min: 0.5, max: 100, step: 0.5, value: q.marks })),
+    field('Area', h('input', { name: 'category', value: q.category || '', placeholder: 'e.g. Number Patterns' })),
+    field('Level', levelSelect),
+    field('Marks', marksInput),
     field('Question', h('textarea', { name: 'question_text', required: true }, q.question_text || ''), 'wide'),
     h('div', { class: 'field wide' }, h('label', {}, 'Question picture (optional)'), imageInput('image_id', q.image_id, (m) => showError(m))),
     LETTERS.map((l) => h('div', { class: 'field' },
@@ -490,6 +527,9 @@ function editQuestion(q, onSaved) {
     h('div', { class: 'wide' }, h('button', { type: 'submit' }, 'Save question')));
   const close = modal(q.id ? 'Edit question' : 'Add question', form);
   showError = (m) => flash(form.parentElement, m);
+  form.elements.section.addEventListener('change', syncMarks);
+  levelSelect.addEventListener('change', syncMarks);
+  syncMarks();
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
@@ -618,7 +658,7 @@ function assessmentTable(list, showCandidate) {
 }
 
 async function renderAssessment(id) {
-  const { assessment: a, candidate, questions } = await api('GET', '/assessments/' + id);
+  const { assessment: a, iq, candidate, questions } = await api('GET', '/assessments/' + id);
   const essayInputs = [];
   const count = { correct: 0, wrong: 0, missed: 0 };
   const submitted = a.status === 'SUBMITTED';
@@ -673,8 +713,7 @@ async function renderAssessment(id) {
       h('tr', {}, h('th', {}, 'Started'), h('td', {}, fmtDateTime(a.started_at))),
       h('tr', {}, h('th', {}, 'Submitted'), h('td', {}, fmtDateTime(a.submitted_at))),
       h('tr', {}, h('th', {}, 'Left the page'), h('td', {}, `${a.focus_losses} time(s)`)),
-      h('tr', {}, h('th', {}, 'IQ Test Score'), h('td', {}, a.iq_total ? `${a.iq_correct} / ${a.iq_total} correct (${Math.round((a.iq_points / a.iq_max) * 1000) / 10}%)` : pct(a.iq_points, a.iq_max),
-        a.iq_breakdown ? h('div', { class: 'muted small' }, breakdownText(JSON.parse(a.iq_breakdown))) : null)),
+      h('tr', {}, h('th', {}, 'IQ Test Result'), h('td', {}, iqResultBlock(iq))),
       h('tr', {}, h('th', {}, 'General'), h('td', {}, pct(a.general_points, a.general_max))),
       h('tr', {}, h('th', {}, 'Calculation'), h('td', {}, pct(a.calc_points, a.calc_max))),
       h('tr', {}, h('th', {}, 'Essay'), h('td', {}, a.essay_pending ? 'Waiting for marking' : pct(a.essay_points, a.essay_max))),
@@ -695,24 +734,20 @@ async function renderAssessment(id) {
 // Results
 // ---------------------------------------------------------------------------
 
-function breakdownText(b) {
-  return ['Easy', 'Medium', 'Hard', 'Not set'].filter((k) => b[k]).map((k) => `${k} ${b[k][0]}/${b[k][1]}`).join(' · ');
-}
 
 async function renderResults() {
   const [list, iq] = await Promise.all([api('GET', '/candidates'), api('GET', '/results/iq')]);
   const iqCard = h('div', { class: 'card' }, h('h2', {}, 'IQ Test Results'),
     iq.length ? h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, ['Candidate', 'IQ Test Score', 'Correct Answers', 'Total Questions', 'Percentage', 'By difficulty', 'Assessment Date', ''].map((t) => h('th', {}, t)))),
+      h('thead', {}, h('tr', {}, ['Candidate', 'IQ Test Score', 'IQ %', 'Correct Answers', 'Level 1 — Easy', 'Level 2 — Medium', 'Level 3 — Hard', 'Assessment Date', ''].map((t) => h('th', {}, t)))),
       h('tbody', {}, iq.map((r) => h('tr', {},
         h('td', {}, r.candidate_id ? h('a', { href: '#/candidates/' + r.candidate_id }, r.candidate_name) : '-'),
-        h('td', {}, h('strong', {}, `${r.iq_correct ?? r.iq_points} / ${r.iq_total ?? r.iq_max}`)),
-        h('td', {}, r.iq_correct ?? r.iq_points), h('td', {}, r.iq_total ?? r.iq_max), h('td', {}, r.iq_percent + '%'),
-        h('td', { class: 'small' }, r.iq_breakdown ? breakdownText(r.iq_breakdown) : '-'),
-        h('td', {}, fmtDate(r.submitted_at)),
+        h('td', {}, h('strong', {}, r.iq_text)), h('td', {}, r.iq_score + '%'), h('td', {}, r.iq_correct_text || '-'),
+        h('td', {}, levelCell(r, 1)), h('td', {}, levelCell(r, 2)), h('td', {}, levelCell(r, 3)),
+        h('td', {}, fmtDate(r.iq_date)),
         h('td', {}, h('a', { class: 'button secondary small', href: '#/assessments/' + r.id }, 'Answers')))))))
       : h('p', { class: 'muted' }, 'No IQ tests submitted yet.'),
-    h('p', { class: 'muted small' }, 'IQ Test Score = number of IQ questions answered correctly. It is a test score, not a clinical IQ measurement.'));
+    h('p', { class: 'muted small' }, 'IQ Test Score = marks earned out of the maximum. Each correct answer is worth 1 mark at Level 1, 2 at Level 2 and 3 at Level 3 (18 questions: maximum 36). It is a test score, not a clinical IQ measurement.'));
   view().replaceChildren(
     h('div', { class: 'row between' }, h('h1', {}, 'Results'), downloadLink('/export/candidates.xlsx', 'Export all candidates (Excel)', '')),
     iqCard,

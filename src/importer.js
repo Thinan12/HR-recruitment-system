@@ -12,6 +12,7 @@ const mammoth = require('mammoth');
 const WordExtractor = require('word-extractor');
 const { PDFParse } = require('pdf-parse');
 const { readScannedPdf } = require('./pdfOcr');
+const { difficultyLevel, LEVEL_MARKS } = require('./assessments');
 
 const MAX_ROWS = 2000;
 const SECTIONS = ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'];
@@ -158,15 +159,6 @@ function rowsFromText(text, defaultSection) {
 
 const IMAGE_KEYS = ['image_id', ...LETTERS.map((L) => `option_${L.toLowerCase()}_image`)];
 
-// "easy", "EASY", "ງ່າຍ" -> "Easy" (the IQ test orders questions by it). Other text is kept as typed.
-function standardDifficulty(v) {
-  const s = v.toLowerCase();
-  if (/^(easy|ງ່າຍ)/.test(s)) return 'Easy';
-  if (/^(medium|normal|ປານກາງ)/.test(s)) return 'Medium';
-  if (/^(hard|difficult|ຍາກ)/.test(s)) return 'Hard';
-  return v;
-}
-
 function resolveAnswerLetter(answer, row) {
   const a = String(answer || '').trim();
   const letter = a.match(/^(?:option\s*)?\(?([A-Ea-e])\)?\.?$/i);
@@ -182,7 +174,7 @@ function validateQuestion(input) {
   const q = {
     section: SECTIONS.includes(input.section) ? input.section : sectionFrom(input.section),
     category: clean(input.category, 200),
-    difficulty: standardDifficulty(clean(input.difficulty, 50)),
+    difficulty: clean(input.difficulty, 50),
     question_text: clean(input.question_text, 5000),
     option_a: clean(input.option_a, 1000),
     option_b: clean(input.option_b, 1000),
@@ -198,6 +190,14 @@ function validateQuestion(input) {
     q[key] = Number.isInteger(id) && id > 0 ? id : null;
   }
   if (!q.section) errors.push('Type must be IQ, General, Calculation or Essay.');
+  if (q.section === 'IQ') {
+    // IQ: the level decides the marks (1 / 2 / 3). No level given -> Level 2.
+    if (q.difficulty && !difficultyLevel(q.difficulty)) errors.push('Level must be 1, 2 or 3 (Easy, Medium or Hard).');
+    q.difficulty = difficultyLevel(q.difficulty) || 'Medium';
+    q.marks = LEVEL_MARKS[q.difficulty];
+  } else {
+    q.difficulty = difficultyLevel(q.difficulty) || q.difficulty;
+  }
   if (!q.question_text) errors.push('Question text is missing.');
   if (!Number.isFinite(q.marks) || q.marks <= 0 || q.marks > 100) errors.push('Marks must be a number between 0 and 100.');
 

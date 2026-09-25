@@ -82,7 +82,8 @@ function checkTablePreview(r) {
   const [q1, q2, calc, essay] = r.data.rows.map((x) => x.question);
   assert.equal(q1.correct_answer, 'B');
   assert.equal(q2.correct_answer, 'C', 'answer given as option text is converted to its letter');
-  assert.equal(q2.marks, 2);
+  assert.equal(q2.marks, 1, 'IQ marks follow the level (Easy = 1), not the Marks column');
+  assert.equal(q1.difficulty, 'Easy');
   assert.equal(calc.correct_answer, '45');
   assert.equal(essay.section, 'ESSAY');
   assert.match(r.data.rows[4].errors.join(' '), /Correct answer/);

@@ -74,11 +74,12 @@ function upload(fileBuffer, name, section) {
 }
 
 // Adds n simple multiple-choice questions straight into the bank.
-function seedQuestions(section, n, marks = 1) {
-  const insert = db.prepare(`INSERT INTO questions (section, question_text, option_a, option_b, option_c, option_d, correct_answer, marks, created_at)
-    VALUES (?, ?, 'opt A', 'opt B', 'opt C', 'opt D', ?, ?, ?)`);
+// IQ questions are Level 1 (Easy, 1 mark) unless a level is given.
+function seedQuestions(section, n, marks = 1, level = section === 'IQ' ? 'Easy' : '') {
+  const insert = db.prepare(`INSERT INTO questions (section, difficulty, question_text, option_a, option_b, option_c, option_d, correct_answer, marks, created_at)
+    VALUES (?, ?, ?, 'opt A', 'opt B', 'opt C', 'opt D', ?, ?, ?)`);
   const ids = [];
-  for (let i = 0; i < n; i++) ids.push(insert.run(section, `${section} question ${i + 1}`, 'ABCD'[i % 4], marks, new Date().toISOString()).lastInsertRowid);
+  for (let i = 0; i < n; i++) ids.push(insert.run(section, level, `${section} question ${i + 1}`, 'ABCD'[i % 4], marks, new Date().toISOString()).lastInsertRowid);
   return ids;
 }
 

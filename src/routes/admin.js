@@ -104,11 +104,7 @@ router.get('/results/iq', (req, res) => {
       a.iq_breakdown, a.submitted_at, a.assessment_type
     FROM assessments a LEFT JOIN candidates c ON c.id = a.candidate_id
     WHERE a.status = 'SUBMITTED' AND a.iq_max IS NOT NULL ORDER BY a.submitted_at DESC`).all();
-  res.json(rows.map((r) => ({
-    ...r,
-    iq_percent: r.iq_max ? Math.round((r.iq_points / r.iq_max) * 1000) / 10 : null,
-    iq_breakdown: r.iq_breakdown ? JSON.parse(r.iq_breakdown) : null,
-  })));
+  res.json(rows.map((r) => ({ id: r.id, candidate_id: r.candidate_id, candidate_name: r.candidate_name, ...reports.iqResult(r) })));
 });
 
 router.get('/export/candidates.xlsx', (req, res) => {
@@ -145,6 +141,7 @@ function checkedQuestion(body) {
 router.post('/questions', (req, res) => {
   const q = checkedQuestion(req.body);
   const id = insertQuestion.run({ ...q, created_at: now() }).lastInsertRowid;
+  if (q.section === 'IQ') A.syncIqLevels();
   res.status(201).json(db.prepare('SELECT * FROM questions WHERE id = ?').get(id));
 });
 
@@ -154,6 +151,8 @@ router.put('/questions/:id', (req, res) => {
   const q = checkedQuestion(req.body);
   const status = req.body?.status === 'Inactive' ? 'Inactive' : 'Active';
   db.prepare(`UPDATE questions SET ${QUESTION_COLS.map((c) => `${c} = @${c}`).join(', ')}, status = @status WHERE id = @id`).run({ ...q, status, id });
+  // A level given to a question that had none also updates past tests that used it.
+  if (q.section === 'IQ') A.syncIqLevels();
   res.json(db.prepare('SELECT * FROM questions WHERE id = ?').get(id));
 });
 
@@ -251,7 +250,7 @@ router.get('/assessments/:id', (req, res) => {
   if (!a) return notFound(res);
   const candidate = a.candidate_id ? db.prepare('SELECT id, name, phone FROM candidates WHERE id = ?').get(a.candidate_id) : null;
   const questions = db.prepare('SELECT * FROM assessment_questions WHERE assessment_id = ? ORDER BY position').all(a.id);
-  res.json({ assessment: { ...a, state: A.linkState(a) }, candidate, questions });
+  res.json({ assessment: { ...a, state: A.linkState(a) }, iq: reports.iqResult(a), candidate, questions });
 });
 
 router.post('/assessments/:id/:action(enable|disable)', (req, res) => {

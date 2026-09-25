@@ -22,12 +22,7 @@ function summarize(candidate, submitted) {
   return {
     ...candidate,
     iq_score: iq ? pct(iq.iq_points, iq.iq_max) : null,
-    // IQ Test Score as "correct / total" (older results fall back to marks).
-    iq_correct: iq ? iq.iq_correct ?? iq.iq_points : null,
-    iq_total: iq ? iq.iq_total ?? iq.iq_max : null,
-    iq_text: iq ? `${iq.iq_correct ?? iq.iq_points} / ${iq.iq_total ?? iq.iq_max}` : null,
-    iq_breakdown: iq && iq.iq_breakdown ? JSON.parse(iq.iq_breakdown) : null,
-    iq_date: iq ? iq.submitted_at : null,
+    ...iqResult(iq),
     general_score: general ? pct(general.general_points, general.general_max) : null,
     calc_score: calc ? pct(calc.calc_points, calc.calc_max) : null,
     essay_score: essay && !essay.essay_pending ? pct(essay.essay_points, essay.essay_max) : null,
@@ -39,6 +34,32 @@ function summarize(candidate, submitted) {
     last_test_date: latest ? latest.submitted_at : null,
   };
 }
+
+// The IQ result of one assessment. The official IQ Test Score is the weighted
+// marks (Level 1 = 1, Level 2 = 2, Level 3 = 3 per correct answer), e.g. "21 / 36".
+const LEVELS = [['Easy', 'Level 1 — Easy'], ['Medium', 'Level 2 — Medium'], ['Hard', 'Level 3 — Hard']];
+function iqResult(a) {
+  if (!a || a.iq_max == null) return { iq_score: null, iq_text: null, iq_correct_text: null, iq_levels: [], iq_date: null };
+  let breakdown = {};
+  try { breakdown = JSON.parse(a.iq_breakdown || '{}') || {}; } catch { breakdown = {}; }
+  const levels = LEVELS.map(([key, label], i) => {
+    const b = breakdown[key];
+    return b && b.total ? { level: i + 1, key, label, correct: b.correct, total: b.total, marks: b.marks, max: b.max,
+      correct_text: `${b.correct} / ${b.total}`, marks_text: `${b.marks} / ${b.max}` } : null;
+  }).filter(Boolean);
+  return {
+    iq_score: pct(a.iq_points, a.iq_max), // percentage of the weighted marks
+    iq_points: a.iq_points,
+    iq_max: a.iq_max,
+    iq_text: `${a.iq_points} / ${a.iq_max}`,
+    iq_correct: a.iq_correct,
+    iq_total: a.iq_total,
+    iq_correct_text: a.iq_total != null ? `${a.iq_correct} / ${a.iq_total}` : null,
+    iq_levels: levels,
+    iq_date: a.submitted_at,
+  };
+}
+const levelText = (c, n) => { const l = (c.iq_levels || []).find((x) => x.level === n); return l ? l : null; };
 
 function submittedByCandidate() {
   const map = new Map();
@@ -76,7 +97,7 @@ function dashboard() {
     passed: people.filter((p) => p.overall_result === 'Pass').length,
     not_passed: people.filter((p) => p.overall_result === 'Not Pass').length,
     average_test_score: scored.length ? Math.round((scored.reduce((s, p) => s + p.test_score, 0) / scored.length) * 10) / 10 : null,
-    highest_iq: withIq[0] ? { id: withIq[0].id, name: withIq[0].name, iq_score: withIq[0].iq_score, iq_text: withIq[0].iq_text } : null,
+    highest_iq: withIq[0] ? { id: withIq[0].id, name: withIq[0].name, iq_score: withIq[0].iq_score, iq_text: withIq[0].iq_text, iq_correct_text: withIq[0].iq_correct_text } : null,
     completed_assessments: count("SELECT COUNT(*) AS n FROM assessments WHERE status = 'SUBMITTED'"),
     pending_assessments: count(`SELECT COUNT(*) AS n FROM assessments WHERE status = 'IN_PROGRESS'
       OR (status = 'NOT_STARTED' AND enabled = 1 AND link_expires_at > ?)`, nowIso),
@@ -107,6 +128,13 @@ const COLUMNS = [
   ['Reference Results', (c) => c.reference_results],
   ['IQ Test Score', (c) => c.iq_text],
   ['IQ %', (c) => c.iq_score],
+  ['IQ Correct Answers', (c) => c.iq_correct_text],
+  ['Level 1 Correct', (c) => levelText(c, 1)?.correct_text],
+  ['Level 1 Marks', (c) => levelText(c, 1)?.marks_text],
+  ['Level 2 Correct', (c) => levelText(c, 2)?.correct_text],
+  ['Level 2 Marks', (c) => levelText(c, 2)?.marks_text],
+  ['Level 3 Correct', (c) => levelText(c, 3)?.correct_text],
+  ['Level 3 Marks', (c) => levelText(c, 3)?.marks_text],
   ['Character', (c) => c.character_note],
   ['Test Score', (c) => c.test_score],
   ['General Test', (c) => c.general_score],
@@ -131,7 +159,11 @@ function reportSections(c) {
       ['School Name', show(c.school_name)], ['Subject', show(c.subject)], ['GPA / Mark', show(c.gpa)],
     ]],
     ['Assessment Results', [
-      ['Reference Results', show(c.reference_results)], ['IQ Test Score', c.iq_text ? `${c.iq_text} correct (${c.iq_score}%)` : '-'], ['Character', show(c.character_note)],
+      ['Reference Results', show(c.reference_results)],
+      ['IQ Test Score', c.iq_text ? `${c.iq_text} marks (${c.iq_score}%)` : '-'],
+      ['IQ Correct Answers', show(c.iq_correct_text)],
+      ...(c.iq_levels || []).map((l) => [l.label, `${l.correct_text} correct, ${l.marks_text} marks`]),
+      ['Character', show(c.character_note)],
       ['Test Score', showPct(c.test_score)], ['General Test', showPct(c.general_score)], ['Calculation Test', showPct(c.calc_score)],
       ['Essay Test', c.essay_pending ? 'Pending' : showPct(c.essay_score)], ['Result', show(c.test_result)], ['Test Date', showDate(c.last_test_date)],
     ]],
@@ -145,7 +177,7 @@ function reportSections(c) {
   ];
 }
 
-const NOTE = 'Scores are percentages of available marks. The IQ Test Score is the number of IQ questions answered correctly; it is not a clinical IQ measurement.';
+const NOTE = 'Scores are percentages of available marks. IQ Test Score = marks earned (Level 1 = 1, Level 2 = 2, Level 3 = 3 per correct answer) out of the maximum; it is not a clinical IQ measurement.';
 
 function candidatePdf(c) {
   return new Promise((resolve, reject) => {
@@ -239,4 +271,4 @@ function questionTemplateXlsx() {
   return XLSX.write(book, { type: 'buffer', bookType: 'xlsx' });
 }
 
-module.exports = { allCandidateSummaries, candidateSummary, dashboard, candidatePdf, candidateDocx, candidatesXlsx, questionTemplateXlsx };
+module.exports = { iqResult, allCandidateSummaries, candidateSummary, dashboard, candidatePdf, candidateDocx, candidatesXlsx, questionTemplateXlsx };

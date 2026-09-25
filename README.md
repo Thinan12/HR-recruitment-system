@@ -63,8 +63,9 @@ Options may also be on one line (`A. Red  B. Blue  C. Green  D. Chair`).
 
 - The IQ bank and the General (recruitment) bank are separate. **IQ Test**, **General Test** and **Combined Assessment** links draw from them.
 - An IQ link has **18 questions by default** (quick choices 10 / 15 / 18 / 20 / 30, or any number).
-- Questions go from easy to hard. For 18 questions: 1–7 **Easy**, 8–12 **Medium**, 13–18 **Hard** (other lengths keep the same proportions). Within each level the questions are random, and answers are shuffled. Questions without a difficulty count as Medium. Candidates never see the difficulty.
-- The result is the **IQ Test Score** — correct answers out of the questions asked, e.g. **15 / 18** — with the percentage and a breakdown by difficulty. It is shown on Results (IQ Test Results), the candidate page, the dashboard (Highest IQ Test Score) and the exports. It is a test score, not a clinical IQ; no IQ-number conversion is applied.
+- Every IQ question has a **level**, and the level alone sets its marks: **Level 1 — Easy = 1 mark**, **Level 2 — Medium = 2 marks**, **Level 3 — Hard = 3 marks** (a Marks value in an imported file is ignored for IQ; no level given = Level 2).
+- Questions are split evenly across the levels and shown Level 1 first, then 2, then 3, random within each level: 18 → 6 / 6 / 6 (maximum 36 marks), 10 → 3 / 3 / 4, 15 → 5 / 5 / 5, 20 → 7 / 6 / 7, 30 → 10 / 10 / 10. Candidates never see the level or the marks.
+- The **IQ Test Score** is the weighted marks, e.g. **21 / 36 (58.3%)**. Correct answers (e.g. 11 / 18) and each level's correct answers and marks are shown next to it on Results, the candidate page, the review page, the dashboard and the PDF / Word / Excel exports. It is a test score, not a clinical IQ; no IQ-number conversion is applied.
 - **Original LALCO IQ bank:** 45 original questions (15 Easy, 15 Medium, 15 Hard) covering number patterns, sequences, visual patterns and matrices, odd one out, logical relationships, spatial reasoning (rotation, reflection), mathematical reasoning and abstract patterns. The pictures are drawn by `scripts/lalco-iq-bank.js`, which also loads the bank: `node scripts/lalco-iq-bank.js https://your-site <admin-password>` (running it twice adds nothing). `node scripts/lalco-iq-bank.js --preview <folder>` writes the pictures to a folder for checking.
 
 ### Scores
@@ -81,7 +82,7 @@ Node.js 24 LTS, Express, SQLite (`better-sqlite3`), plain HTML/JS frontend (no b
 ```
 npm install
 ADMIN_PASSWORD=choose-a-password npm start    # http://localhost:3000
-npm test                                       # 62 tests, uses temporary databases
+npm test                                       # 65 tests, uses temporary databases
 ```
 
 ```

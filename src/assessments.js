@@ -31,30 +31,42 @@ function questionKey(q) {
 // ---- IQ difficulty ------------------------------------------------------
 // An IQ test starts easy and gets harder. Questions without a difficulty
 // count as Medium.
+// Three IQ levels. The level alone decides a question's marks:
+// Level 1 Easy = 1 mark, Level 2 Medium = 2 marks, Level 3 Hard = 3 marks.
 const DIFFICULTIES = ['Easy', 'Medium', 'Hard'];
+const LEVEL_MARKS = { Easy: 1, Medium: 2, Hard: 3 };
 function difficultyLevel(value) {
   const v = String(value || '').trim().toLowerCase();
-  if (/^(easy|ງ່າຍ)/.test(v)) return 'Easy';
-  if (/^(hard|difficult|ຍາກ)/.test(v)) return 'Hard';
-  if (/^(medium|normal|ປານກາງ)/.test(v)) return 'Medium';
+  if (/^(easy|ງ່າຍ|(level\s*)?1$)/.test(v)) return 'Easy';
+  if (/^(medium|normal|ປານກາງ|(level\s*)?2$)/.test(v)) return 'Medium';
+  if (/^(hard|difficult|ຍາກ|(level\s*)?3$)/.test(v)) return 'Hard';
   return '';
 }
+// A question without a level is treated as Level 2 (Medium).
+const levelOf = (q) => difficultyLevel(q.difficulty) || 'Medium';
+const levelMarks = (q) => LEVEL_MARKS[levelOf(q)];
 
-// Picks n questions from an already shuffled pool: about 7/18 Easy, 5/18
-// Medium and 6/18 Hard (for 18: questions 1-7 Easy, 8-12 Medium, 13-18 Hard).
-// If a level runs short the gap is filled from the other levels. The result is
-// ordered Easy -> Medium -> Hard; the order within a level stays random.
+// How many questions of each level an IQ test of n questions gets: as even as
+// possible, extra questions going to Level 3 first, then Level 1
+// (10 -> 3/3/4, 18 -> 6/6/6, 20 -> 7/6/7).
+function levelSplit(n) {
+  const base = Math.floor(n / 3);
+  const extra = n % 3;
+  return { Easy: base + (extra === 2 ? 1 : 0), Medium: base, Hard: base + (extra >= 1 ? 1 : 0) };
+}
+
+// Picks n questions from an already shuffled pool: random within each level,
+// shown Level 1 first, then Level 2, then Level 3. If a level has too few
+// questions, the gap is filled from the other levels.
 function pickProgressive(pool, n) {
   const byLevel = { Easy: [], Medium: [], Hard: [] };
-  for (const q of pool) byLevel[difficultyLevel(q.difficulty) || 'Medium'].push(q);
-  const easy = Math.round((n * 7) / 18);
-  const medium = Math.round((n * 5) / 18);
-  const want = { Easy: easy, Medium: medium, Hard: n - easy - medium };
+  for (const q of pool) byLevel[levelOf(q)].push(q);
+  const want = levelSplit(n);
   const picked = [];
   for (const level of DIFFICULTIES) picked.push(...byLevel[level].splice(0, want[level]));
   const rest = [...byLevel.Easy, ...byLevel.Medium, ...byLevel.Hard];
   picked.push(...shuffle(rest).slice(0, n - picked.length));
-  const rank = (q) => DIFFICULTIES.indexOf(difficultyLevel(q.difficulty) || 'Medium');
+  const rank = (q) => DIFFICULTIES.indexOf(levelOf(q));
   return picked.map((q, i) => [q, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([q]) => q);
 }
 
@@ -181,7 +193,7 @@ const startTx = db.transaction((a, info) => {
       insert.run({
         ...Object.fromEntries(SNAPSHOT_COLS.map((c) => [c, q[c]])),
         assessment_id: a.id, question_id: q.id, position: ++position, section, question_text: q.question_text,
-        correct_answer: q.correct_answer, option_order: JSON.stringify(shuffle(letters)), max_marks: q.marks, difficulty: q.difficulty,
+        correct_answer: q.correct_answer, option_order: JSON.stringify(shuffle(letters)), max_marks: section === 'IQ' ? levelMarks(q) : q.marks, difficulty: q.difficulty,
       });
     }
   }
@@ -249,16 +261,20 @@ function scoreAssessment(assessmentId) {
   const result = essayPending > 0 ? 'Pending' : testScore >= passMark ? 'Pass' : 'Not Pass';
   const sec = (s) => (totals[s].max > 0 ? [totals[s].points, totals[s].max] : [null, null]);
 
-  // IQ Test Score as "correct / total", with how the candidate did per difficulty.
+  // IQ result per level: questions asked, answered correctly, marks earned and possible.
+  // The IQ Test Score is the weighted marks (iq_points / iq_max).
   const iq = questions.filter((q) => q.section === 'IQ');
   const breakdown = {};
   for (const q of iq) {
-    const level = difficultyLevel(q.difficulty) || 'Not set';
-    breakdown[level] = breakdown[level] || [0, 0];
-    breakdown[level][1]++;
-    if (gradeQuestion(q) > 0) breakdown[level][0]++;
+    const level = levelOf(q);
+    const b = (breakdown[level] = breakdown[level] || { correct: 0, total: 0, marks: 0, max: 0 });
+    const got = gradeQuestion(q) || 0;
+    b.total++;
+    b.max += q.max_marks;
+    b.marks += got;
+    if (got > 0) b.correct++;
   }
-  const iqCorrect = iq.length ? Object.values(breakdown).reduce((s, [c]) => s + c, 0) : null;
+  const iqCorrect = iq.length ? Object.values(breakdown).reduce((sum, b) => sum + b.correct, 0) : null;
 
   db.prepare(`UPDATE assessments SET iq_points = ?, iq_max = ?, general_points = ?, general_max = ?, calc_points = ?, calc_max = ?,
     essay_points = ?, essay_max = ?, essay_pending = ?, total_points = ?, total_max = ?, test_score = ?, result = ?,
@@ -296,6 +312,30 @@ function finalizeExpired() {
   return expired.length;
 }
 
+// 1. Bank IQ questions: marks follow the level.
+// 2. Candidates' IQ questions that were copied without a level take the level
+//    their bank question has now (answers and dates are never touched).
+// 3. Their marks follow the level, and changed tests are scored again.
+function syncIqLevels() {
+  const fixMarks = db.prepare("UPDATE questions SET marks = ? WHERE id = ? AND section = 'IQ' AND marks != ?");
+  for (const q of db.prepare("SELECT id, difficulty FROM questions WHERE section = 'IQ'").all()) {
+    if (difficultyLevel(q.difficulty)) fixMarks.run(levelMarks(q), q.id, levelMarks(q));
+  }
+  db.prepare(`UPDATE assessment_questions SET difficulty = (SELECT q.difficulty FROM questions q WHERE q.id = assessment_questions.question_id)
+    WHERE section = 'IQ' AND difficulty = '' AND question_id IS NOT NULL
+      AND COALESCE((SELECT q.difficulty FROM questions q WHERE q.id = assessment_questions.question_id), '') != ''`).run();
+  const changed = new Set();
+  const setMax = db.prepare('UPDATE assessment_questions SET max_marks = ? WHERE id = ?');
+  for (const q of db.prepare("SELECT id, assessment_id, difficulty, max_marks FROM assessment_questions WHERE section = 'IQ'").all()) {
+    if (q.max_marks !== levelMarks(q)) { setMax.run(levelMarks(q), q.id); changed.add(q.assessment_id); }
+  }
+  // Results saved in the older format (lists instead of per-level marks) are recalculated too.
+  for (const a of db.prepare("SELECT id FROM assessments WHERE status = 'SUBMITTED' AND iq_max IS NOT NULL AND (iq_breakdown IS NULL OR iq_breakdown NOT LIKE '%\"marks\"%')").all()) changed.add(a.id);
+  const submitted = db.prepare("SELECT status FROM assessments WHERE id = ?");
+  for (const id of changed) if (submitted.get(id)?.status === 'SUBMITTED') scoreAssessment(id);
+  return changed.size;
+}
+
 function setEssayMarks(assessmentId, marks) {
   const a = getAssessment(assessmentId);
   if (!a || a.status !== 'SUBMITTED') throw new InputError('Essay marks can be entered after the assessment is submitted.');
@@ -330,7 +370,7 @@ function regenerateLink(id) {
 }
 
 module.exports = {
-  SECTIONS, TYPES, LANGUAGES, LETTERS, DIFFICULTIES, InputError, label, questionKey, difficultyLevel, pickProgressive,
+  SECTIONS, TYPES, LANGUAGES, LETTERS, DIFFICULTIES, LEVEL_MARKS, InputError, label, questionKey, difficultyLevel, levelSplit, pickProgressive, syncIqLevels,
   activeCounts, createAssessment, getAssessment, linkState, startAssessment, saveAnswer,
   isPastDeadline, submitAssessment, finalize, finalizeExpired, scoreAssessment, setEssayMarks, rescoreAll, regenerateLink,
 };

@@ -205,3 +205,8 @@ table.kv th { width: 200px; background: transparent; }
 .summary-badges { display: flex; gap: 8px; flex-wrap: wrap; }
 .section-gap-sm { margin-top: 6px; }
 .exam-title { font-weight: 700; color: var(--primary); letter-spacing: .5px; margin-bottom: 2px; }
+.iq-result { display: grid; gap: 4px; }
+.iq-row { display: flex; gap: 12px; justify-content: space-between; max-width: 320px; }
+.iq-main { font-size: 18px; color: var(--primary); }
+.iq-levels { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+.iq-level { border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; min-width: 140px; font-size: 14px; }

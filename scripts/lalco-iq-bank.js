@@ -291,7 +291,7 @@ async function main() {
   if (existing.some((q) => q.question_text === BANK.Hard[5].t)) { console.log('The LALCO IQ bank is already loaded - nothing added.'); return; }
   let added = 0;
   for (const [difficulty, list] of Object.entries(BANK)) for (const q of list) {
-    const body = { section: 'IQ', difficulty, category: q.c, question_text: q.t, correct_answer: q.a, marks: 1 };
+    const body = { section: 'IQ', difficulty, category: q.c, question_text: q.t, correct_answer: q.a }; // marks follow the level
     (q.o || []).forEach((text, i) => { body['option_' + 'abcd'[i]] = text; });
     if (q.fig) body.image_id = await upload(q.fig());
     for (const [i, o] of (q.opts || []).entries()) body[`option_${'abcd'[i]}_image`] = await upload(o());
