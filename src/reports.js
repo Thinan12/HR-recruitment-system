@@ -22,6 +22,12 @@ function summarize(candidate, submitted) {
   return {
     ...candidate,
     iq_score: iq ? pct(iq.iq_points, iq.iq_max) : null,
+    // IQ Test Score as "correct / total" (older results fall back to marks).
+    iq_correct: iq ? iq.iq_correct ?? iq.iq_points : null,
+    iq_total: iq ? iq.iq_total ?? iq.iq_max : null,
+    iq_text: iq ? `${iq.iq_correct ?? iq.iq_points} / ${iq.iq_total ?? iq.iq_max}` : null,
+    iq_breakdown: iq && iq.iq_breakdown ? JSON.parse(iq.iq_breakdown) : null,
+    iq_date: iq ? iq.submitted_at : null,
     general_score: general ? pct(general.general_points, general.general_max) : null,
     calc_score: calc ? pct(calc.calc_points, calc.calc_max) : null,
     essay_score: essay && !essay.essay_pending ? pct(essay.essay_points, essay.essay_max) : null,
@@ -70,7 +76,7 @@ function dashboard() {
     passed: people.filter((p) => p.overall_result === 'Pass').length,
     not_passed: people.filter((p) => p.overall_result === 'Not Pass').length,
     average_test_score: scored.length ? Math.round((scored.reduce((s, p) => s + p.test_score, 0) / scored.length) * 10) / 10 : null,
-    highest_iq: withIq[0] ? { id: withIq[0].id, name: withIq[0].name, iq_score: withIq[0].iq_score } : null,
+    highest_iq: withIq[0] ? { id: withIq[0].id, name: withIq[0].name, iq_score: withIq[0].iq_score, iq_text: withIq[0].iq_text } : null,
     completed_assessments: count("SELECT COUNT(*) AS n FROM assessments WHERE status = 'SUBMITTED'"),
     pending_assessments: count(`SELECT COUNT(*) AS n FROM assessments WHERE status = 'IN_PROGRESS'
       OR (status = 'NOT_STARTED' AND enabled = 1 AND link_expires_at > ?)`, nowIso),
@@ -99,7 +105,8 @@ const COLUMNS = [
   ['Subject', (c) => c.subject],
   ['GPA / Mark', (c) => c.gpa],
   ['Reference Results', (c) => c.reference_results],
-  ['IQ Test Score', (c) => c.iq_score],
+  ['IQ Test Score', (c) => c.iq_text],
+  ['IQ %', (c) => c.iq_score],
   ['Character', (c) => c.character_note],
   ['Test Score', (c) => c.test_score],
   ['General Test', (c) => c.general_score],
@@ -124,7 +131,7 @@ function reportSections(c) {
       ['School Name', show(c.school_name)], ['Subject', show(c.subject)], ['GPA / Mark', show(c.gpa)],
     ]],
     ['Assessment Results', [
-      ['Reference Results', show(c.reference_results)], ['IQ Test Score', showPct(c.iq_score)], ['Character', show(c.character_note)],
+      ['Reference Results', show(c.reference_results)], ['IQ Test Score', c.iq_text ? `${c.iq_text} correct (${c.iq_score}%)` : '-'], ['Character', show(c.character_note)],
       ['Test Score', showPct(c.test_score)], ['General Test', showPct(c.general_score)], ['Calculation Test', showPct(c.calc_score)],
       ['Essay Test', c.essay_pending ? 'Pending' : showPct(c.essay_score)], ['Result', show(c.test_result)], ['Test Date', showDate(c.last_test_date)],
     ]],
@@ -138,7 +145,7 @@ function reportSections(c) {
   ];
 }
 
-const NOTE = 'Scores are percentages of available marks. The IQ Test Score is a test score, not a clinical IQ measurement.';
+const NOTE = 'Scores are percentages of available marks. The IQ Test Score is the number of IQ questions answered correctly; it is not a clinical IQ measurement.';
 
 function candidatePdf(c) {
   return new Promise((resolve, reject) => {

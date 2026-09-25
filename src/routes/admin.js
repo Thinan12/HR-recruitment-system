@@ -98,6 +98,19 @@ router.get('/candidates/:id/export.:format', (req, res, next) => {
   build().catch(next);
 });
 
+// Every submitted test that had IQ questions, newest first.
+router.get('/results/iq', (req, res) => {
+  const rows = db.prepare(`SELECT a.id, a.candidate_id, c.name AS candidate_name, a.iq_correct, a.iq_total, a.iq_points, a.iq_max,
+      a.iq_breakdown, a.submitted_at, a.assessment_type
+    FROM assessments a LEFT JOIN candidates c ON c.id = a.candidate_id
+    WHERE a.status = 'SUBMITTED' AND a.iq_max IS NOT NULL ORDER BY a.submitted_at DESC`).all();
+  res.json(rows.map((r) => ({
+    ...r,
+    iq_percent: r.iq_max ? Math.round((r.iq_points / r.iq_max) * 1000) / 10 : null,
+    iq_breakdown: r.iq_breakdown ? JSON.parse(r.iq_breakdown) : null,
+  })));
+});
+
 router.get('/export/candidates.xlsx', (req, res) => {
   const stamp = new Date().toISOString().slice(0, 10);
   sendFile(res, reports.candidatesXlsx(reports.allCandidateSummaries()), `LALCO_All_Candidates_${stamp}.xlsx`, XLSX_TYPE);

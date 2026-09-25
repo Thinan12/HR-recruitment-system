@@ -158,6 +158,15 @@ function rowsFromText(text, defaultSection) {
 
 const IMAGE_KEYS = ['image_id', ...LETTERS.map((L) => `option_${L.toLowerCase()}_image`)];
 
+// "easy", "EASY", "ງ່າຍ" -> "Easy" (the IQ test orders questions by it). Other text is kept as typed.
+function standardDifficulty(v) {
+  const s = v.toLowerCase();
+  if (/^(easy|ງ່າຍ)/.test(s)) return 'Easy';
+  if (/^(medium|normal|ປານກາງ)/.test(s)) return 'Medium';
+  if (/^(hard|difficult|ຍາກ)/.test(s)) return 'Hard';
+  return v;
+}
+
 function resolveAnswerLetter(answer, row) {
   const a = String(answer || '').trim();
   const letter = a.match(/^(?:option\s*)?\(?([A-Ea-e])\)?\.?$/i);
@@ -173,7 +182,7 @@ function validateQuestion(input) {
   const q = {
     section: SECTIONS.includes(input.section) ? input.section : sectionFrom(input.section),
     category: clean(input.category, 200),
-    difficulty: clean(input.difficulty, 50),
+    difficulty: standardDifficulty(clean(input.difficulty, 50)),
     question_text: clean(input.question_text, 5000),
     option_a: clean(input.option_a, 1000),
     option_b: clean(input.option_b, 1000),

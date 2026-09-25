@@ -203,3 +203,5 @@ table.kv th { width: 200px; background: transparent; }
 .image-field input[type=file] { width: auto; font-size: 13px; }
 .answer-choice { display: inline-flex; align-items: center; gap: 6px; }
 .summary-badges { display: flex; gap: 8px; flex-wrap: wrap; }
+.section-gap-sm { margin-top: 6px; }
+.exam-title { font-weight: 700; color: var(--primary); letter-spacing: .5px; margin-bottom: 2px; }

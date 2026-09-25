@@ -12,7 +12,7 @@ const TEXT = {
     grad_options: ['', 'High School', 'College', 'University', 'Other'],
     start: 'Start Assessment',
     time_remaining: 'Time Remaining',
-    question: 'Question',
+    question: 'Question', of: 'of', iq_title: 'LALCO IQ TEST',
     previous: 'Previous', next: 'Next', submit: 'Submit Assessment', submitting: 'Submitting...',
     type_answer: 'Type your answer here',
     confirm_submit: 'Submit your answers now? You cannot change them after submitting.',
@@ -39,7 +39,7 @@ const TEXT = {
     grad_options: ['', 'ມັດທະຍົມຕອນປາຍ', 'ວິທະຍາໄລ', 'ມະຫາວິທະຍາໄລ', 'ອື່ນໆ'],
     start: 'ເລີ່ມການທົດສອບ',
     time_remaining: 'ເວລາທີ່ເຫຼືອ',
-    question: 'ຄຳຖາມ',
+    question: 'ຄຳຖາມ', of: 'ຈາກ', iq_title: 'ແບບທົດສອບ IQ ຂອງ LALCO',
     previous: 'ກ່ອນໜ້າ', next: 'ຕໍ່ໄປ', submit: 'ສົ່ງຄຳຕອບ', submitting: 'ກຳລັງສົ່ງ...',
     type_answer: 'ພິມຄຳຕອບຂອງທ່ານບ່ອນນີ້',
     confirm_submit: 'ສົ່ງຄຳຕອບດຽວນີ້ບໍ່? ຫຼັງຈາກສົ່ງແລ້ວຈະບໍ່ສາມາດແກ້ໄຂໄດ້.',
@@ -166,6 +166,7 @@ function renderExam(data) {
     deadline: Date.now() + data.remaining_seconds * 1000,
     current: exam ? exam.current : 0,
     candidateName: data.candidate ? data.candidate.name : '',
+    isIq: data.assessment_type === 'IQ',
   };
   startTimer();
   drawQuestion();
@@ -234,11 +235,12 @@ function drawQuestion() {
   const last = exam.current === qs.length - 1;
   root.replaceChildren(
     h('div', { class: 'exam-head' },
-      h('div', {}, h('strong', {}, exam.candidateName), h('div', { class: 'progress' }, T.sections[q.section] || '')),
+      h('div', {}, exam.isIq ? h('div', { class: 'exam-title' }, T.iq_title) : null, h('strong', {}, exam.candidateName),
+        exam.isIq ? null : h('div', { class: 'progress' }, T.sections[q.section] || '')),
       h('div', { id: 'timer', class: 'timer' })),
     offline,
     h('div', { class: 'card' },
-      h('div', { class: 'progress' }, `${T.question} ${exam.current + 1} / ${qs.length}`),
+      h('div', { class: 'progress' }, `${T.question} ${exam.current + 1} ${T.of} ${qs.length}`),
       h('div', { class: 'question-text' }, q.text),
       q.image ? h('img', { src: q.image, alt: '', class: 'question-image' }) : null,
       answerBox,

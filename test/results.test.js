@@ -173,7 +173,8 @@ test('candidate Excel export and all-candidate Excel export', async () => {
   const rows = XLSX.utils.sheet_to_json(sheet);
   assert.equal(rows.length, 3);
   const top = rows.find((r) => r['Candidate Name'] === 'High Scorer');
-  assert.equal(top['IQ Test Score'], 90);
+  assert.equal(top['IQ Test Score'], '9 / 10');
+  assert.equal(top['IQ %'], 90);
   assert.equal(top['Interviewer'], 'Ms. Somchay');
   assert.equal(top['Phone Number'], CANDIDATE.phone);
 });

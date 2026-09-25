@@ -1,9 +1,12 @@
 const app = require('./app');
 const { ensureFirstAdmin } = require('./auth');
-const { finalizeExpired } = require('./assessments');
-const { DB_PATH } = require('./db');
+const { finalizeExpired, scoreAssessment } = require('./assessments');
+const { db, DB_PATH } = require('./db');
 
 ensureFirstAdmin();
+
+// Results submitted before the IQ "correct / total" score existed get it now (once).
+for (const { id } of db.prepare("SELECT id FROM assessments WHERE status = 'SUBMITTED' AND iq_max IS NOT NULL AND iq_total IS NULL").all()) scoreAssessment(id);
 
 // Submit assessments whose time ran out while the candidate was away.
 finalizeExpired();

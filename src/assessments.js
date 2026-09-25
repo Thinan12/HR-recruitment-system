@@ -28,6 +28,36 @@ function questionKey(q) {
   return [q.section, norm(q.question_text), ...SNAPSHOT_COLS.map((c) => norm(q[c]))].join('|');
 }
 
+// ---- IQ difficulty ------------------------------------------------------
+// An IQ test starts easy and gets harder. Questions without a difficulty
+// count as Medium.
+const DIFFICULTIES = ['Easy', 'Medium', 'Hard'];
+function difficultyLevel(value) {
+  const v = String(value || '').trim().toLowerCase();
+  if (/^(easy|ງ່າຍ)/.test(v)) return 'Easy';
+  if (/^(hard|difficult|ຍາກ)/.test(v)) return 'Hard';
+  if (/^(medium|normal|ປານກາງ)/.test(v)) return 'Medium';
+  return '';
+}
+
+// Picks n questions from an already shuffled pool: about 7/18 Easy, 5/18
+// Medium and 6/18 Hard (for 18: questions 1-7 Easy, 8-12 Medium, 13-18 Hard).
+// If a level runs short the gap is filled from the other levels. The result is
+// ordered Easy -> Medium -> Hard; the order within a level stays random.
+function pickProgressive(pool, n) {
+  const byLevel = { Easy: [], Medium: [], Hard: [] };
+  for (const q of pool) byLevel[difficultyLevel(q.difficulty) || 'Medium'].push(q);
+  const easy = Math.round((n * 7) / 18);
+  const medium = Math.round((n * 5) / 18);
+  const want = { Easy: easy, Medium: medium, Hard: n - easy - medium };
+  const picked = [];
+  for (const level of DIFFICULTIES) picked.push(...byLevel[level].splice(0, want[level]));
+  const rest = [...byLevel.Easy, ...byLevel.Medium, ...byLevel.Hard];
+  picked.push(...shuffle(rest).slice(0, n - picked.length));
+  const rank = (q) => DIFFICULTIES.indexOf(difficultyLevel(q.difficulty) || 'Medium');
+  return picked.map((q, i) => [q, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([q]) => q);
+}
+
 const newToken = () => crypto.randomBytes(24).toString('base64url');
 const addMinutes = (iso, minutes) => new Date(new Date(iso).getTime() + minutes * 60000).toISOString();
 
@@ -131,28 +161,27 @@ const startTx = db.transaction((a, info) => {
   // Random, non-repeating selection per section, then shuffled answer order.
   const sections = JSON.parse(a.sections);
   const insert = db.prepare(`INSERT INTO assessment_questions
-    (assessment_id, question_id, position, section, question_text, ${SNAPSHOT_COLS.join(', ')}, correct_answer, option_order, max_marks)
+    (assessment_id, question_id, position, section, question_text, ${SNAPSHOT_COLS.join(', ')}, correct_answer, option_order, max_marks, difficulty)
     VALUES (@assessment_id, @question_id, @position, @section, @question_text, ${SNAPSHOT_COLS.map((c) => '@' + c).join(', ')},
-      @correct_answer, @option_order, @max_marks)`);
+      @correct_answer, @option_order, @max_marks, @difficulty)`);
   let position = 0;
   const used = new Set(); // never show the same question twice, even if the bank has copies
   for (const section of SECTIONS) {
     if (!sections[section]) continue;
-    const pool = db.prepare("SELECT * FROM questions WHERE section = ? AND status = 'Active'").all(section);
-    const picked = [];
-    for (const q of shuffle(pool)) {
-      if (picked.length === sections[section]) break;
+    const pool = [];
+    for (const q of shuffle(db.prepare("SELECT * FROM questions WHERE section = ? AND status = 'Active'").all(section))) {
       const key = questionKey(q);
       if (used.has(key)) continue;
       used.add(key);
-      picked.push(q);
+      pool.push(q);
     }
+    const picked = section === 'IQ' ? pickProgressive(pool, sections[section]) : pool.slice(0, sections[section]);
     for (const q of picked) {
       const letters = LETTERS.filter((L) => q['option_' + L.toLowerCase()] || q['option_' + L.toLowerCase() + '_image']);
       insert.run({
         ...Object.fromEntries(SNAPSHOT_COLS.map((c) => [c, q[c]])),
         assessment_id: a.id, question_id: q.id, position: ++position, section, question_text: q.question_text,
-        correct_answer: q.correct_answer, option_order: JSON.stringify(shuffle(letters)), max_marks: q.marks,
+        correct_answer: q.correct_answer, option_order: JSON.stringify(shuffle(letters)), max_marks: q.marks, difficulty: q.difficulty,
       });
     }
   }
@@ -219,9 +248,23 @@ function scoreAssessment(assessmentId) {
   const passMark = getSettings().pass_mark;
   const result = essayPending > 0 ? 'Pending' : testScore >= passMark ? 'Pass' : 'Not Pass';
   const sec = (s) => (totals[s].max > 0 ? [totals[s].points, totals[s].max] : [null, null]);
+
+  // IQ Test Score as "correct / total", with how the candidate did per difficulty.
+  const iq = questions.filter((q) => q.section === 'IQ');
+  const breakdown = {};
+  for (const q of iq) {
+    const level = difficultyLevel(q.difficulty) || 'Not set';
+    breakdown[level] = breakdown[level] || [0, 0];
+    breakdown[level][1]++;
+    if (gradeQuestion(q) > 0) breakdown[level][0]++;
+  }
+  const iqCorrect = iq.length ? Object.values(breakdown).reduce((s, [c]) => s + c, 0) : null;
+
   db.prepare(`UPDATE assessments SET iq_points = ?, iq_max = ?, general_points = ?, general_max = ?, calc_points = ?, calc_max = ?,
-    essay_points = ?, essay_max = ?, essay_pending = ?, total_points = ?, total_max = ?, test_score = ?, result = ? WHERE id = ?`)
-    .run(...sec('IQ'), ...sec('GENERAL'), ...sec('CALCULATION'), ...sec('ESSAY'), essayPending, totalPoints, totalMax, testScore, result, assessmentId);
+    essay_points = ?, essay_max = ?, essay_pending = ?, total_points = ?, total_max = ?, test_score = ?, result = ?,
+    iq_correct = ?, iq_total = ?, iq_breakdown = ? WHERE id = ?`)
+    .run(...sec('IQ'), ...sec('GENERAL'), ...sec('CALCULATION'), ...sec('ESSAY'), essayPending, totalPoints, totalMax, testScore, result,
+      iqCorrect, iq.length || null, iq.length ? JSON.stringify(breakdown) : null, assessmentId);
 }
 
 // Marks the assessment submitted exactly once and scores it.
@@ -287,7 +330,7 @@ function regenerateLink(id) {
 }
 
 module.exports = {
-  SECTIONS, TYPES, LANGUAGES, LETTERS, InputError, label, questionKey,
+  SECTIONS, TYPES, LANGUAGES, LETTERS, DIFFICULTIES, InputError, label, questionKey, difficultyLevel, pickProgressive,
   activeCounts, createAssessment, getAssessment, linkState, startAssessment, saveAnswer,
   isPastDeadline, submitAssessment, finalize, finalizeExpired, scoreAssessment, setEssayMarks, rescoreAll, regenerateLink,
 };

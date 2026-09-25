@@ -59,6 +59,14 @@ Options may also be on one line (`A. Red  B. Blue  C. Green  D. Chair`).
 5. On **Assessments → View**, HR sees every question with the answer the candidate chose (and the letter they saw on screen), the correct answer, and **Correct / Wrong / Not answered**, with totals at the top.
 6. A link can be used only once. An unused link stops working at its expiry time, or whenever you press **Disable**.
 
+### The LALCO IQ test
+
+- The IQ bank and the General (recruitment) bank are separate. **IQ Test**, **General Test** and **Combined Assessment** links draw from them.
+- An IQ link has **18 questions by default** (quick choices 10 / 15 / 18 / 20 / 30, or any number).
+- Questions go from easy to hard. For 18 questions: 1–7 **Easy**, 8–12 **Medium**, 13–18 **Hard** (other lengths keep the same proportions). Within each level the questions are random, and answers are shuffled. Questions without a difficulty count as Medium. Candidates never see the difficulty.
+- The result is the **IQ Test Score** — correct answers out of the questions asked, e.g. **15 / 18** — with the percentage and a breakdown by difficulty. It is shown on Results (IQ Test Results), the candidate page, the dashboard (Highest IQ Test Score) and the exports. It is a test score, not a clinical IQ; no IQ-number conversion is applied.
+- **Original LALCO IQ bank:** 45 original questions (15 Easy, 15 Medium, 15 Hard) covering number patterns, sequences, visual patterns and matrices, odd one out, logical relationships, spatial reasoning (rotation, reflection), mathematical reasoning and abstract patterns. The pictures are drawn by `scripts/lalco-iq-bank.js`, which also loads the bank: `node scripts/lalco-iq-bank.js https://your-site <admin-password>` (running it twice adds nothing). `node scripts/lalco-iq-bank.js --preview <folder>` writes the pictures to a folder for checking.
+
 ### Scores
 
 - Multiple choice: correct = full marks, wrong = 0.
@@ -73,7 +81,7 @@ Node.js 24 LTS, Express, SQLite (`better-sqlite3`), plain HTML/JS frontend (no b
 ```
 npm install
 ADMIN_PASSWORD=choose-a-password npm start    # http://localhost:3000
-npm test                                       # 58 tests, uses temporary databases
+npm test                                       # 62 tests, uses temporary databases
 ```
 
 ```

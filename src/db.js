@@ -147,6 +147,10 @@ function addMissingColumns(table, columns) {
 for (const table of ['questions', 'assessment_questions']) {
   addMissingColumns(table, [["option_e", "TEXT NOT NULL DEFAULT ''"], ...IMAGE_COLUMNS.map((c) => [c, 'INTEGER'])]);
 }
+// Difficulty copied into each candidate's questions, and the IQ result as
+// "correct / total" with a per-difficulty breakdown ({"Easy":[5,7],...}).
+addMissingColumns('assessment_questions', [['difficulty', "TEXT NOT NULL DEFAULT ''"]]);
+addMissingColumns('assessments', [['iq_correct', 'INTEGER'], ['iq_total', 'INTEGER'], ['iq_breakdown', 'TEXT']]);
 
 const DEFAULT_SETTINGS = {
   default_time_minutes: '30',

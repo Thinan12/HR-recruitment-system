@@ -204,7 +204,7 @@ async function renderDashboard() {
       stat('Passed', d.passed),
       stat('Not Passed', d.not_passed),
       stat('Average Test Score', d.average_test_score == null ? '-' : d.average_test_score + '%'),
-      stat('Highest IQ Test Score', d.highest_iq ? d.highest_iq.iq_score + '%' : '-', d.highest_iq ? d.highest_iq.name : 'No IQ results yet', 'highlight'),
+      stat('Highest IQ Test Score', d.highest_iq ? d.highest_iq.iq_text : '-', d.highest_iq ? `${d.highest_iq.name} (${d.highest_iq.iq_score}%)` : 'No IQ results yet', 'highlight'),
       stat('Completed Assessments', d.completed_assessments),
       stat('Pending Assessments', d.pending_assessments)),
     h('div', { class: 'card' },
@@ -274,7 +274,7 @@ async function renderCandidate(id) {
       : text(name, c[name])))),
     h('h2', { class: 'section-gap' }, 'Assessment Results'),
     h('div', { class: 'table-wrap' }, h('table', { class: 'kv' }, h('tbody', {},
-      h('tr', {}, h('th', {}, 'IQ Test Score'), h('td', {}, c.iq_score == null ? '-' : c.iq_score + '%')),
+      h('tr', {}, h('th', {}, 'IQ Test Result'), h('td', {}, c.iq_text == null ? '-' : `${c.iq_text} correct (${c.iq_score}%)`, c.iq_breakdown ? h('div', { class: 'muted small' }, breakdownText(c.iq_breakdown)) : null)),
       h('tr', {}, h('th', {}, 'Test Score'), h('td', {}, c.test_score == null ? '-' : c.test_score + '%')),
       h('tr', {}, h('th', {}, 'General Test'), h('td', {}, c.general_score == null ? '-' : c.general_score + '%')),
       h('tr', {}, h('th', {}, 'Calculation Test'), h('td', {}, c.calc_score == null ? '-' : c.calc_score + '%')),
@@ -505,6 +505,9 @@ function editQuestion(q, onSaved) {
 // Assessments
 // ---------------------------------------------------------------------------
 
+// The LALCO IQ test has 18 questions unless HR chooses otherwise.
+const IQ_DEFAULT = 18;
+
 const EXPIRY_CHOICES = [[10, '10 minutes'], [30, '30 minutes'], [60, '1 hour'], [120, '2 hours'], [1440, '1 day'], [4320, '3 days'], [10080, '7 days'], ['custom', 'Custom (minutes)']];
 
 async function renderAssessments() {
@@ -515,11 +518,13 @@ async function renderAssessments() {
   const typeSelect = select('assessment_type', Object.entries(TYPE_LABEL), 'IQ');
   const countsBox = h('div', { class: 'grid wide' });
   const drawCounts = () => {
-    countsBox.replaceChildren(...TYPE_SECTIONS[typeSelect.value].map((s) =>
-      field(`${SECTION_LABEL[s]} questions (bank has ${counts[s]})`, h('input', {
-        name: 'count_' + s, type: 'number', min: 0, max: counts[s],
-        value: typeSelect.value === 'COMBINED' ? Math.min(counts[s], s === 'ESSAY' ? 1 : 10) : Math.min(counts[s], 20),
-      }))));
+    countsBox.replaceChildren(...TYPE_SECTIONS[typeSelect.value].map((s) => {
+      const def = s === 'IQ' ? IQ_DEFAULT : typeSelect.value === 'COMBINED' ? (s === 'ESSAY' ? 1 : 10) : 20;
+      const input = h('input', { name: 'count_' + s, type: 'number', min: 0, max: counts[s], value: Math.min(counts[s], def) });
+      const quick = s === 'IQ' ? h('div', { class: 'row small section-gap-sm' }, 'Quick:', [10, 15, 18, 20, 30].map((n) =>
+        h('button', { type: 'button', class: 'secondary small', disabled: n > counts[s], onclick: () => { input.value = n; } }, String(n)))) : null;
+      return h('div', { class: 'field' }, field(`${SECTION_LABEL[s]} questions (bank has ${counts[s]})`, input), quick);
+    }));
   };
   typeSelect.addEventListener('change', drawCounts);
   drawCounts();
@@ -540,7 +545,7 @@ async function renderAssessments() {
     field('Link expires in', expirySelect),
     customField,
     countsBox,
-    h('p', { class: 'muted small wide' }, 'Each candidate gets a different random set of questions from the bank, and answer options are shuffled.'),
+    h('p', { class: 'muted small wide' }, 'Each candidate gets a different random set of questions from the bank, and answer options are shuffled. IQ questions go from Easy to Hard (for 18: questions 1-7 Easy, 8-12 Medium, 13-18 Hard).'),
     h('div', { class: 'wide' }, h('button', { type: 'submit' }, 'Generate Link')));
 
   form.addEventListener('submit', async (e) => {
@@ -668,7 +673,8 @@ async function renderAssessment(id) {
       h('tr', {}, h('th', {}, 'Started'), h('td', {}, fmtDateTime(a.started_at))),
       h('tr', {}, h('th', {}, 'Submitted'), h('td', {}, fmtDateTime(a.submitted_at))),
       h('tr', {}, h('th', {}, 'Left the page'), h('td', {}, `${a.focus_losses} time(s)`)),
-      h('tr', {}, h('th', {}, 'IQ'), h('td', {}, pct(a.iq_points, a.iq_max))),
+      h('tr', {}, h('th', {}, 'IQ Test Score'), h('td', {}, a.iq_total ? `${a.iq_correct} / ${a.iq_total} correct (${Math.round((a.iq_points / a.iq_max) * 1000) / 10}%)` : pct(a.iq_points, a.iq_max),
+        a.iq_breakdown ? h('div', { class: 'muted small' }, breakdownText(JSON.parse(a.iq_breakdown))) : null)),
       h('tr', {}, h('th', {}, 'General'), h('td', {}, pct(a.general_points, a.general_max))),
       h('tr', {}, h('th', {}, 'Calculation'), h('td', {}, pct(a.calc_points, a.calc_max))),
       h('tr', {}, h('th', {}, 'Essay'), h('td', {}, a.essay_pending ? 'Waiting for marking' : pct(a.essay_points, a.essay_max))),
@@ -689,15 +695,32 @@ async function renderAssessment(id) {
 // Results
 // ---------------------------------------------------------------------------
 
+function breakdownText(b) {
+  return ['Easy', 'Medium', 'Hard', 'Not set'].filter((k) => b[k]).map((k) => `${k} ${b[k][0]}/${b[k][1]}`).join(' · ');
+}
+
 async function renderResults() {
-  const list = await api('GET', '/candidates');
+  const [list, iq] = await Promise.all([api('GET', '/candidates'), api('GET', '/results/iq')]);
+  const iqCard = h('div', { class: 'card' }, h('h2', {}, 'IQ Test Results'),
+    iq.length ? h('div', { class: 'table-wrap' }, h('table', {},
+      h('thead', {}, h('tr', {}, ['Candidate', 'IQ Test Score', 'Correct Answers', 'Total Questions', 'Percentage', 'By difficulty', 'Assessment Date', ''].map((t) => h('th', {}, t)))),
+      h('tbody', {}, iq.map((r) => h('tr', {},
+        h('td', {}, r.candidate_id ? h('a', { href: '#/candidates/' + r.candidate_id }, r.candidate_name) : '-'),
+        h('td', {}, h('strong', {}, `${r.iq_correct ?? r.iq_points} / ${r.iq_total ?? r.iq_max}`)),
+        h('td', {}, r.iq_correct ?? r.iq_points), h('td', {}, r.iq_total ?? r.iq_max), h('td', {}, r.iq_percent + '%'),
+        h('td', { class: 'small' }, r.iq_breakdown ? breakdownText(r.iq_breakdown) : '-'),
+        h('td', {}, fmtDate(r.submitted_at)),
+        h('td', {}, h('a', { class: 'button secondary small', href: '#/assessments/' + r.id }, 'Answers')))))))
+      : h('p', { class: 'muted' }, 'No IQ tests submitted yet.'),
+    h('p', { class: 'muted small' }, 'IQ Test Score = number of IQ questions answered correctly. It is a test score, not a clinical IQ measurement.'));
   view().replaceChildren(
     h('div', { class: 'row between' }, h('h1', {}, 'Results'), downloadLink('/export/candidates.xlsx', 'Export all candidates (Excel)', '')),
-    h('div', { class: 'card' }, list.length ? h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, ['Candidate', 'IQ Mark', 'Test Score', 'Calculation Test', 'Essay Test', 'Interview Score', 'Final Result', 'Date', 'Export'].map((t) => h('th', {}, t)))),
+    iqCard,
+    h('div', { class: 'card' }, h('h2', {}, 'All candidates'), list.length ? h('div', { class: 'table-wrap' }, h('table', {},
+      h('thead', {}, h('tr', {}, ['Candidate', 'IQ Test Score', 'Test Score', 'Calculation Test', 'Essay Test', 'Interview Score', 'Final Result', 'Date', 'Export'].map((t) => h('th', {}, t)))),
       h('tbody', {}, list.map((c) => h('tr', {},
         h('td', {}, h('a', { href: '#/candidates/' + c.id }, c.name)),
-        h('td', {}, fmt(c.iq_score)), h('td', {}, fmt(c.test_score)), h('td', {}, fmt(c.calc_score)),
+        h('td', {}, c.iq_text ? `${c.iq_text} (${c.iq_score}%)` : '-'), h('td', {}, fmt(c.test_score)), h('td', {}, fmt(c.calc_score)),
         h('td', {}, c.essay_pending ? 'Pending' : fmt(c.essay_score)), h('td', {}, fmt(c.interview_score)),
         h('td', {}, resultBadge(c.overall_result)), h('td', {}, fmtDate(c.last_test_date || c.created_at)),
         h('td', { class: 'nowrap' }, downloadLink(`/candidates/${c.id}/export.pdf`, 'PDF'), ' ', downloadLink(`/candidates/${c.id}/export.docx`, 'Word'), ' ', downloadLink(`/candidates/${c.id}/export.xlsx`, 'Excel')))))))
