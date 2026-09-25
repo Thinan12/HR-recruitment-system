@@ -1,0 +1,194 @@
+:root {
+  --bg: #f5f7fa;
+  --card: #ffffff;
+  --text: #1f2933;
+  --muted: #616e7c;
+  --line: #e1e5ea;
+  --primary: #1f4e79;
+  --primary-dark: #163a5a;
+  --pass: #1b7f3b;
+  --pass-bg: #e3f4e8;
+  --fail: #b42318;
+  --fail-bg: #fdecea;
+  --pending: #8a5a00;
+  --pending-bg: #fdf3dc;
+  --radius: 8px;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 "Segoe UI", "Noto Sans Lao", "Phetsarath OT", "Leelawadee UI", system-ui, sans-serif;
+}
+a { color: var(--primary); }
+h1 { font-size: 22px; margin: 0 0 16px; }
+h2 { font-size: 17px; margin: 0 0 12px; }
+.hidden { display: none !important; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.right { text-align: right; }
+.nowrap { white-space: nowrap; }
+.pre { white-space: pre-wrap; }
+.section-gap { margin-top: 20px; }
+
+/* ---- layout ---- */
+.topbar {
+  background: var(--primary);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 0 24px;
+  min-height: 56px;
+  flex-wrap: wrap;
+}
+.brand { font-weight: 700; font-size: 17px; letter-spacing: .3px; }
+.nav { display: flex; gap: 4px; flex: 1; flex-wrap: wrap; }
+.nav a {
+  color: #dbe7f3;
+  text-decoration: none;
+  padding: 8px 12px;
+  border-radius: 6px;
+}
+.nav a:hover { background: rgba(255,255,255,.1); color: #fff; }
+.nav a.active { background: rgba(255,255,255,.18); color: #fff; }
+.topbar .user { font-size: 13px; color: #dbe7f3; display: flex; gap: 12px; align-items: center; }
+.topbar .user button { background: transparent; border: 1px solid rgba(255,255,255,.4); color: #fff; }
+main { max-width: 1200px; margin: 0 auto; padding: 24px; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 20px;
+}
+.row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.row.between { justify-content: space-between; }
+.spacer { flex: 1; }
+
+/* ---- dashboard ---- */
+.stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 16px; margin-bottom: 20px; }
+.stat { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+.stat .label { color: var(--muted); font-size: 13px; }
+.stat .value { font-size: 28px; font-weight: 600; margin-top: 4px; }
+.stat .sub { font-size: 13px; color: var(--muted); }
+.stat.highlight { border-color: var(--primary); }
+
+/* ---- forms ---- */
+label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+input, select, textarea {
+  font: inherit;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #c8d0d9;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text);
+}
+textarea { min-height: 80px; resize: vertical; }
+input:focus, select:focus, textarea:focus { outline: 2px solid #9cc3e6; border-color: var(--primary); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px 16px; }
+.grid .wide { grid-column: 1 / -1; }
+.field { min-width: 0; }
+.inline-input { width: auto; }
+
+button, .button {
+  font: inherit;
+  display: inline-block;
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--primary);
+  background: var(--primary);
+  color: #fff;
+  cursor: pointer;
+  text-decoration: none;
+  line-height: 1.4;
+}
+button:hover, .button:hover { background: var(--primary-dark); }
+button:disabled { opacity: .55; cursor: not-allowed; }
+button.secondary, .button.secondary { background: #fff; color: var(--primary); }
+button.secondary:hover, .button.secondary:hover { background: #eef4fa; }
+button.danger { background: #fff; color: var(--fail); border-color: #e3b2ad; }
+button.danger:hover { background: var(--fail-bg); }
+button.small, .button.small { padding: 4px 10px; font-size: 13px; }
+
+.message { padding: 10px 14px; border-radius: 6px; margin-bottom: 14px; white-space: pre-line; }
+.message.error { background: var(--fail-bg); color: var(--fail); }
+.message.ok { background: var(--pass-bg); color: var(--pass); }
+
+/* ---- tables ---- */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; background: #fff; }
+th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 13px; color: var(--muted); font-weight: 600; background: #fafbfc; white-space: nowrap; }
+tr.clickable { cursor: pointer; }
+tr.clickable:hover td { background: #f3f7fb; }
+td.question-cell { max-width: 420px; }
+table.kv th { width: 200px; background: transparent; }
+
+.badge { display: inline-block; padding: 2px 10px; border-radius: 99px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.badge.pass { background: var(--pass-bg); color: var(--pass); }
+.badge.fail { background: var(--fail-bg); color: var(--fail); }
+.badge.pending { background: var(--pending-bg); color: var(--pending); }
+.badge.neutral { background: #eef1f4; color: var(--muted); }
+
+.link-box { display: flex; gap: 8px; }
+.link-box input { font-family: Consolas, monospace; font-size: 13px; }
+
+.tabs { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+.tabs button { background: #fff; color: var(--text); border-color: var(--line); }
+.tabs button.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+.modal-backdrop { position: fixed; inset: 0; background: rgba(15, 23, 42, .45); display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow-y: auto; z-index: 10; }
+.modal { background: #fff; border-radius: var(--radius); padding: 22px; width: 100%; max-width: 720px; }
+
+/* ---- login ---- */
+.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.login { width: 100%; max-width: 360px; }
+.login h1 { text-align: center; color: var(--primary); }
+.login .field { margin-bottom: 14px; }
+.login button { width: 100%; }
+
+/* ---- candidate exam ---- */
+.exam { max-width: 760px; margin: 0 auto; padding: 16px; }
+.exam-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.timer { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 6px 14px; }
+.timer.low { color: var(--fail); border-color: #e3b2ad; background: var(--fail-bg); }
+.progress { color: var(--muted); font-size: 14px; }
+.question-text { font-size: 18px; margin: 8px 0 18px; white-space: pre-wrap; }
+.option {
+  display: flex; gap: 12px; align-items: flex-start;
+  padding: 12px 14px; margin-bottom: 10px;
+  border: 1px solid #c8d0d9; border-radius: 8px; cursor: pointer; background: #fff;
+  color: var(--text); font-size: 16px;
+}
+.option:hover { border-color: var(--primary); }
+.option.selected { border-color: var(--primary); background: #eaf2fa; }
+.option input { width: auto; margin-top: 4px; }
+.option .letter { font-weight: 700; min-width: 22px; }
+.exam-nav { display: flex; gap: 10px; justify-content: space-between; margin-top: 20px; flex-wrap: wrap; }
+.dots { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 18px; }
+.dots button { width: 36px; padding: 4px 0; background: #fff; color: var(--text); border-color: var(--line); font-size: 13px; }
+.dots button.answered { background: #eaf2fa; border-color: #9cc3e6; }
+.dots button.current { background: var(--primary); color: #fff; border-color: var(--primary); }
+.center { text-align: center; }
+.big-message { padding: 48px 20px; text-align: center; font-size: 18px; white-space: pre-line; }
+
+@media (max-width: 640px) {
+  main { padding: 16px; }
+  .topbar { padding: 8px 16px; gap: 8px; }
+  .topbar .user { margin-left: auto; }
+  .nav { order: 3; flex-basis: 100%; flex-wrap: nowrap; overflow-x: auto; }
+  .nav a { white-space: nowrap; }
+  .card { padding: 16px; }
+  .exam-nav button { flex: 1; }
+  table.kv th { width: 130px; }
+}
+
+@media print {
+  .topbar, button, .button { display: none !important; }
+  body { background: #fff; }
+}
