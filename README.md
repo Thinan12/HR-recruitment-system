@@ -73,7 +73,7 @@ Node.js 24 LTS, Express, SQLite (`better-sqlite3`), plain HTML/JS frontend (no b
 ```
 npm install
 ADMIN_PASSWORD=choose-a-password npm start    # http://localhost:3000
-npm test                                       # 72 tests, uses temporary databases
+npm test                                       # 77 tests, uses temporary databases
 ```
 
 ```

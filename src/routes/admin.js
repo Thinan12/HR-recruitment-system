@@ -238,7 +238,7 @@ router.post('/questions/import', (req, res) => {
 router.get('/assessments', (req, res) => {
   const rows = db.prepare(`SELECT a.*, c.name AS candidate_name FROM assessments a
     LEFT JOIN candidates c ON c.id = a.candidate_id ORDER BY a.created_at DESC, a.id DESC`).all();
-  res.json(rows.map((a) => ({ ...a, state: A.linkState(a), stages: A.stagesOf(a) })));
+  res.json(rows.map((a) => ({ ...a, state: A.linkState(a), stages: A.stagesOf(a), current_stage: A.currentStage(a) })));
 });
 
 router.post('/assessments', (req, res) => {
@@ -251,7 +251,7 @@ router.get('/assessments/:id', (req, res) => {
   if (!a) return notFound(res);
   const candidate = a.candidate_id ? db.prepare('SELECT id, name, phone FROM candidates WHERE id = ?').get(a.candidate_id) : null;
   const questions = db.prepare('SELECT * FROM assessment_questions WHERE assessment_id = ? ORDER BY position').all(a.id);
-  res.json({ assessment: { ...a, state: A.linkState(a) }, stages: A.stagesOf(a), iq: reports.iqResult(a), candidate, questions });
+  res.json({ assessment: { ...a, state: A.linkState(a), current_stage: A.currentStage(a) }, stages: A.stagesOf(a), iq: reports.iqResult(a), candidate, questions });
 });
 
 router.post('/assessments/:id/:action(enable|disable)', (req, res) => {

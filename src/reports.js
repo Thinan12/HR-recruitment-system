@@ -4,6 +4,27 @@ const PDFDocument = require('pdfkit');
 const XLSX = require('xlsx');
 const docx = require('docx');
 const { db } = require('./db');
+const A = require('./assessments');
+
+const TEST_NAMES = { IQ: 'IQ Test', GENERAL: 'General Test', CALCULATION: 'Calculation Test', ESSAY: 'Essay Test' };
+const RESULT_TEXT = { Pass: 'PASS', 'Not Pass': 'NOT PASS', Pending: 'Pending' };
+
+// Every test of one assessment link, with its own score and result.
+function testResults(a) {
+  if (!a) return { tests: [], current_stage: null, assessment_result: null, assessment_date: null };
+  const stages = A.stagesOf(a);
+  const tests = stages.map((st) => {
+    const done = st.status === 'SUBMITTED';
+    const text = !done ? (st.status === 'IN_PROGRESS' ? 'In progress' : a.status === 'SUBMITTED' ? 'Not taken' : 'Not started')
+      : st.result === 'Pending' ? 'Pending HR marking' : `${st.percent}% ${RESULT_TEXT[st.result]}`;
+    return {
+      section: st.section, name: TEST_NAMES[st.section], status: st.status, result: done ? st.result : null,
+      points: done ? st.points : null, max: done ? st.max : null, percent: done && st.result !== 'Pending' ? st.percent : null,
+      score_text: done && st.result !== 'Pending' ? `${st.points} / ${st.max}` : null, text,
+    };
+  });
+  return { tests, current_stage: A.currentStage(a, stages).label, assessment_result: a.result, assessment_date: a.submitted_at || a.started_at };
+}
 
 const FONT = path.join(__dirname, 'assets', 'NotoSansLao-Regular.ttf');
 const pct = (points, max) => (max ? Math.round((points / max) * 1000) / 10 : null);
@@ -11,7 +32,7 @@ const pct = (points, max) => (max ? Math.round((points / max) * 1000) / 10 : nul
 // A candidate's current results. Each section comes from the most recent
 // submitted assessment that contained it; Test Score and Result come from the
 // most recent submitted assessment overall.
-function summarize(candidate, submitted) {
+function summarize(candidate, submitted, latestStarted) {
   const latestWith = (maxKey) => submitted.find((a) => a[maxKey] != null);
   const iq = latestWith('iq_max');
   const general = latestWith('general_max');
@@ -23,6 +44,8 @@ function summarize(candidate, submitted) {
     ...candidate,
     iq_score: iq ? pct(iq.iq_points, iq.iq_max) : null,
     ...iqResult(iq),
+    // The most recent link the candidate started: every test in it, the stage they are at, and its result.
+    ...testResults(latestStarted),
     general_score: general ? pct(general.general_points, general.general_max) : null,
     calc_score: calc ? pct(calc.calc_points, calc.calc_max) : null,
     essay_score: essay && !essay.essay_pending ? pct(essay.essay_points, essay.essay_max) : null,
@@ -70,20 +93,31 @@ function submittedByCandidate() {
   return map;
 }
 
+// The latest assessment each candidate has started (in progress or finished).
+function latestStartedByCandidate() {
+  const map = new Map();
+  for (const a of db.prepare("SELECT * FROM assessments WHERE status != 'NOT_STARTED' ORDER BY started_at DESC, id DESC").all()) {
+    if (!map.has(a.candidate_id)) map.set(a.candidate_id, a);
+  }
+  return map;
+}
+
 function allCandidateSummaries(search) {
   const q = String(search || '').trim();
   const rows = q
     ? db.prepare('SELECT * FROM candidates WHERE name LIKE ? OR phone LIKE ? ORDER BY created_at DESC, id DESC').all(`%${q}%`, `%${q}%`)
     : db.prepare('SELECT * FROM candidates ORDER BY created_at DESC, id DESC').all();
   const byCandidate = submittedByCandidate();
-  return rows.map((c) => summarize(c, byCandidate.get(c.id) || []));
+  const latest = latestStartedByCandidate();
+  return rows.map((c) => summarize(c, byCandidate.get(c.id) || [], latest.get(c.id)));
 }
 
 function candidateSummary(id) {
   const c = db.prepare('SELECT * FROM candidates WHERE id = ?').get(id);
   if (!c) return null;
   const submitted = db.prepare("SELECT * FROM assessments WHERE candidate_id = ? AND status = 'SUBMITTED' ORDER BY submitted_at DESC, id DESC").all(id);
-  return summarize(c, submitted);
+  const latest = db.prepare("SELECT * FROM assessments WHERE candidate_id = ? AND status != 'NOT_STARTED' ORDER BY started_at DESC, id DESC LIMIT 1").get(id);
+  return summarize(c, submitted, latest);
 }
 
 function dashboard() {
@@ -140,6 +174,14 @@ const COLUMNS = [
   ['General Test', (c) => c.general_score],
   ['Calculation Test', (c) => c.calc_score],
   ['Essay Test', (c) => (c.essay_pending ? 'Pending' : c.essay_score)],
+  ...['GENERAL', 'CALCULATION', 'ESSAY'].flatMap((sec) => {
+    const t = (c) => (c.tests || []).find((x) => x.section === sec);
+    const name = TEST_NAMES[sec].replace(' Test', '');
+    return [[`${name} Score`, (c) => t(c)?.score_text], [`${name} Result`, (c) => t(c)?.text]];
+  }),
+  ['IQ Result', (c) => (c.tests || []).find((x) => x.section === 'IQ')?.text],
+  ['Current Stage', (c) => c.current_stage],
+  ['Assessment Result', (c) => c.assessment_result],
   ['Interview', (c) => c.interview],
   ['Interviewer', (c) => c.interviewer],
   ['Interview Score', (c) => c.interview_score],
@@ -163,6 +205,9 @@ function reportSections(c) {
       ['IQ Test Score', c.iq_text ? `${c.iq_text} marks (${c.iq_score}%)` : '-'],
       ['IQ Correct Answers', show(c.iq_correct_text)],
       ...(c.iq_levels || []).map((l) => [l.label, `${l.correct_text} correct, ${l.marks_text} marks`]),
+      ...(c.tests || []).map((t) => [t.name, t.score_text ? `${t.score_text} marks, ${t.text}` : t.text]),
+      ['Current Stage', show(c.current_stage)],
+      ['Assessment Result', show(c.assessment_result)],
       ['Character', show(c.character_note)],
       ['Test Score', showPct(c.test_score)], ['General Test', showPct(c.general_score)], ['Calculation Test', showPct(c.calc_score)],
       ['Essay Test', c.essay_pending ? 'Pending' : showPct(c.essay_score)], ['Result', show(c.test_result)], ['Test Date', showDate(c.last_test_date)],

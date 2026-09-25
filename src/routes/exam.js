@@ -43,6 +43,8 @@ function stateResponse(a) {
   if (state === 'not_found') return base;
   const stages = A.stagesOf(a);
   base.tests = progress(stages, state);
+  // The server's view of where the candidate is: IQ / GENERAL / CALCULATION / ESSAY / COMPLETE / STOPPED.
+  base.current_stage = A.currentStage(a, stages).key;
   if (state === 'ready') {
     base.question_count = stages[0].question_count;
     base.time_limit_minutes = stages[0].time_limit_minutes;

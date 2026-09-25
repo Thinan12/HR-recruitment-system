@@ -198,6 +198,22 @@ function linkState(a) {
   return 'ready';
 }
 
+// Where the candidate is in the link: the test running or next to open, or
+// COMPLETE / STOPPED / NOT_STARTED. While an essay waits for HR marking the
+// stage stays on that essay.
+function currentStage(a, stages = stagesOf(a)) {
+  const running = stages.find((st) => st.status === 'IN_PROGRESS');
+  if (running) return { key: running.section, label: label(running.section) };
+  const failed = stages.find((st) => st.status === 'SUBMITTED' && st.result === 'Not Pass');
+  if (failed) return { key: 'STOPPED', label: `Stopped (${label(failed.section)} not passed)` };
+  if (a.status === 'NOT_STARTED') return { key: 'NOT_STARTED', label: 'Not started' };
+  const next = stages.find((st) => st.status === 'NOT_STARTED');
+  if (next) return { key: next.section, label: label(next.section) };
+  const pending = stages.find((st) => st.result === 'Pending');
+  if (pending) return { key: pending.section, label: `${label(pending.section)} (pending HR marking)` };
+  return { key: 'COMPLETE', label: 'Complete' };
+}
+
 // ---- start --------------------------------------------------------------
 
 const CANDIDATE_FIELDS = ['name', 'phone', 'graduate_from', 'high_school', 'college', 'university', 'school_name', 'subject', 'gpa'];
@@ -480,7 +496,7 @@ function regenerateLink(id) {
 }
 
 module.exports = {
-  stagesOf, continueAssessment,
+  stagesOf, continueAssessment, currentStage,
   SECTIONS, TYPES, LANGUAGES, LETTERS, DIFFICULTIES, LEVEL_MARKS, InputError, label, questionKey, difficultyLevel, levelSplit, pickProgressive, syncIqLevels,
   activeCounts, inactiveCounts, createAssessment, getAssessment, linkState, startAssessment, saveAnswer,
   isPastDeadline, submitAssessment, finalize, finalizeExpired, scoreAssessment, setEssayMarks, rescoreAll, regenerateLink,

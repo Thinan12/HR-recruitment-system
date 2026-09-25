@@ -170,3 +170,109 @@ test('links made before tests were split into steps still work', async () => {
   assert.equal((await candidate.get(url('legacy-token-1'))).data.state, 'submitted');
   assert.equal(db.prepare('SELECT result, submitted_at FROM assessments WHERE id = ?').get(aid).submitted_at, '2026-01-01T09:10:00.000Z');
 });
+
+// Runs a link; plan says per test whether to answer right (true) or wrong (false).
+async function run(name, tests, plan) {
+  const a = await link(tests);
+  const keys = [];
+  let s = (await candidate.post(url(a.token, '/start'), { ...CANDIDATE, name })).data;
+  while (s.state === 'in_progress') {
+    keys.push(s.current_stage);
+    if (s.section === 'ESSAY') {
+      s = (await candidate.post(url(a.token, '/submit'), { answers: { [s.questions[0].id]: 'My essay.' } })).data;
+    } else {
+      s = await answerAndSubmit(a.token, s, plan[s.section]);
+    }
+    if (s.state === 'next_test') { keys.push(s.current_stage); s = (await candidate.post(url(a.token, '/continue'))).data; }
+  }
+  return { a, s, keys };
+}
+
+test('General FAIL stops before Calculation; Calculation FAIL stops before Essay', async () => {
+  const all = ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'];
+  const g = await run('Fails General', all, { IQ: true, GENERAL: false });
+  assert.equal(g.s.outcome, 'stopped');
+  assert.equal(statuses(g.s), 'IQ:done GENERAL:failed CALCULATION:upcoming ESSAY:upcoming');
+  assert.deepEqual(db.prepare('SELECT DISTINCT section FROM assessment_questions WHERE assessment_id = ?').all(g.a.id).map((r) => r.section), ['IQ', 'GENERAL']);
+  assert.equal(g.s.current_stage, 'STOPPED');
+
+  const c = await run('Fails Calculation', all, { IQ: true, GENERAL: true, CALCULATION: false });
+  assert.equal(c.s.outcome, 'stopped');
+  assert.equal(statuses(c.s), 'IQ:done GENERAL:done CALCULATION:failed ESSAY:upcoming');
+  assert.equal((await candidate.post(url(c.a.token, '/continue'))).status, 409);
+});
+
+test('the server reports the current stage: IQ -> GENERAL -> CALCULATION -> ESSAY -> COMPLETE', async () => {
+  const r = await run('Stage Keys', ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'], { IQ: true, GENERAL: true, CALCULATION: true });
+  assert.deepEqual(r.keys, ['IQ', 'GENERAL', 'GENERAL', 'CALCULATION', 'CALCULATION', 'ESSAY', 'ESSAY']);
+  assert.equal(r.s.outcome, 'completed');
+  const detail = (await admin.get('/api/admin/assessments/' + r.a.id)).data;
+  assert.equal(detail.assessment.current_stage.key, 'ESSAY', 'the essay is waiting for HR');
+  const essayQ = detail.questions.find((q) => q.section === 'ESSAY');
+  await admin.put(`/api/admin/assessments/${r.a.id}/essay-marks`, { marks: { [essayQ.id]: 9 } });
+  const after = (await admin.get('/api/admin/assessments/' + r.a.id)).data;
+  assert.equal(after.assessment.current_stage.key, 'COMPLETE');
+  assert.equal(after.assessment.result, 'Pass');
+  assert.equal((await candidate.get(url(r.a.token))).data.current_stage, 'COMPLETE');
+});
+
+test('refresh / reopening the link resumes the same test, answers and timer', async () => {
+  const a = await link(['IQ', 'GENERAL']);
+  const first = (await candidate.post(url(a.token, '/start'), { ...CANDIDATE, name: 'Resumer' })).data;
+  const q = first.questions[2];
+  await candidate.put(url(a.token, '/answer'), { question_id: q.id, answer: 'C' });
+  const again = (await client().get(url(a.token))).data; // a fresh browser with no session
+  assert.equal(again.state, 'in_progress');
+  assert.equal(again.section, 'IQ');
+  assert.deepEqual(again.questions.map((x) => x.id), first.questions.map((x) => x.id), 'same questions, same order');
+  assert.equal(again.questions[2].answer, 'C');
+  assert.ok(again.remaining_seconds <= first.remaining_seconds, 'the timer keeps running; it does not restart');
+});
+
+test('disabling the link blocks every test; expiry only applies before the start', async () => {
+  const a = await link(['IQ', 'GENERAL']);
+  let s = (await candidate.post(url(a.token, '/start'), { ...CANDIDATE, name: 'Blocked' })).data;
+  s = await answerAndSubmit(a.token, s, true);
+  assert.equal(s.state, 'next_test');
+
+  await admin.post(`/api/admin/assessments/${a.id}/disable`);
+  assert.equal((await candidate.get(url(a.token))).data.state, 'disabled');
+  assert.equal((await candidate.post(url(a.token, '/continue'))).status, 409);
+  await admin.post(`/api/admin/assessments/${a.id}/enable`);
+
+  // The link's expiry time passing does not cut off a candidate who already started.
+  db.prepare("UPDATE assessments SET link_expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(a.id);
+  s = (await candidate.post(url(a.token, '/continue'))).data;
+  assert.equal(s.section, 'GENERAL');
+  await admin.post(`/api/admin/assessments/${a.id}/disable`);
+  assert.equal((await candidate.put(url(a.token, '/answer'), { question_id: s.questions[0].id, answer: 'A' })).status, 409);
+});
+
+test('results, candidate page and PDF / Word / Excel show every test of the link', async () => {
+  const XLSX = require('xlsx');
+  const mammoth = require('mammoth');
+  const { PDFParse } = require('pdf-parse');
+  const r = await run('All Tests Person', ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'], { IQ: true, GENERAL: true, CALCULATION: true });
+  const c = (await admin.get('/api/admin/candidates')).data.find((x) => x.name === 'All Tests Person');
+  assert.deepEqual(c.tests.map((t) => [t.section, t.text]), [['IQ', '100% PASS'], ['GENERAL', '100% PASS'], ['CALCULATION', '100% PASS'], ['ESSAY', 'Pending HR marking']]);
+  assert.equal(c.current_stage, 'Essay (pending HR marking)');
+  assert.equal(c.assessment_result, 'Pending');
+  assert.equal(c.final_result, 'Pending', 'HR decision stays separate');
+
+  const x = XLSX.utils.sheet_to_json(XLSX.read((await admin.get(`/api/admin/candidates/${c.id}/export.xlsx`, { raw: true })).buffer).Sheets.Candidates)[0];
+  assert.equal(x['IQ Result'], '100% PASS');
+  assert.equal(x['General Result'], '100% PASS');
+  assert.equal(x['Calculation Result'], '100% PASS');
+  assert.equal(x['Essay Result'], 'Pending HR marking');
+  assert.equal(x['Assessment Result'], 'Pending');
+  assert.ok(x['Level 1 Marks']);
+
+  const word = (await mammoth.extractRawText({ buffer: (await admin.get(`/api/admin/candidates/${c.id}/export.docx`, { raw: true })).buffer })).value;
+  const pdfBuf = (await admin.get(`/api/admin/candidates/${c.id}/export.pdf`, { raw: true })).buffer;
+  const p = new PDFParse({ data: new Uint8Array(pdfBuf) });
+  const pdf = (await p.getText()).text;
+  await p.destroy();
+  for (const text of [word, pdf]) {
+    for (const want of ['IQ Test', 'General Test', 'Calculation Test', 'Essay Test', '100% PASS', 'Pending HR marking', 'Level 1', 'Assessment Result']) assert.ok(text.includes(want), want);
+  }
+});

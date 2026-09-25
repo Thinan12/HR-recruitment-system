@@ -302,7 +302,13 @@ async function renderCandidate(id) {
       : text(name, c[name])))),
     h('h2', { class: 'section-gap' }, 'Assessment Results'),
     h('div', { class: 'table-wrap' }, h('table', { class: 'kv' }, h('tbody', {},
-      h('tr', {}, h('th', {}, 'IQ Test Result'), h('td', {}, iqResultBlock(c))),
+      h('tr', {}, h('th', {}, 'IQ Test Result'), h('td', {}, iqResultBlock(c), c.tests && c.tests.find((t) => t.section === 'IQ') ? h('div', { class: 'section-gap-sm' }, testCell(c, 'IQ')) : null)),
+      ...['GENERAL', 'CALCULATION', 'ESSAY'].filter((sec) => (c.tests || []).some((t) => t.section === sec)).map((sec) => {
+        const t = c.tests.find((x) => x.section === sec);
+        return h('tr', {}, h('th', {}, t.name), h('td', {}, t.score_text ? h('span', {}, h('strong', {}, t.score_text + ' marks'), ' ') : null, testCell(c, sec)));
+      }),
+      h('tr', {}, h('th', {}, 'Current Stage'), h('td', {}, fmt(c.current_stage))),
+      h('tr', {}, h('th', {}, 'Assessment Result'), h('td', {}, c.assessment_result ? resultBadge(c.assessment_result) : '-')),
       h('tr', {}, h('th', {}, 'Test Score'), h('td', {}, c.test_score == null ? '-' : c.test_score + '%')),
       h('tr', {}, h('th', {}, 'General Test'), h('td', {}, c.general_score == null ? '-' : c.general_score + '%')),
       h('tr', {}, h('th', {}, 'Calculation Test'), h('td', {}, c.calc_score == null ? '-' : c.calc_score + '%')),
@@ -595,7 +601,7 @@ async function renderAssessments() {
     customField,
     testsBox,
     h('p', { class: 'muted small wide' }, `The candidate gets ONE link, enters their details once, then takes the tests in order. Each test has its own timer. A test is passed at ${settings.pass_mark}% (Settings); if a test is not passed the assessment stops. Questions are random for each candidate and answers are shuffled. IQ: Level 1 → 2 → 3 (18 questions = 6 / 6 / 6, maximum 36 marks).`),
-    h('div', { class: 'wide' }, h('button', { type: 'submit' }, 'Generate Assessment Link')));
+    h('div', { class: 'wide' }, h('button', { type: 'submit' }, 'Generate ONE Assessment Link')));
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -636,6 +642,14 @@ async function renderAssessments() {
 }
 
 // "✓ IQ → ✗ General → ○ Calculation" for the admin tables.
+// "69.4% PASS" / "Pending HR marking" / "-" for one test of a candidate.
+function testCell(c, sec) {
+  const t = (c.tests || []).find((x) => x.section === sec);
+  if (!t) return '-';
+  const cls = t.result === 'Pass' ? 'pass' : t.result === 'Not Pass' ? 'fail' : t.result === 'Pending' ? 'pending' : 'neutral';
+  return h('span', { class: 'badge ' + cls }, t.text);
+}
+
 function testsChain(stages) {
   return (stages || []).map((st) => {
     const mark = st.status === 'IN_PROGRESS' ? '▶ ' : st.status !== 'SUBMITTED' ? '○ ' : st.result === 'Pass' ? '✓ ' : st.result === 'Not Pass' ? '✗ ' : '… ';
@@ -658,17 +672,17 @@ function assessmentTable(list, showCandidate) {
     } catch (ex) { alert(ex.message); }
   };
   return h('div', { class: 'table-wrap' }, h('table', {},
-    h('thead', {}, h('tr', {}, [showCandidate ? 'Candidate' : null, 'Tests', 'Language', 'Time', 'Status', 'Link expires', 'Score', 'Result', 'Actions'].filter(Boolean).map((t) => h('th', {}, t)))),
+    h('thead', {}, h('tr', {}, [showCandidate ? 'Candidate' : null, 'Tests', 'Current Stage', 'Overall Result', 'Created', 'Link expires', 'Actions'].filter(Boolean).map((t) => h('th', {}, t)))),
     h('tbody', {}, list.map((a) => {
       const copy = h('button', { class: 'secondary small', type: 'button', onclick: () => copyText(examUrl(a.token), copy) }, 'Copy link');
       const canUse = a.state === 'ready' || a.state === 'disabled' || a.state === 'expired';
       return h('tr', {},
         showCandidate ? h('td', {}, a.candidate_id ? h('a', { href: '#/candidates/' + a.candidate_id }, a.candidate_name || 'Candidate') : h('span', { class: 'muted' }, 'Not started')) : null,
-        h('td', { class: 'small' }, testsChain(a.stages)), h('td', {}, LANG_LABEL[a.language]), h('td', {}, a.time_limit_minutes + ' min'),
-        h('td', {}, stateBadge(a.state), a.auto_submitted ? h('div', { class: 'muted small' }, 'Auto-submitted') : null),
+        h('td', { class: 'small' }, testsChain(a.stages), h('div', { class: 'muted small' }, `${LANG_LABEL[a.language]} · ${a.time_limit_minutes} min in total`)),
+        h('td', {}, a.current_stage ? a.current_stage.label : '-', h('div', {}, stateBadge(a.state)), a.auto_submitted ? h('div', { class: 'muted small' }, 'Time ran out on a test') : null),
+        h('td', {}, a.status === 'NOT_STARTED' ? '-' : resultBadge(a.result)),
+        h('td', { class: 'small' }, fmtDate(a.created_at)),
         h('td', { class: 'small' }, a.status === 'NOT_STARTED' ? fmtDateTime(a.link_expires_at) : '-'),
-        h('td', {}, a.test_score == null ? '-' : a.test_score + '%'),
-        h('td', {}, a.status === 'SUBMITTED' ? resultBadge(a.result) : '-'),
         h('td', { class: 'nowrap' },
           a.status !== 'SUBMITTED' && a.state !== 'expired' ? copy : null, ' ',
           a.status !== 'NOT_STARTED' ? h('a', { class: 'button secondary small', href: '#/assessments/' + a.id }, 'View') : null, ' ',
@@ -732,7 +746,9 @@ async function renderAssessment(id) {
     h('div', { class: 'table-wrap' }, h('table', { class: 'kv' }, h('tbody', {},
       h('tr', {}, h('th', {}, 'Candidate'), h('td', {}, candidate ? h('a', { href: '#/candidates/' + candidate.id }, candidate.name) : '-')),
       h('tr', {}, h('th', {}, 'Type'), h('td', {}, TYPE_LABEL[a.assessment_type], ' - ', LANG_LABEL[a.language])),
-      h('tr', {}, h('th', {}, 'Status'), h('td', {}, stateBadge(a.state), a.auto_submitted ? ' (auto-submitted when time ran out)' : '')),
+      h('tr', {}, h('th', {}, 'Status'), h('td', {}, stateBadge(a.state), a.auto_submitted ? ' (time ran out on a test)' : '')),
+      h('tr', {}, h('th', {}, 'Current Stage'), h('td', {}, a.current_stage ? a.current_stage.label : '-')),
+      h('tr', {}, h('th', {}, 'Assessment Result'), h('td', {}, a.status === 'NOT_STARTED' ? '-' : resultBadge(a.result))),
       h('tr', {}, h('th', {}, 'Started'), h('td', {}, fmtDateTime(a.started_at))),
       h('tr', {}, h('th', {}, 'Submitted'), h('td', {}, fmtDateTime(a.submitted_at))),
       h('tr', {}, h('th', {}, 'Left the page'), h('td', {}, `${a.focus_losses} time(s)`)),
@@ -787,15 +803,17 @@ async function renderResults() {
     h('div', { class: 'row between' }, h('h1', {}, 'Results'), downloadLink('/export/candidates.xlsx', 'Export all candidates (Excel)', '')),
     iqCard,
     h('div', { class: 'card' }, h('h2', {}, 'All candidates'), list.length ? h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, ['Candidate', 'IQ Test Score', 'Test Score', 'Calculation Test', 'Essay Test', 'Interview Score', 'Final Result', 'Date', 'Export'].map((t) => h('th', {}, t)))),
+      h('thead', {}, h('tr', {}, ['Candidate', 'IQ', 'General', 'Calculation', 'Essay', 'Current Stage', 'Assessment Result', 'Final Result', 'Date', 'Export'].map((t) => h('th', {}, t)))),
       h('tbody', {}, list.map((c) => h('tr', {},
         h('td', {}, h('a', { href: '#/candidates/' + c.id }, c.name)),
-        h('td', {}, c.iq_text ? `${c.iq_text} (${c.iq_score}%)` : '-'), h('td', {}, fmt(c.test_score)), h('td', {}, fmt(c.calc_score)),
-        h('td', {}, c.essay_pending ? 'Pending' : fmt(c.essay_score)), h('td', {}, fmt(c.interview_score)),
-        h('td', {}, resultBadge(c.overall_result)), h('td', {}, fmtDate(c.last_test_date || c.created_at)),
+        h('td', {}, testCell(c, 'IQ'), c.iq_text ? h('div', { class: 'muted small' }, c.iq_text) : null),
+        h('td', {}, testCell(c, 'GENERAL')), h('td', {}, testCell(c, 'CALCULATION')), h('td', {}, testCell(c, 'ESSAY')),
+        h('td', { class: 'small' }, fmt(c.current_stage)),
+        h('td', {}, c.assessment_result ? resultBadge(c.assessment_result) : '-'),
+        h('td', {}, resultBadge(c.final_result || 'Pending')), h('td', {}, fmtDate(c.assessment_date || c.created_at)),
         h('td', { class: 'nowrap' }, downloadLink(`/candidates/${c.id}/export.pdf`, 'PDF'), ' ', downloadLink(`/candidates/${c.id}/export.docx`, 'Word'), ' ', downloadLink(`/candidates/${c.id}/export.xlsx`, 'Excel')))))))
       : h('p', { class: 'muted' }, 'No candidates yet.')),
-    h('p', { class: 'muted small' }, 'Scores are percentages. Final Result shows HR\'s decision; until HR decides, it shows the test result (Pass when Test Score reaches the pass mark).'));
+    h('p', { class: 'muted small' }, 'Each test shows its percentage and PASS / NOT PASS (pass mark in Settings). Assessment Result: any test NOT PASS = NOT PASS; all tests PASS = PASS; otherwise Pending. Final Result is HR\'s own decision on the candidate page.'));
 }
 
 // ---------------------------------------------------------------------------
