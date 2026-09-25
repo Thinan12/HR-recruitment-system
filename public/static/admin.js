@@ -355,6 +355,7 @@ async function renderCandidate(id) {
 // ---------------------------------------------------------------------------
 
 let questionSection = '';
+let questionStatus = ''; // '' = all, 'Active', 'Inactive'
 const LETTERS = ['a', 'b', 'c', 'd', 'e'];
 // Small picture; click to open it full size.
 const thumb = (id) => (id ? h('a', { href: '/api/admin/images/' + id, target: '_blank', rel: 'noopener' }, h('img', { src: '/api/admin/images/' + id, alt: '', class: 'thumb' })) : null);
@@ -401,12 +402,18 @@ function imageInput(name, currentId, onError) {
 
 async function renderQuestions() {
   const search = h('input', { placeholder: 'Search questions', class: 'inline-input' });
+  const statusFilter = select('status_filter', [['', 'Active and inactive'], ['Active', 'Active only'], ['Inactive', 'Inactive only']], questionStatus);
+  statusFilter.classList.add('inline-input');
   const tabs = h('div', { class: 'tabs' });
+  const summary = h('p', { class: 'small' });
   const body = h('div');
-  const card = h('div', { class: 'card' }, h('div', { class: 'row between' }, tabs, search), body);
+  const card = h('div', { class: 'card' }, h('div', { class: 'row between' }, tabs, h('div', { class: 'row' }, statusFilter, search)), summary, body);
+  statusFilter.addEventListener('change', () => { questionStatus = statusFilter.value; load(); });
 
   const load = async () => {
-    const { questions, counts } = await api('GET', `/questions?section=${questionSection}&q=${encodeURIComponent(search.value)}`);
+    const { questions, counts, inactive_counts: inactive } = await api('GET', `/questions?section=${questionSection}&status=${questionStatus}&q=${encodeURIComponent(search.value)}`);
+    const shown = questionSection ? [questionSection] : Object.keys(SECTION_LABEL);
+    summary.replaceChildren(...shown.flatMap((s, i) => [i ? ' · ' : '', h('strong', {}, `Active ${SECTION_LABEL[s]} Questions: ${counts[s]}`), `  Inactive ${SECTION_LABEL[s]} Questions: ${inactive[s]}`]));
     const total = Object.values(counts).reduce((a, b) => a + b, 0);
     tabs.replaceChildren(...[['', `All (${total})`], ...Object.keys(SECTION_LABEL).map((s) => [s, `${SECTION_LABEL[s]} (${counts[s]})`])]
       .map(([s, label]) => h('button', { type: 'button', class: s === questionSection ? 'active' : '', onclick: () => { questionSection = s; load(); } }, label)));

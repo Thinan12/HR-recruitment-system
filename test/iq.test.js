@@ -137,3 +137,56 @@ test('import: level decides marks, missing level -> Level 2, unknown level is re
   assert.deepEqual(r.data.rows.map((x) => [x.question.difficulty, x.question.marks]), [['Easy', 1], ['Hard', 3], ['Medium', 2], ['Medium', 2], ['Medium', 2]]);
   assert.match(r.data.rows[4].errors.join(' '), /Level must be 1, 2 or 3/);
 });
+
+test('inactive questions are never selected, stay visible in the bank, and past reviews still work', async () => {
+  // A finished test that used Level 1 questions.
+  const past = await sitIq('Before Cleanup');
+  await candidate.post(`/api/exam/${past.token}/submit`, { answers: {} });
+  const before = db.prepare('SELECT iq_points, iq_max, submitted_at FROM assessments WHERE id = ?').get(past.id);
+
+  // Make every Level 1 question except three Inactive (status only).
+  const easy = db.prepare("SELECT * FROM questions WHERE section = 'IQ' AND difficulty = 'Easy' ORDER BY id").all();
+  for (const q of easy.slice(3)) {
+    const r = await admin.put('/api/admin/questions/' + q.id, { ...q, status: 'Inactive' });
+    assert.equal(r.data.status, 'Inactive');
+    assert.equal(r.data.question_text, q.question_text);
+    assert.equal(r.data.correct_answer, q.correct_answer);
+    assert.equal(r.data.difficulty, q.difficulty);
+    assert.equal(r.data.marks, q.marks);
+  }
+  // An active IQ question without a level is not usable either.
+  db.prepare("INSERT INTO questions (section, difficulty, question_text, option_a, option_b, correct_answer, marks, created_at) VALUES ('IQ', '', 'No level yet?', '1', '2', 'A', 1, ?)").run(new Date().toISOString());
+  const inactiveIds = new Set(easy.slice(3).map((q) => q.id));
+
+  for (let i = 0; i < 5; i++) {
+    const a = await sitIq('After Cleanup ' + i);
+    const used = db.prepare('SELECT question_id, difficulty, question_text FROM assessment_questions WHERE assessment_id = ?').all(a.id);
+    assert.ok(used.every((u) => !inactiveIds.has(u.question_id)), 'no inactive question is used');
+    assert.ok(used.every((u) => u.question_text !== 'No level yet?'), 'an unlevelled question is not used');
+    assert.equal(used.length, 18);
+  }
+
+  // The bank shows active and inactive counts, and can list inactive questions.
+  const bank = (await admin.get('/api/admin/questions?section=IQ&status=Inactive')).data;
+  assert.ok(bank.questions.length >= inactiveIds.size && bank.questions.every((q) => q.status === 'Inactive'));
+  assert.ok(bank.inactive_counts.IQ >= inactiveIds.size);
+  const usable = db.prepare("SELECT COUNT(*) AS n FROM questions WHERE section = 'IQ' AND status = 'Active' AND difficulty IN ('Easy', 'Medium', 'Hard')").get().n;
+  assert.equal((await admin.get('/api/admin/questions/counts')).data.IQ, usable, 'counts cover active, levelled questions only');
+
+  // The earlier test is unchanged and still opens and exports.
+  assert.deepEqual(db.prepare('SELECT iq_points, iq_max, submitted_at FROM assessments WHERE id = ?').get(past.id), before);
+  const review = await admin.get('/api/admin/assessments/' + past.id);
+  assert.equal(review.status, 200);
+  assert.equal(review.data.questions.length, 18);
+  const cid = db.prepare('SELECT candidate_id FROM assessments WHERE id = ?').get(past.id).candidate_id;
+  assert.equal((await admin.get(`/api/admin/candidates/${cid}/export.pdf`, { raw: true })).status, 200);
+
+  // Uploading a copy of an inactive question again is skipped, not inserted.
+  const q = easy[5];
+  const form = new FormData();
+  form.append('section', 'IQ');
+  form.append('file', new Blob([Buffer.from(`Question,Difficulty,Option A,Option B,Option C,Option D,Correct Answer\n"${q.question_text}",Easy,1,2,3,4,A\n`)]), 'again.csv');
+  const p = await admin.post('/api/admin/questions/import/preview', undefined, { form });
+  assert.equal(p.data.valid, 0);
+  assert.match(p.data.rows[0].errors.join(' '), /already in the question bank/);
+});

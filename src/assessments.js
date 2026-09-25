@@ -82,9 +82,19 @@ function shuffle(list) {
   return a;
 }
 
+// Questions a new assessment may use: Active, and for IQ also given a level
+// (Easy / Medium / Hard). Inactive questions are never selected.
+const USABLE = "status = 'Active' AND (section != 'IQ' OR difficulty IN ('Easy', 'Medium', 'Hard'))";
+
 function activeCounts() {
   const counts = Object.fromEntries(SECTIONS.map((s) => [s, 0]));
-  for (const r of db.prepare("SELECT section, COUNT(*) AS n FROM questions WHERE status = 'Active' GROUP BY section").all()) counts[r.section] = r.n;
+  for (const r of db.prepare(`SELECT section, COUNT(*) AS n FROM questions WHERE ${USABLE} GROUP BY section`).all()) counts[r.section] = r.n;
+  return counts;
+}
+
+function inactiveCounts() {
+  const counts = Object.fromEntries(SECTIONS.map((s) => [s, 0]));
+  for (const r of db.prepare("SELECT section, COUNT(*) AS n FROM questions WHERE status != 'Active' GROUP BY section").all()) counts[r.section] = r.n;
   return counts;
 }
 
@@ -181,7 +191,7 @@ const startTx = db.transaction((a, info) => {
   for (const section of SECTIONS) {
     if (!sections[section]) continue;
     const pool = [];
-    for (const q of shuffle(db.prepare("SELECT * FROM questions WHERE section = ? AND status = 'Active'").all(section))) {
+    for (const q of shuffle(db.prepare(`SELECT * FROM questions WHERE section = ? AND ${USABLE}`).all(section))) {
       const key = questionKey(q);
       if (used.has(key)) continue;
       used.add(key);
@@ -371,6 +381,6 @@ function regenerateLink(id) {
 
 module.exports = {
   SECTIONS, TYPES, LANGUAGES, LETTERS, DIFFICULTIES, LEVEL_MARKS, InputError, label, questionKey, difficultyLevel, levelSplit, pickProgressive, syncIqLevels,
-  activeCounts, createAssessment, getAssessment, linkState, startAssessment, saveAnswer,
+  activeCounts, inactiveCounts, createAssessment, getAssessment, linkState, startAssessment, saveAnswer,
   isPastDeadline, submitAssessment, finalize, finalizeExpired, scoreAssessment, setEssayMarks, rescoreAll, regenerateLink,
 };

@@ -118,12 +118,13 @@ router.get('/questions', (req, res) => {
   const where = [];
   const args = [];
   if (A.SECTIONS.includes(req.query.section)) { where.push('section = ?'); args.push(req.query.section); }
+  if (req.query.status === 'Active' || req.query.status === 'Inactive') { where.push('status = ?'); args.push(req.query.status); }
   if (req.query.q) {
     where.push('(question_text LIKE ? OR category LIKE ?)');
     args.push(`%${req.query.q}%`, `%${req.query.q}%`);
   }
   const sql = 'SELECT * FROM questions' + (where.length ? ' WHERE ' + where.join(' AND ') : '') + ' ORDER BY id DESC';
-  res.json({ questions: db.prepare(sql).all(...args), counts: A.activeCounts() });
+  res.json({ questions: db.prepare(sql).all(...args), counts: A.activeCounts(), inactive_counts: A.inactiveCounts() });
 });
 
 const QUESTION_COLS = ['section', 'category', 'difficulty', 'question_text', 'option_a', 'option_b', 'option_c', 'option_d', 'option_e',
