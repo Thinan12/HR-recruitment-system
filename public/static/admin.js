@@ -327,6 +327,49 @@ async function renderCandidate(id) {
 // ---------------------------------------------------------------------------
 
 let questionSection = '';
+const LETTERS = ['a', 'b', 'c', 'd', 'e'];
+// Small picture; click to open it full size.
+const thumb = (id) => (id ? h('a', { href: '/api/admin/images/' + id, target: '_blank', rel: 'noopener' }, h('img', { src: '/api/admin/images/' + id, alt: '', class: 'thumb' })) : null);
+
+// The text and/or picture of option L ("A".."E") of a question row.
+function optionContent(q, L) {
+  const l = String(L || '').toLowerCase();
+  if (!LETTERS.includes(l)) return fmt(L);
+  return h('span', { class: 'answer-choice' }, h('strong', {}, L + '.'), thumb(q['option_' + l + '_image']), q['option_' + l] || null);
+}
+
+function readAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(new Error('Unable to read the picture.'));
+    r.readAsDataURL(file);
+  });
+}
+
+// A picture chooser that uploads immediately and keeps the id in a hidden input.
+function imageInput(name, currentId, onError) {
+  const hidden = h('input', { type: 'hidden', name, value: currentId || '' });
+  const preview = h('span');
+  const remove = h('button', { type: 'button', class: 'secondary small' }, 'Remove');
+  const show = () => {
+    preview.replaceChildren(hidden.value ? thumb(hidden.value) : h('span', { class: 'muted small' }, 'No picture'));
+    remove.classList.toggle('hidden', !hidden.value);
+  };
+  const file = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/gif,image/webp' });
+  file.addEventListener('change', async () => {
+    if (!file.files[0]) return;
+    try {
+      const { id } = await api('POST', '/images', { data_url: await readAsDataUrl(file.files[0]) });
+      hidden.value = id;
+      show();
+    } catch (ex) { onError(ex.message); }
+    file.value = '';
+  });
+  remove.addEventListener('click', () => { hidden.value = ''; show(); });
+  show();
+  return h('div', { class: 'image-field' }, hidden, preview, file, remove);
+}
 
 async function renderQuestions() {
   const search = h('input', { placeholder: 'Search questions', class: 'inline-input' });
@@ -342,9 +385,10 @@ async function renderQuestions() {
     body.replaceChildren(questions.length ? h('div', { class: 'table-wrap' }, h('table', {},
       h('thead', {}, h('tr', {}, ['Question', 'Type', 'Category', 'Difficulty', 'Correct Answer', 'Marks', 'Status', ''].map((t) => h('th', {}, t)))),
       h('tbody', {}, questions.map((q) => h('tr', {},
-        h('td', { class: 'question-cell pre' }, q.question_text),
+        h('td', { class: 'question-cell' }, h('div', { class: 'pre' }, q.question_text), q.image_id ? h('div', { class: 'thumb-row' }, thumb(q.image_id)) : null),
         h('td', {}, SECTION_LABEL[q.section]), h('td', {}, fmt(q.category)), h('td', {}, fmt(q.difficulty)),
-        h('td', {}, q.section === 'ESSAY' ? 'HR marks' : q.correct_answer), h('td', {}, q.marks),
+        h('td', {}, q.section === 'ESSAY' ? 'HR marks' : /^[A-E]$/.test(q.correct_answer) ? optionContent(q, q.correct_answer) : q.correct_answer),
+        h('td', {}, q.marks),
         h('td', {}, h('span', { class: 'badge ' + (q.status === 'Active' ? 'pass' : 'neutral') }, q.status)),
         h('td', { class: 'nowrap' },
           h('button', { class: 'secondary small', type: 'button', onclick: () => editQuestion(q, load) }, 'Edit'), ' ',
@@ -419,25 +463,31 @@ function showPreview(container, p, onDone) {
       h('thead', {}, h('tr', {}, ['Question', 'Type', 'Options', 'Answer', 'Marks'].map((t) => h('th', {}, t)))),
       h('tbody', {}, valid.slice(0, 5).map((q) => h('tr', {},
         h('td', { class: 'question-cell pre' }, q.question_text), h('td', {}, SECTION_LABEL[q.section]),
-        h('td', { class: 'small' }, ['a', 'b', 'c', 'd'].filter((l) => q['option_' + l]).map((l) => `${l.toUpperCase()}. ${q['option_' + l]}`).join('  ')),
+        h('td', { class: 'small' }, ['a', 'b', 'c', 'd', 'e'].filter((l) => q['option_' + l]).map((l) => `${l.toUpperCase()}. ${q['option_' + l]}`).join('  ')),
         h('td', {}, q.correct_answer), h('td', {}, q.marks))))))) : null,
     h('div', { class: 'row section-gap' }, importBtn, h('button', { class: 'secondary', type: 'button', onclick: () => container.replaceChildren() }, 'Cancel')));
 }
 
 function editQuestion(q, onSaved) {
   q = q || { section: questionSection || 'IQ', marks: 1, status: 'Active' };
+  let showError = () => {};
   const form = h('form', { class: 'grid' },
     field('Type', select('section', Object.entries(SECTION_LABEL), q.section)),
     field('Category', h('input', { name: 'category', value: q.category || '', placeholder: 'e.g. Number pattern' })),
     field('Difficulty', h('input', { name: 'difficulty', value: q.difficulty || '', placeholder: 'e.g. Easy' })),
     field('Marks', h('input', { name: 'marks', type: 'number', min: 0.5, max: 100, step: 0.5, value: q.marks })),
     field('Question', h('textarea', { name: 'question_text', required: true }, q.question_text || ''), 'wide'),
-    ['a', 'b', 'c', 'd'].map((l) => field('Option ' + l.toUpperCase(), h('input', { name: 'option_' + l, value: q['option_' + l] || '' }))),
-    field('Correct Answer', h('input', { name: 'correct_answer', value: q.correct_answer || '', placeholder: 'A, B, C or D (or the exact answer for calculation)' }), 'wide'),
+    h('div', { class: 'field wide' }, h('label', {}, 'Question picture (optional)'), imageInput('image_id', q.image_id, (m) => showError(m))),
+    LETTERS.map((l) => h('div', { class: 'field' },
+      h('label', { for: 'opt_' + l }, 'Option ' + l.toUpperCase() + (l === 'e' ? ' (optional)' : '')),
+      h('input', { id: 'opt_' + l, name: 'option_' + l, value: q['option_' + l] || '', placeholder: 'Text, a picture, or both' }),
+      imageInput('option_' + l + '_image', q['option_' + l + '_image'], (m) => showError(m)))),
+    field('Correct Answer', h('input', { name: 'correct_answer', value: q.correct_answer || '', placeholder: 'A, B, C, D or E (or the exact answer for calculation)' }), 'wide'),
     q.id ? field('Status', select('status', [['Active', 'Active'], ['Inactive', 'Inactive (not used in new tests)']], q.status)) : null,
-    h('p', { class: 'muted small wide' }, 'Essay questions need no options; HR marks the answer after submission. Calculation questions may have options or a single exact answer.'),
+    h('p', { class: 'muted small wide' }, 'Each option can be text, a picture, or both. Essay questions need no options; HR marks the answer after submission. Calculation questions may have options or a single exact answer.'),
     h('div', { class: 'wide' }, h('button', { type: 'submit' }, 'Save question')));
   const close = modal(q.id ? 'Edit question' : 'Add question', form);
+  showError = (m) => flash(form.parentElement, m);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
@@ -563,22 +613,42 @@ function assessmentTable(list, showCandidate) {
 async function renderAssessment(id) {
   const { assessment: a, candidate, questions } = await api('GET', '/assessments/' + id);
   const essayInputs = [];
+  const count = { correct: 0, wrong: 0, missed: 0 };
+  const submitted = a.status === 'SUBMITTED';
   const rows = questions.map((q) => {
     const options = JSON.parse(q.option_order);
+    const answered = q.answer != null && String(q.answer).trim() !== '';
     let answerCell;
+    let status;
     if (q.section === 'ESSAY') {
       const input = h('input', { type: 'number', min: 0, max: q.max_marks, step: 'any', value: q.marks_awarded ?? '', class: 'inline-input', 'data-id': q.id });
       essayInputs.push(input);
-      answerCell = h('td', {}, h('div', { class: 'pre' }, fmt(q.answer)), h('div', { class: 'row small' }, 'Marks:', input, `/ ${q.max_marks}`));
+      answerCell = h('td', {}, answered ? h('div', { class: 'pre' }, q.answer) : h('span', { class: 'muted' }, 'No answer'),
+        h('div', { class: 'row small' }, 'Marks:', input, '/ ' + q.max_marks));
+      if (submitted && !answered) count.missed++;
+      status = !answered ? h('span', { class: 'badge pending' }, 'Not answered')
+        : q.marks_awarded == null ? h('span', { class: 'badge pending' }, 'Not marked') : h('span', { class: 'badge pass' }, 'Marked');
     } else {
-      const shown = options.length && q.answer ? `${q.answer}. ${q['option_' + q.answer.toLowerCase()] || ''}` : fmt(q.answer);
-      answerCell = h('td', {}, shown);
+      // The candidate saw the options shuffled, so also show the letter they saw.
+      const seenAs = options.indexOf(q.answer);
+      answerCell = h('td', {}, !answered ? h('span', { class: 'muted' }, '-')
+        : options.length ? [optionContent(q, q.answer), seenAs >= 0 ? h('div', { class: 'muted small' }, 'shown to candidate as ' + 'ABCDE'[seenAs]) : null]
+          : q.answer);
+      if (!submitted) status = h('span', { class: 'badge neutral' }, answered ? 'Answered' : 'Not answered yet');
+      else if (!answered) { count.missed++; status = h('span', { class: 'badge pending' }, 'Not answered'); }
+      else if (q.marks_awarded > 0) { count.correct++; status = h('span', { class: 'badge pass' }, 'Correct'); }
+      else { count.wrong++; status = h('span', { class: 'badge fail' }, 'Wrong'); }
     }
-    const correct = q.section === 'ESSAY' ? '-' : options.length ? `${q.correct_answer}. ${q['option_' + q.correct_answer.toLowerCase()] || ''}` : q.correct_answer;
-    const mark = q.section === 'ESSAY' ? null : h('span', { class: 'badge ' + (q.marks_awarded > 0 ? 'pass' : 'fail') }, q.marks_awarded > 0 ? 'Correct' : 'Wrong');
-    return h('tr', {}, h('td', {}, q.position), h('td', {}, SECTION_LABEL[q.section]), h('td', { class: 'question-cell pre' }, q.question_text),
-      answerCell, h('td', {}, correct), h('td', {}, a.status === 'SUBMITTED' ? mark : '-'));
+    const correct = q.section === 'ESSAY' ? '-' : options.length ? optionContent(q, q.correct_answer) : q.correct_answer;
+    return h('tr', {}, h('td', {}, q.position), h('td', {}, SECTION_LABEL[q.section]),
+      h('td', { class: 'question-cell' }, h('div', { class: 'pre' }, q.question_text), q.image_id ? h('div', { class: 'thumb-row' }, thumb(q.image_id)) : null),
+      answerCell, h('td', {}, correct), h('td', {}, status));
   });
+  const summary = h('div', { class: 'summary-badges' },
+    h('span', { class: 'badge pass' }, 'Correct: ' + count.correct),
+    h('span', { class: 'badge fail' }, 'Wrong: ' + count.wrong),
+    h('span', { class: 'badge pending' }, 'Not answered: ' + count.missed),
+    h('span', { class: 'badge neutral' }, 'Total: ' + questions.length));
 
   const card = h('div', { class: 'card' });
   const saveEssays = essayInputs.length && a.status === 'SUBMITTED'
@@ -607,9 +677,9 @@ async function renderAssessment(id) {
     h('p', {}, h('a', { href: '#/assessments' }, '< All assessments')),
     h('h1', {}, 'Assessment review'),
     card,
-    h('div', { class: 'card' }, h('div', { class: 'row between' }, h('h2', {}, 'Answers'), saveEssays),
+    h('div', { class: 'card' }, h('div', { class: 'row between' }, h('h2', {}, 'Answers'), submitted ? summary : null, saveEssays),
       h('div', { class: 'table-wrap' }, h('table', {},
-        h('thead', {}, h('tr', {}, ['#', 'Type', 'Question', 'Candidate answer', 'Correct answer', ''].map((t) => h('th', {}, t)))),
+        h('thead', {}, h('tr', {}, ['#', 'Type', 'Question', 'Candidate answer', 'Correct answer', 'Status'].map((t) => h('th', {}, t)))),
         h('tbody', {}, rows)))));
 }
 

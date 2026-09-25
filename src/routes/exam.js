@@ -4,6 +4,7 @@
 const express = require('express');
 const { db } = require('../db');
 const A = require('../assessments');
+const images = require('../images');
 
 const router = express.Router();
 
@@ -38,16 +39,18 @@ function stateResponse(a) {
     const c = db.prepare('SELECT name FROM candidates WHERE id = ?').get(a.candidate_id);
     base.candidate = { name: c ? c.name : '' };
     base.remaining_seconds = Math.max(0, Math.floor((Date.parse(a.deadline_at) - Date.now()) / 1000));
+    const imageUrl = (id) => (id ? `/api/exam/${encodeURIComponent(a.token)}/images/${id}` : null);
     base.questions = db.prepare('SELECT * FROM assessment_questions WHERE assessment_id = ? ORDER BY position').all(a.id).map((q) => {
       const order = JSON.parse(q.option_order);
       return {
         id: q.id,
         section: q.section,
         text: q.question_text,
+        image: imageUrl(q.image_id),
         kind: q.section === 'ESSAY' ? 'essay' : order.length ? 'choice' : 'short',
         // Options in this candidate's shuffled order; the key is the original
         // letter, which tells the browser nothing about which one is correct.
-        options: order.map((L) => ({ key: L, text: q['option_' + L.toLowerCase()] })),
+        options: order.map((L) => ({ key: L, text: q['option_' + L.toLowerCase()], image: imageUrl(q[`option_${L.toLowerCase()}_image`]) })),
         answer: q.answer,
       };
     });
@@ -87,6 +90,17 @@ router.put('/:token/answer', (req, res) => {
   if (state !== 'in_progress') return res.status(409).json(stateResponse(a));
   if (!A.saveAnswer(a, req.body?.question_id, req.body?.answer)) return res.status(400).json({ error: 'unknown_question' });
   res.json({ ok: true, remaining_seconds: Math.max(0, Math.floor((Date.parse(a.deadline_at) - Date.now()) / 1000)) });
+});
+
+// A picture is only served to the candidate whose test contains it, while the test is running.
+const IMAGE_COLS = ['image_id', 'option_a_image', 'option_b_image', 'option_c_image', 'option_d_image', 'option_e_image'];
+router.get('/:token/images/:id', (req, res) => {
+  const a = loadFresh(req);
+  const id = Number(req.params.id);
+  if (!a || A.linkState(a) !== 'in_progress' || !Number.isInteger(id)) return res.status(404).json({ error: 'Not found.' });
+  const used = db.prepare(`SELECT 1 FROM assessment_questions WHERE assessment_id = ? AND ? IN (${IMAGE_COLS.join(', ')}) LIMIT 1`).get(a.id, id);
+  if (!used) return res.status(404).json({ error: 'Not found.' });
+  images.sendImage(res, id);
 });
 
 router.post('/:token/focus-lost', (req, res) => {

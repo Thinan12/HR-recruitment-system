@@ -5,7 +5,8 @@ const { db, getSettings, saveSettings, now } = require('../db');
 const auth = require('../auth');
 const A = require('../assessments');
 const reports = require('../reports');
-const { parseFile, validateQuestion, ImportError } = require('../importer');
+const { parseFile, validateQuestion, ImportError, IMAGE_KEYS } = require('../importer');
+const images = require('../images');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 1 } });
@@ -116,12 +117,14 @@ router.get('/questions', (req, res) => {
   res.json({ questions: db.prepare(sql).all(...args), counts: A.activeCounts() });
 });
 
-const QUESTION_COLS = ['section', 'category', 'difficulty', 'question_text', 'option_a', 'option_b', 'option_c', 'option_d', 'correct_answer', 'marks'];
+const QUESTION_COLS = ['section', 'category', 'difficulty', 'question_text', 'option_a', 'option_b', 'option_c', 'option_d', 'option_e',
+  'correct_answer', 'marks', ...IMAGE_KEYS];
 const insertQuestion = db.prepare(`INSERT INTO questions (${QUESTION_COLS.join(', ')}, status, created_at)
   VALUES (${QUESTION_COLS.map((c) => '@' + c).join(', ')}, 'Active', @created_at)`);
 
 function checkedQuestion(body) {
   const { question, errors } = validateQuestion(body);
+  for (const key of IMAGE_KEYS) if (question[key] && !images.imageExists(question[key])) errors.push('A picture could not be found. Please upload it again.');
   if (errors.length) throw new A.InputError(errors.join(' '));
   return question;
 }
@@ -148,6 +151,17 @@ router.delete('/questions/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// Pictures for questions and options. Upload returns an id to put on the question.
+router.post('/images', (req, res) => {
+  try {
+    res.status(201).json({ id: images.saveDataUrl(req.body?.data_url) });
+  } catch (e) {
+    if (e instanceof images.ImageError) return bad(res, e.message);
+    throw e;
+  }
+});
+router.get('/images/:id', (req, res) => images.sendImage(res, Number(req.params.id)));
+
 router.get('/questions/counts', (req, res) => res.json(A.activeCounts()));
 
 router.get('/questions/template.xlsx', (req, res) => {
@@ -155,9 +169,8 @@ router.get('/questions/template.xlsx', (req, res) => {
 });
 
 // The same question uploaded twice would let one candidate see it twice.
-const questionKey = (section, text) => section + '|' + String(text).trim().toLowerCase().replace(/\s+/g, ' ');
 function existingQuestionKeys() {
-  return new Set(db.prepare('SELECT section, question_text FROM questions').all().map((q) => questionKey(q.section, q.question_text)));
+  return new Set(db.prepare('SELECT * FROM questions').all().map(A.questionKey));
 }
 
 // Step 1: read the file and show what was found. Nothing is saved yet.
@@ -171,7 +184,7 @@ router.post('/questions/import/preview', (req, res, next) => {
       const seen = existingQuestionKeys();
       for (const r of rows) {
         if (r.errors.length) continue;
-        const key = questionKey(r.question.section, r.question.question_text);
+        const key = A.questionKey(r.question);
         if (seen.has(key)) r.errors.push('This question is already in the question bank (or repeated in this file).');
         seen.add(key);
       }
@@ -197,7 +210,7 @@ router.post('/questions/import', (req, res) => {
     const seen = existingQuestionKeys();
     for (const row of rows) {
       const { question, errors } = validateQuestion(row);
-      const key = questionKey(question.section, question.question_text);
+      const key = A.questionKey(question);
       if (errors.length || seen.has(key)) { skipped++; continue; }
       seen.add(key);
       insertQuestion.run({ ...question, created_at: created });

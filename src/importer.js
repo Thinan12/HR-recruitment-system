@@ -14,7 +14,7 @@ const { PDFParse } = require('pdf-parse');
 
 const MAX_ROWS = 2000;
 const SECTIONS = ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'];
-const LETTERS = ['A', 'B', 'C', 'D'];
+const LETTERS = ['A', 'B', 'C', 'D', 'E'];
 
 const ALLOWED = {
   '.xlsx': 'zip', '.docx': 'zip',
@@ -50,6 +50,7 @@ const HEADER_ALIASES = {
   option_b: ['optionb', 'b', 'choiceb', 'answerb'],
   option_c: ['optionc', 'c', 'choicec', 'answerc'],
   option_d: ['optiond', 'd', 'choiced', 'answerd'],
+  option_e: ['optione', 'e', 'choicee', 'answere'],
   correct_answer: ['correctanswer', 'answer', 'correct', 'key', 'answerkey', 'ຄຳຕອບ', 'ຄຳຕອບທີ່ຖືກ'],
   marks: ['marks', 'mark', 'points', 'point', 'score', 'ຄະແນນ'],
 };
@@ -89,12 +90,12 @@ function rowsFromTable(table, defaultSection) {
 
 function splitInlineOptions(line) {
   // "A. 10  B. 20  C. 30  D. 40" -> ["A. 10", "B. 20", ...]
-  return line.split(/\s+(?=\(?[B-D]\s*[.)]\s)/);
+  return line.split(/\s+(?=\(?[B-E]\s*[.)]\s)/);
 }
 
 const RE_QUESTION = /^(?:q(?:uestion)?\s*)?(\d{1,4})\s*[.):]\s*(.+)$/i;
 const RE_QUESTION_LABEL = /^question\s*[:.]\s*(.+)$/i;
-const RE_OPTION = /^\(?([A-Da-d])\s*[.):]\s*(.*)$/;
+const RE_OPTION = /^\(?([A-Ea-e])\s*[.):]\s*(.*)$/;
 const RE_ANSWER = /^(?:correct\s*answer|answer|ans|correct|key|ຄຳຕອບ)\s*[:=：-]\s*(.+)$/i;
 const RE_META = /^(type|section|category|difficulty|level|marks?|points?)\s*[:=：]\s*(.+)$/i;
 
@@ -113,7 +114,7 @@ function rowsFromText(text, defaultSection) {
   let cur = null;
   let lastOption = null;
   const start = (textValue) => {
-    cur = { question_text: textValue, section: defaultSection, option_a: '', option_b: '', option_c: '', option_d: '', correct_answer: '', category: '', difficulty: '', marks: '' };
+    cur = { question_text: textValue, section: defaultSection, option_a: '', option_b: '', option_c: '', option_d: '', option_e: '', correct_answer: '', category: '', difficulty: '', marks: '' };
     rows.push(cur);
     lastOption = null;
   };
@@ -154,9 +155,11 @@ function rowsFromText(text, defaultSection) {
 
 // ---- validation ------------------------------------------------------------
 
+const IMAGE_KEYS = ['image_id', ...LETTERS.map((L) => `option_${L.toLowerCase()}_image`)];
+
 function resolveAnswerLetter(answer, row) {
   const a = String(answer || '').trim();
-  const letter = a.match(/^(?:option\s*)?\(?([A-Da-d])\)?\.?$/i);
+  const letter = a.match(/^(?:option\s*)?\(?([A-Ea-e])\)?\.?$/i);
   if (letter) return letter[1].toUpperCase();
   const byText = LETTERS.find((L) => row['option_' + L.toLowerCase()] && row['option_' + L.toLowerCase()].trim().toLowerCase() === a.toLowerCase());
   return byText || null;
@@ -175,21 +178,27 @@ function validateQuestion(input) {
     option_b: clean(input.option_b, 1000),
     option_c: clean(input.option_c, 1000),
     option_d: clean(input.option_d, 1000),
+    option_e: clean(input.option_e, 1000),
     correct_answer: clean(input.correct_answer, 1000),
     marks: input.marks === '' || input.marks == null ? 1 : Number(input.marks),
   };
+  // Pictures are referenced by id (uploaded separately); the route checks they exist.
+  for (const key of IMAGE_KEYS) {
+    const id = Number(input[key]);
+    q[key] = Number.isInteger(id) && id > 0 ? id : null;
+  }
   if (!q.section) errors.push('Type must be IQ, General, Calculation or Essay.');
   if (!q.question_text) errors.push('Question text is missing.');
   if (!Number.isFinite(q.marks) || q.marks <= 0 || q.marks > 100) errors.push('Marks must be a number between 0 and 100.');
 
-  const filled = LETTERS.filter((L) => q['option_' + L.toLowerCase()]);
+  const filled = LETTERS.filter((L) => q['option_' + L.toLowerCase()] || q['option_' + L.toLowerCase() + '_image']);
   if (q.section === 'ESSAY') {
     // Essays are marked by HR; options are ignored.
-    LETTERS.forEach((L) => { q['option_' + L.toLowerCase()] = ''; });
+    LETTERS.forEach((L) => { q['option_' + L.toLowerCase()] = ''; q['option_' + L.toLowerCase() + '_image'] = null; });
   } else if (filled.length >= 2) {
     const letter = resolveAnswerLetter(q.correct_answer, q);
-    if (!letter) errors.push('Correct answer must be one of the options (A, B, C or D).');
-    else if (!filled.includes(letter)) errors.push(`Correct answer ${letter} has no option text.`);
+    if (!letter) errors.push('Correct answer must be one of the options (A, B, C, D or E).');
+    else if (!filled.includes(letter)) errors.push(`Correct answer ${letter} has no option text or picture.`);
     else q.correct_answer = letter;
   } else if (filled.length === 1) {
     errors.push('A multiple-choice question needs at least 2 options.');
@@ -279,4 +288,4 @@ async function parseFile(buffer, originalName, defaultSection) {
   return checked;
 }
 
-module.exports = { parseFile, validateQuestion, ImportError, SECTIONS, rowsFromText };
+module.exports = { parseFile, validateQuestion, ImportError, SECTIONS, LETTERS, IMAGE_KEYS, rowsFromText };

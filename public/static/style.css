@@ -192,3 +192,14 @@ table.kv th { width: 200px; background: transparent; }
   .topbar, button, .button { display: none !important; }
   body { background: #fff; }
 }
+
+/* ---- pictures in questions ---- */
+.question-image { display: block; max-width: 100%; max-height: 320px; margin: 0 auto 18px; border: 1px solid var(--line); border-radius: 8px; }
+.option-body { display: flex; flex-direction: column; gap: 6px; }
+.option-image { max-width: 140px; max-height: 110px; }
+.thumb { max-width: 90px; max-height: 60px; border: 1px solid var(--line); border-radius: 4px; vertical-align: middle; }
+.thumb-row { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
+.image-field { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+.image-field input[type=file] { width: auto; font-size: 13px; }
+.answer-choice { display: inline-flex; align-items: center; gap: 6px; }
+.summary-badges { display: flex; gap: 8px; flex-wrap: wrap; }

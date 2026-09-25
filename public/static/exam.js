@@ -212,7 +212,7 @@ function drawQuestion() {
   let answerBox;
   if (q.kind === 'choice') {
     answerBox = h('div', {}, q.options.map((o, i) => {
-      const letter = 'ABCD'[i];
+      const letter = 'ABCDE'[i];
       const selected = exam.answers[q.id] === o.key;
       return h('label', { class: 'option' + (selected ? ' selected' : '') },
         h('input', { type: 'radio', name: 'answer', value: o.key, checked: selected, onchange: () => {
@@ -220,7 +220,8 @@ function drawQuestion() {
           queueSave(q.id, 0);
           drawQuestion();
         } }),
-        h('span', { class: 'letter' }, letter + '.'), h('span', {}, o.text));
+        h('span', { class: 'letter' }, letter + '.'),
+        h('span', { class: 'option-body' }, o.image ? h('img', { src: o.image, alt: letter, class: 'option-image' }) : null, o.text || null));
     }));
   } else {
     const box = h(q.kind === 'essay' ? 'textarea' : 'input', { placeholder: T.type_answer, value: exam.answers[q.id] || '', rows: q.kind === 'essay' ? 10 : null });
@@ -239,6 +240,7 @@ function drawQuestion() {
     h('div', { class: 'card' },
       h('div', { class: 'progress' }, `${T.question} ${exam.current + 1} / ${qs.length}`),
       h('div', { class: 'question-text' }, q.text),
+      q.image ? h('img', { src: q.image, alt: '', class: 'question-image' }) : null,
       answerBox,
       h('div', { class: 'exam-nav' },
         h('button', { type: 'button', class: 'secondary', disabled: exam.current === 0, onclick: () => go(exam.current - 1) }, T.previous),

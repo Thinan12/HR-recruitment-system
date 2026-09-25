@@ -44,6 +44,7 @@ Type: IQ
 
 Options may also be on one line (`A. Red  B. Blue  C. Green  D. Chair`).
 
+- **Pictures:** in **Add question** / **Edit**, any question and any option (A–E) can have a picture (PNG, JPG, GIF or WebP, up to 2 MB). An option can be text, a picture, or both. A fifth option (E) is optional.
 - **Essay** questions need no options. HR enters the marks on the assessment review page.
 - **Calculation** questions can have options, or just one exact answer (e.g. `Answer: 1250`). Spaces and commas are ignored when marking.
 
@@ -53,7 +54,8 @@ Options may also be on one line (`A. Red  B. Blue  C. Green  D. Chair`).
 2. Send the link to the candidate. They enter their details and press Start.
 3. Each candidate gets a **different random set** of questions, with the answer options shuffled. The same question never appears twice in one test.
 4. The timer is enforced by the server. When time runs out the test is **submitted automatically**, even if the candidate closed the browser. Late answers are refused.
-5. A link can be used only once. An unused link stops working at its expiry time, or whenever you press **Disable**.
+5. On **Assessments → View**, HR sees every question with the answer the candidate chose (and the letter they saw on screen), the correct answer, and **Correct / Wrong / Not answered**, with totals at the top.
+6. A link can be used only once. An unused link stops working at its expiry time, or whenever you press **Disable**.
 
 ### Scores
 
@@ -69,7 +71,7 @@ Node.js 24 LTS, Express, SQLite (`better-sqlite3`), plain HTML/JS frontend (no b
 ```
 npm install
 ADMIN_PASSWORD=choose-a-password npm start    # http://localhost:3000
-npm test                                       # 53 tests, uses temporary databases
+npm test                                       # 57 tests, uses temporary databases
 ```
 
 ```
@@ -88,7 +90,7 @@ public/
 test/              node:test suites and Word-generated fixtures
 ```
 
-**Database tables:** `admins`, `settings`, `candidates` (incl. interview and final decision), `questions`, `assessments` (link, timer and scores), `assessment_questions` (each candidate's questions, copied from the bank so later edits never change a past result).
+**Database tables:** `admins`, `settings`, `candidates` (incl. interview and final decision), `questions`, `assessments` (link, timer and scores), `assessment_questions` (each candidate's questions, copied from the bank so later edits never change a past result), `images` (question and option pictures).
 
 ### Railway
 

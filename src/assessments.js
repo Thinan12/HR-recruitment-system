@@ -16,6 +16,18 @@ const LANGUAGES = ['en', 'lo'];
 // accepted with its answers; after this it is ignored and saved answers count.
 const SUBMIT_GRACE_MS = 30 * 1000;
 
+const LETTERS = ['A', 'B', 'C', 'D', 'E'];
+// Option and picture columns copied from the bank into each candidate's questions.
+const SNAPSHOT_COLS = [...LETTERS.map((L) => 'option_' + L.toLowerCase()), 'image_id', ...LETTERS.map((L) => `option_${L.toLowerCase()}_image`)];
+
+// Two questions are "the same" only if wording, options and pictures all match,
+// so several "Which figure comes next?" questions with different pictures can
+// all appear in one test.
+function questionKey(q) {
+  const norm = (v) => String(v ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  return [q.section, norm(q.question_text), ...SNAPSHOT_COLS.map((c) => norm(q[c]))].join('|');
+}
+
 const newToken = () => crypto.randomBytes(24).toString('base64url');
 const addMinutes = (iso, minutes) => new Date(new Date(iso).getTime() + minutes * 60000).toISOString();
 
@@ -119,25 +131,29 @@ const startTx = db.transaction((a, info) => {
   // Random, non-repeating selection per section, then shuffled answer order.
   const sections = JSON.parse(a.sections);
   const insert = db.prepare(`INSERT INTO assessment_questions
-    (assessment_id, question_id, position, section, question_text, option_a, option_b, option_c, option_d, correct_answer, option_order, max_marks)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    (assessment_id, question_id, position, section, question_text, ${SNAPSHOT_COLS.join(', ')}, correct_answer, option_order, max_marks)
+    VALUES (@assessment_id, @question_id, @position, @section, @question_text, ${SNAPSHOT_COLS.map((c) => '@' + c).join(', ')},
+      @correct_answer, @option_order, @max_marks)`);
   let position = 0;
-  const usedTexts = new Set(); // never show the same wording twice, even if the bank has copies
+  const used = new Set(); // never show the same question twice, even if the bank has copies
   for (const section of SECTIONS) {
     if (!sections[section]) continue;
     const pool = db.prepare("SELECT * FROM questions WHERE section = ? AND status = 'Active'").all(section);
     const picked = [];
     for (const q of shuffle(pool)) {
       if (picked.length === sections[section]) break;
-      const text = q.question_text.trim().toLowerCase().replace(/\s+/g, ' ');
-      if (usedTexts.has(text)) continue;
-      usedTexts.add(text);
+      const key = questionKey(q);
+      if (used.has(key)) continue;
+      used.add(key);
       picked.push(q);
     }
     for (const q of picked) {
-      const letters = ['A', 'B', 'C', 'D'].filter((L) => q['option_' + L.toLowerCase()]);
-      insert.run(a.id, q.id, ++position, section, q.question_text, q.option_a, q.option_b, q.option_c, q.option_d,
-        q.correct_answer, JSON.stringify(shuffle(letters)), q.marks);
+      const letters = LETTERS.filter((L) => q['option_' + L.toLowerCase()] || q['option_' + L.toLowerCase() + '_image']);
+      insert.run({
+        ...Object.fromEntries(SNAPSHOT_COLS.map((c) => [c, q[c]])),
+        assessment_id: a.id, question_id: q.id, position: ++position, section, question_text: q.question_text,
+        correct_answer: q.correct_answer, option_order: JSON.stringify(shuffle(letters)), max_marks: q.marks,
+      });
     }
   }
   if (position === 0) throw new InputError('no_questions');
@@ -271,7 +287,7 @@ function regenerateLink(id) {
 }
 
 module.exports = {
-  SECTIONS, TYPES, LANGUAGES, InputError, label,
+  SECTIONS, TYPES, LANGUAGES, LETTERS, InputError, label, questionKey,
   activeCounts, createAssessment, getAssessment, linkState, startAssessment, saveAnswer,
   isPastDeadline, submitAssessment, finalize, finalizeExpired, scoreAssessment, setEssayMarks, rescoreAll, regenerateLink,
 };

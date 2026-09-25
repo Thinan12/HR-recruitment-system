@@ -125,7 +125,28 @@ CREATE TABLE IF NOT EXISTS assessment_questions (
   UNIQUE (assessment_id, question_id)
 );
 CREATE INDEX IF NOT EXISTS idx_aq_assessment ON assessment_questions(assessment_id, position);
+
+-- Pictures for questions and answer options (PNG / JPEG / GIF / WebP only).
+-- Never deleted with a question, so past assessments keep showing them.
+CREATE TABLE IF NOT EXISTS images (
+  id INTEGER PRIMARY KEY,
+  mime TEXT NOT NULL,
+  sha256 TEXT NOT NULL UNIQUE,
+  data BLOB NOT NULL,
+  created_at TEXT NOT NULL
+);
 `);
+
+// Columns added after the first release. Adding a column never touches
+// existing rows, so this is safe to run on every start.
+const IMAGE_COLUMNS = ['image_id', 'option_a_image', 'option_b_image', 'option_c_image', 'option_d_image', 'option_e_image'];
+function addMissingColumns(table, columns) {
+  const have = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
+  for (const [name, type] of columns) if (!have.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+}
+for (const table of ['questions', 'assessment_questions']) {
+  addMissingColumns(table, [["option_e", "TEXT NOT NULL DEFAULT ''"], ...IMAGE_COLUMNS.map((c) => [c, 'INTEGER'])]);
+}
 
 const DEFAULT_SETTINGS = {
   default_time_minutes: '30',
