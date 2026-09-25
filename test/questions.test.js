@@ -232,3 +232,29 @@ test('real Word-generated .doc and PDF files import', async () => {
   assert.equal(t.data.rows[0].question.section, 'CALCULATION');
   assert.equal(t.data.rows[1].question.correct_answer, 'B', 'answer "Cold" matched to option B');
 });
+
+// Three real pages of "IQ Test - 50 Mixed Questions" embedded as pictures:
+// Question 01 (text answers), Question 08 (five picture answers) and the
+// answer key for 1-25. There is no text layer, so the OCR fallback must run.
+test('scanned (picture-only) PDF imports through OCR', { timeout: 180000 }, async () => {
+  const fs = require('fs');
+  const path = require('path');
+  const r = await preview(fs.readFileSync(path.join(__dirname, 'fixtures', 'scanned-iq-sample.pdf')), 'scanned.pdf', 'IQ');
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.found, 2);
+  assert.equal(r.data.valid, 2);
+  assert.equal(r.data.by_section.IQ, 2);
+  const [q1, q8] = r.data.rows.map((x) => x.question);
+  assert.equal(q1.question_text, 'What number comes next?');
+  assert.deepEqual([q1.option_a, q1.option_b, q1.option_c, q1.option_d], ['19', '16', '15', '17']);
+  assert.equal(q1.correct_answer, 'D', 'answer from the answer key page');
+  assert.ok(q1.image_id, 'the question picture is kept');
+  assert.equal(q8.question_text, 'Which figure is the odd one out?');
+  assert.ok(['a', 'b', 'c', 'd', 'e'].every((l) => q8[`option_${l}_image`]), 'five picture options');
+  assert.equal(q8.correct_answer, 'A');
+
+  const imported = await admin.post('/api/admin/questions/import', { questions: [q1, q8] });
+  assert.deepEqual(imported.data, { imported: 2, skipped: 0 });
+  const again = await preview(fs.readFileSync(path.join(__dirname, 'fixtures', 'scanned-iq-sample.pdf')), 'scanned.pdf', 'IQ');
+  assert.equal(again.data.valid, 0, 'uploading it again finds only duplicates');
+});

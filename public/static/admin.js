@@ -429,7 +429,7 @@ function uploadCard(onImported) {
     data.append('section', section.value);
     data.append('file', fileInput.files[0]);
     button.disabled = true;
-    result.replaceChildren(h('p', { class: 'muted' }, 'Reading file...'));
+    result.replaceChildren(h('p', { class: 'muted' }, 'Reading file... A PDF made of pictures (scanned pages) is read with OCR and can take 1-2 minutes.'));
     try {
       const preview = await api('POST', '/questions/import/preview', data, true);
       showPreview(result, preview, () => { fileInput.value = ''; onImported(); });
@@ -452,7 +452,7 @@ function showPreview(container, p, onDone) {
       onDone();
     } catch (ex) { flash(container, ex.message); importBtn.disabled = false; }
   });
-  container.replaceChildren(
+  container.replaceChildren(h('div', {}, // h() skips the null sections; replaceChildren would print "null"
     h('div', { class: 'stats' },
       ...[['Questions found', p.found], ['Valid', p.valid], ['Invalid', p.invalid]].map(([l, v]) => h('div', { class: 'stat' }, h('div', { class: 'label' }, l), h('div', { class: 'value' }, v))),
       ...Object.entries(p.by_section).filter(([, n]) => n > 0).map(([s, n]) => h('div', { class: 'stat' }, h('div', { class: 'label' }, SECTION_LABEL[s] + ' questions'), h('div', { class: 'value' }, n)))),
@@ -462,10 +462,12 @@ function showPreview(container, p, onDone) {
     valid.length ? h('div', {}, h('h2', { class: 'section-gap' }, 'First questions'), h('div', { class: 'table-wrap' }, h('table', {},
       h('thead', {}, h('tr', {}, ['Question', 'Type', 'Options', 'Answer', 'Marks'].map((t) => h('th', {}, t)))),
       h('tbody', {}, valid.slice(0, 5).map((q) => h('tr', {},
-        h('td', { class: 'question-cell pre' }, q.question_text), h('td', {}, SECTION_LABEL[q.section]),
-        h('td', { class: 'small' }, ['a', 'b', 'c', 'd', 'e'].filter((l) => q['option_' + l]).map((l) => `${l.toUpperCase()}. ${q['option_' + l]}`).join('  ')),
+        h('td', { class: 'question-cell' }, h('div', { class: 'pre' }, q.question_text), q.image_id ? h('div', { class: 'thumb-row' }, thumb(q.image_id)) : null),
+        h('td', {}, SECTION_LABEL[q.section]),
+        h('td', { class: 'small' }, h('div', { class: 'thumb-row' }, LETTERS.filter((l) => q['option_' + l] || q['option_' + l + '_image'])
+          .map((l) => optionContent(q, l.toUpperCase())))),
         h('td', {}, q.correct_answer), h('td', {}, q.marks))))))) : null,
-    h('div', { class: 'row section-gap' }, importBtn, h('button', { class: 'secondary', type: 'button', onclick: () => container.replaceChildren() }, 'Cancel')));
+    h('div', { class: 'row section-gap' }, importBtn, h('button', { class: 'secondary', type: 'button', onclick: () => container.replaceChildren() }, 'Cancel'))));
 }
 
 function editQuestion(q, onSaved) {

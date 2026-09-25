@@ -11,6 +11,7 @@ const XLSX = require('xlsx');
 const mammoth = require('mammoth');
 const WordExtractor = require('word-extractor');
 const { PDFParse } = require('pdf-parse');
+const { readScannedPdf } = require('./pdfOcr');
 
 const MAX_ROWS = 2000;
 const SECTIONS = ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'];
@@ -271,10 +272,21 @@ async function parseFile(buffer, originalName, defaultSection) {
       rows = rowsFromText(doc.getBody(), defaultSection);
     } else if (ext === '.pdf') {
       rows = rowsFromText(await pdfText(buffer), defaultSection);
+      // Pages that are pictures have no text to read: fall back to OCR.
+      if (!rows.some((r) => validateQuestion(r).errors.length === 0)) {
+        try {
+          const scanned = await readScannedPdf(buffer, defaultSection);
+          if (scanned.length) rows = scanned;
+        } catch (e) {
+          if (e.message === 'busy') throw new ImportError('Another scanned PDF is being read right now. Please try again in a minute.');
+          throw e;
+        }
+      }
     } else {
       rows = rowsFromText(decodeText(buffer), defaultSection);
     }
   } catch (e) {
+    if (e instanceof ImportError) throw e;
     throw new ImportError(GENERIC_ERROR);
   }
 

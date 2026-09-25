@@ -18,6 +18,8 @@ A simple recruitment and assessment system for LALCO HR.
 ### Uploading questions
 
 Accepted files: Excel (`.xlsx`, `.xls`), Word (`.docx`, `.doc`), PDF, CSV and TXT (max 10 MB).
+A PDF whose pages are pictures (scanned, or exported as images) is read automatically with OCR: question number, question text, answer cards and the answer key at the end are recognised, and the diagrams are kept as pictures. This takes about 15–60 seconds for a 50-question booklet.
+
 Every upload shows a preview first (questions found, valid, invalid, and the reason for each skipped row). Nothing is saved until you press **Import**.
 Questions already in the bank are skipped, so uploading the same file twice is safe.
 
@@ -71,7 +73,7 @@ Node.js 24 LTS, Express, SQLite (`better-sqlite3`), plain HTML/JS frontend (no b
 ```
 npm install
 ADMIN_PASSWORD=choose-a-password npm start    # http://localhost:3000
-npm test                                       # 57 tests, uses temporary databases
+npm test                                       # 58 tests, uses temporary databases
 ```
 
 ```
