@@ -100,7 +100,7 @@ function checkBlockPreview(r) {
   assert.equal(q1.section, 'GENERAL', 'uses the section chosen in the upload form');
   assert.equal(q2.option_d, 'Chair', 'options written on one line are split');
   assert.equal(q2.section, 'IQ', 'a Type: line overrides the default');
-  assert.equal(q2.marks, 2);
+  assert.equal(q2.marks, 3, 'IQ without a level = Level 3 (3 marks); the Marks line does not override it');
 }
 
 test('Excel .xlsx import preview', async () => checkTablePreview(await preview(workbook(TABLE, 'xlsx'), 'questions.xlsx')));

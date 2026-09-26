@@ -191,12 +191,12 @@ function validateQuestion(input) {
   }
   if (!q.section) errors.push('Type must be IQ, General, Calculation or Essay.');
   if (q.section === 'IQ') {
-    // IQ: the level decides the marks (1 / 2 / 3). No level given -> Level 2.
-    if (q.difficulty && !difficultyLevel(q.difficulty)) errors.push('Level must be 1, 2 or 3 (Easy, Medium or Hard).');
-    q.difficulty = difficultyLevel(q.difficulty) || 'Medium';
+    // IQ: the level decides the marks (1-5). No level given -> Level 3 (Moderate).
+    if (q.difficulty && !difficultyLevel(q.difficulty)) errors.push('Level must be 1-5 (Easy, Basic, Moderate, Difficult or Very Difficult).');
+    q.difficulty = difficultyLevel(q.difficulty) || 'Moderate';
     q.marks = LEVEL_MARKS[q.difficulty];
   } else {
-    q.difficulty = difficultyLevel(q.difficulty) || q.difficulty;
+    // Other tests: difficulty is free text, kept as typed.
   }
   if (!q.question_text) errors.push('Question text is missing.');
   if (!Number.isFinite(q.marks) || q.marks <= 0 || q.marks > 100) errors.push('Marks must be a number between 0 and 100.');

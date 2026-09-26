@@ -59,6 +59,15 @@ Options may also be on one line (`A. Red  B. Blue  C. Green  D. Chair`).
 5. On **Assessments → View**, HR sees each test (status, times, score, %, PASS / NOT PASS) and every answer: chosen option (and the letter the candidate saw), the correct answer, Correct / Wrong / Not answered.
 6. A link can be used only once. An unused link stops working at its expiry time, or whenever you press **Disable**.
 
+### The LALCO IQ test
+
+- The IQ bank and the General (recruitment) bank are separate question pools.
+- **Question pool vs. test length.** The IQ bank is the *pool* (e.g. 95 active questions). HR sets how many questions a candidate gets (default **18**, quick choices 10 / 15 / 18 / 20 / 30, or any whole number from 1 up to the pool size); each candidate gets exactly that many, drawn at random from the pool, never the same question twice, with shuffled answers. The rest of the pool stays in the bank.
+- Every IQ question has one of **5 levels**, and the level alone sets its marks: **Level 1 Easy = 1**, **Level 2 Basic = 2**, **Level 3 Moderate = 3**, **Level 4 Difficult = 4**, **Level 5 Very Difficult = 5** marks. A Marks value in an imported file is ignored for IQ; no level given = Level 3. Levels can be typed as 1–5, "Level 4" or the name.
+- Questions are split evenly across the levels and shown Level 1 first up to Level 5, random within each level: 20 → 4 each (maximum 60 marks), 18 → 4 / 3 / 3 / 4 / 4 (maximum 55), 10 → 2 each, 30 → 6 each. The maximum is worked out from the questions the candidate actually got. Candidates never see the level or the marks.
+- The **IQ Test Score** is the weighted marks, e.g. **24 / 60 (40%)**, with correct answers (e.g. 11 / 20) and each level's correct answers and marks, on Results, the candidate page, the review page, the dashboard and the PDF / Word / Excel exports. Tests taken before the 5-level scale keep their own Easy / Medium / Hard marks and show them as the earlier 3-level scale. It is a test score, not a clinical IQ; no IQ-number conversion is applied.
+- **Original LALCO IQ bank:** 45 original questions across number patterns, sequences, visual patterns and matrices, odd one out, logical relationships, spatial reasoning, mathematical reasoning and abstract patterns, with pictures drawn by `scripts/lalco-iq-bank.js`, which also loads the bank on the 5-level scale: `node scripts/lalco-iq-bank.js https://your-site <admin-password>` (running it twice adds nothing).
+
 ### Scores
 
 - Multiple choice: correct = full marks, wrong = 0.
@@ -73,7 +82,7 @@ Node.js 24 LTS, Express, SQLite (`better-sqlite3`), plain HTML/JS frontend (no b
 ```
 npm install
 ADMIN_PASSWORD=choose-a-password npm start    # http://localhost:3000
-npm test                                       # 77 tests, uses temporary databases
+npm test                                       # 81 tests, uses temporary databases
 ```
 
 ```

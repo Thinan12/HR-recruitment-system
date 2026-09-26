@@ -1,5 +1,5 @@
 // The original LALCO IQ question bank: 45 questions (15 Easy, 15 Medium,
-// 15 Hard) covering number patterns, sequences, visual patterns and matrices,
+// 15 Hard bands, tagged on the 5-level scale below) covering number patterns, sequences, visual patterns and matrices,
 // odd one out, logical relationships, spatial reasoning (rotation and
 // reflection), mathematical reasoning and abstract patterns.
 // All questions and pictures are original; pictures are drawn here in code.
@@ -259,6 +259,16 @@ const BANK = {
   ],
 };
 
+// The 5-level scale (1 Easy ... 5 Very Difficult). The bank above is grouped in
+// three bands; each Medium question is Level 2 (Basic) or 3 (Moderate), each
+// Hard question Level 4 (Difficult) or 5 (Very Difficult), in list order.
+const FIVE_LEVELS = {
+  Easy: Array(15).fill('Easy'),
+  Medium: ['Basic', 'Moderate', 'Moderate', 'Basic', 'Basic', 'Moderate', 'Basic', 'Moderate', 'Moderate', 'Basic', 'Basic', 'Basic', 'Moderate', 'Basic', 'Moderate'],
+  Hard: ['Difficult', 'Difficult', 'Very Difficult', 'Difficult', 'Difficult', 'Difficult', 'Very Difficult', 'Difficult', 'Very Difficult', 'Very Difficult',
+    'Difficult', 'Difficult', 'Difficult', 'Very Difficult', 'Very Difficult'],
+};
+
 // ---- loading --------------------------------------------------------------------
 
 async function main() {
@@ -290,8 +300,8 @@ async function main() {
   const existing = (await call('GET', '/api/admin/questions?section=IQ')).questions;
   if (existing.some((q) => q.question_text === BANK.Hard[5].t)) { console.log('The LALCO IQ bank is already loaded - nothing added.'); return; }
   let added = 0;
-  for (const [difficulty, list] of Object.entries(BANK)) for (const q of list) {
-    const body = { section: 'IQ', difficulty, category: q.c, question_text: q.t, correct_answer: q.a }; // marks follow the level
+  for (const [band, list] of Object.entries(BANK)) for (const [i, q] of list.entries()) {
+    const body = { section: 'IQ', difficulty: FIVE_LEVELS[band][i], category: q.c, question_text: q.t, correct_answer: q.a }; // marks follow the level
     (q.o || []).forEach((text, i) => { body['option_' + 'abcd'[i]] = text; });
     if (q.fig) body.image_id = await upload(q.fig());
     for (const [i, o] of (q.opts || []).entries()) body[`option_${'abcd'[i]}_image`] = await upload(o());
@@ -303,4 +313,4 @@ async function main() {
 }
 
 if (require.main === module) main().catch((e) => { console.error('FAILED:', e.message); process.exit(1); });
-module.exports = { BANK };
+module.exports = { BANK, FIVE_LEVELS };

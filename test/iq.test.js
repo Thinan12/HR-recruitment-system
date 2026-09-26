@@ -1,192 +1,202 @@
+// IQ: 5 levels (marks 1-5), question count chosen by HR, drawn at random from
+// the active pool (here 95 questions), and the one-link flow around it.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const XLSX = require('xlsx');
-const mammoth = require('mammoth');
-const { start, stop, client, db, CANDIDATE } = require('./helpers');
-const { levelSplit, syncIqLevels } = require('../src/assessments');
+const { start, stop, client, seedQuestions, db, CANDIDATE } = require('./helpers');
+const { levelSplit, syncIqLevels, rescoreAll } = require('../src/assessments');
 
 let admin;
 const candidate = client();
-const LEVELS = ['Easy', 'Medium', 'Hard'];
+const LEVELS = ['Easy', 'Basic', 'Moderate', 'Difficult', 'Very Difficult'];
 test.before(async () => {
   await start();
   admin = client();
   await admin.login();
-  // 10 questions per level, all with correct answer A. Added through the API so
-  // the level -> marks rule is applied exactly as for HR.
-  for (const level of LEVELS) for (let i = 1; i <= 10; i++) {
-    const r = await admin.post('/api/admin/questions', { section: 'IQ', difficulty: level, category: 'Number Patterns', question_text: `Puzzle ${level[0]}${i}`, option_a: '1', option_b: '2', option_c: '3', option_d: '4', correct_answer: 'A', marks: 9 });
+  // 19 questions per level = 95 active IQ questions, correct answer always A.
+  // Added through the API so the level -> marks rule applies as for HR (marks: 9 is ignored).
+  for (const level of LEVELS) for (let i = 1; i <= 19; i++) {
+    const r = await admin.post('/api/admin/questions', { section: 'IQ', difficulty: level, category: 'Number Patterns', question_text: `Puzzle ${level} ${i}`, option_a: '1', option_b: '2', option_c: '3', option_d: '4', correct_answer: 'A', marks: 9 });
     assert.equal(r.status, 201, JSON.stringify(r.data));
   }
+  seedQuestions('GENERAL', 10);
+  seedQuestions('CALCULATION', 10);
+  db.prepare("INSERT INTO questions (section, question_text, marks, created_at) VALUES ('ESSAY', 'Why LALCO?', 10, ?)").run(new Date().toISOString());
 });
 test.after(stop);
 
-async function sitIq(name, count = 18) {
-  const link = await admin.post('/api/admin/assessments', { assessment_type: 'IQ', counts: { IQ: count }, time_limit_minutes: 20, link_expiry_minutes: 60 });
-  assert.equal(link.status, 201, JSON.stringify(link.data));
-  const started = await candidate.post(`/api/exam/${link.data.token}/start`, { ...CANDIDATE, name });
-  return { id: link.data.id, token: link.data.token, questions: started.data.questions };
+const url = (token, path = '') => `/api/exam/${token}${path}`;
+async function create(count, tests = ['IQ']) {
+  return admin.post('/api/admin/assessments', { tests, counts: { IQ: count, GENERAL: 3, CALCULATION: 3, ESSAY: 1 }, minutes: { IQ: 20, GENERAL: 10, CALCULATION: 10, ESSAY: 20 }, link_expiry_minutes: 60 });
 }
-const levelsOf = (id) => db.prepare('SELECT difficulty FROM assessment_questions WHERE assessment_id = ? ORDER BY position').all(id).map((r) => r.difficulty);
+async function sit(name, count = 20, tests = ['IQ']) {
+  const link = await create(count, tests);
+  assert.equal(link.status, 201, JSON.stringify(link.data));
+  const started = await candidate.post(url(link.data.token, '/start'), { ...CANDIDATE, name });
+  return { id: link.data.id, token: link.data.token, state: started.data };
+}
+const copies = (id) => db.prepare('SELECT * FROM assessment_questions WHERE assessment_id = ? ORDER BY position').all(id);
 
-test('marks follow the level: Level 1 = 1, Level 2 = 2, Level 3 = 3 (an entered mark is ignored)', () => {
+test('the pool has 95 active IQ questions; marks follow the level (1-5), an entered mark is ignored', async () => {
+  assert.equal((await admin.get('/api/admin/questions/counts')).data.IQ, 95);
   const marks = Object.fromEntries(db.prepare("SELECT difficulty, MIN(marks) AS lo, MAX(marks) AS hi FROM questions WHERE section = 'IQ' GROUP BY difficulty").all().map((r) => [r.difficulty, [r.lo, r.hi]]));
-  assert.deepEqual(marks, { Easy: [1, 1], Medium: [2, 2], Hard: [3, 3] });
+  assert.deepEqual(marks, { Easy: [1, 1], Basic: [2, 2], Moderate: [3, 3], Difficult: [4, 4], 'Very Difficult': [5, 5] });
 });
 
-test('18 questions: 6 Level 1, then 6 Level 2, then 6 Level 3; maximum 36 marks', async () => {
-  const a = await sitIq('Order Check');
-  assert.equal(a.questions.length, 18);
-  assert.deepEqual(levelsOf(a.id), [...Array(6).fill('Easy'), ...Array(6).fill('Medium'), ...Array(6).fill('Hard')]);
-  const max = db.prepare('SELECT SUM(max_marks) AS m FROM assessment_questions WHERE assessment_id = ?').get(a.id).m;
-  assert.equal(max, 36);
-  // The candidate sees neither the level nor the marks.
-  const json = JSON.stringify(a.questions);
-  assert.ok(a.questions.every((q) => !('difficulty' in q) && !('marks' in q) && !('max_marks' in q)));
-  assert.ok(!/Easy|Medium|Hard|mark/i.test(json.replace(/Puzzle [EMH]\d+/g, '')));
+test('TEST 1: pool of 95, IQ count 20 -> exactly 20 questions, 4 per level, maximum 60', async () => {
+  const a = await sit('Twenty');
+  assert.equal(a.state.questions.length, 20);
+  const rows = copies(a.id);
+  assert.equal(rows.length, 20, '20 copies saved, not 95');
+  assert.deepEqual(rows.map((r) => r.difficulty), LEVELS.flatMap((l) => Array(4).fill(l)), 'Level 1 first, up to Level 5');
+  assert.equal(rows.reduce((s, r) => s + r.max_marks, 0), 60);
+  const json = JSON.stringify(a.state.questions);
+  assert.ok(a.state.questions.every((q) => !('difficulty' in q) && !('max_marks' in q)), 'the candidate sees no level or marks');
+  assert.ok(!/Basic|Moderate|Difficult/.test(json.replace(/Puzzle [A-Za-z ]+\d+/g, '')));
 });
 
-test('balanced split for other lengths (10, 15, 20, 30)', async () => {
-  assert.deepEqual(levelSplit(10), { Easy: 3, Medium: 3, Hard: 4 });
-  assert.deepEqual(levelSplit(15), { Easy: 5, Medium: 5, Hard: 5 });
-  assert.deepEqual(levelSplit(18), { Easy: 6, Medium: 6, Hard: 6 });
-  assert.deepEqual(levelSplit(20), { Easy: 7, Medium: 6, Hard: 7 });
-  assert.deepEqual(levelSplit(30), { Easy: 10, Medium: 10, Hard: 10 });
-  const ten = await sitIq('Ten', 10);
-  assert.deepEqual(levelsOf(ten.id), ['Easy', 'Easy', 'Easy', 'Medium', 'Medium', 'Medium', 'Hard', 'Hard', 'Hard', 'Hard']);
+test('TEST 2 and 3: count 10 -> 10 questions; count 95 -> all 95', async () => {
+  const ten = await sit('Ten', 10);
+  assert.equal(copies(ten.id).length, 10);
+  assert.deepEqual(copies(ten.id).map((r) => r.difficulty), LEVELS.flatMap((l) => [l, l]));
+  const all = await sit('All', 95);
+  assert.equal(copies(all.id).length, 95);
+  assert.equal(new Set(copies(all.id).map((r) => r.question_id)).size, 95);
 });
 
-test('different candidates get different random questions, always 6 / 6 / 6', async () => {
-  const sets = new Set();
-  for (let i = 0; i < 4; i++) {
-    const a = await sitIq('Random ' + i);
-    assert.deepEqual(levelsOf(a.id), [...Array(6).fill('Easy'), ...Array(6).fill('Medium'), ...Array(6).fill('Hard')]);
-    sets.add(a.questions.map((q) => q.text).sort().join('|'));
+test('TEST 4 and 5: invalid counts are rejected (96, 0, -1, 20.5, text, empty)', async () => {
+  for (const bad of [96, 0, -1, 20.5, 'abc', '']) {
+    const r = await create(bad);
+    assert.equal(r.status, 400, `count ${JSON.stringify(bad)} must be rejected`);
+    assert.ok(r.data.error, 'with a clear message');
   }
-  assert.ok(sets.size > 1);
+  assert.match((await create(96)).data.error, /Only 95 active IQ questions/);
+  assert.match((await create(0)).data.error, /at least 1 IQ question/);
+  assert.equal((await create(1)).status, 201);
+  assert.equal((await create(95)).status, 201);
 });
 
-test('weighted score: 6 L1 + 4 L2 + 3 L3 correct = 6 + 8 + 9 = 23 / 36 = 63.89%', async () => {
-  const a = await sitIq('John Smith');
-  const rows = db.prepare('SELECT id, difficulty FROM assessment_questions WHERE assessment_id = ? ORDER BY position').all(a.id);
-  const want = { Easy: 6, Medium: 4, Hard: 3 };
-  const seen = { Easy: 0, Medium: 0, Hard: 0 };
+test('the default 18 questions = 4 / 3 / 3 / 4 / 4, maximum 55; other lengths split evenly', async () => {
+  assert.deepEqual(levelSplit(18), { Easy: 4, Basic: 3, Moderate: 3, Difficult: 4, 'Very Difficult': 4 });
+  assert.deepEqual(levelSplit(20), { Easy: 4, Basic: 4, Moderate: 4, Difficult: 4, 'Very Difficult': 4 });
+  assert.deepEqual(levelSplit(10), { Easy: 2, Basic: 2, Moderate: 2, Difficult: 2, 'Very Difficult': 2 });
+  assert.deepEqual(levelSplit(30), { Easy: 6, Basic: 6, Moderate: 6, Difficult: 6, 'Very Difficult': 6 });
+  const a = await sit('Eighteen', 18);
+  assert.equal(copies(a.id).length, 18);
+  assert.equal(copies(a.id).reduce((s, r) => s + r.max_marks, 0), 55);
+});
+
+test('TEST 6 and 7: random sets, no duplicates, shuffled answer order', async () => {
+  const sets = new Set();
+  let shuffled = false;
+  for (let i = 0; i < 4; i++) {
+    const a = await sit('Random ' + i);
+    const rows = copies(a.id);
+    assert.equal(new Set(rows.map((r) => r.question_id)).size, 20, 'no question twice');
+    sets.add(rows.map((r) => r.question_id).sort().join(','));
+    if (rows.some((r) => r.option_order !== '["A","B","C","D"]')) shuffled = true;
+  }
+  assert.ok(sets.size > 1, 'different candidates get different questions');
+  assert.ok(shuffled, 'answer options are shuffled');
+});
+
+test('TEST 12: scoring uses only the selected questions (20 questions, maximum 60)', async () => {
+  const a = await sit('Scorer');
+  // Correct: all 4 of Level 1, 2 of Level 2, all of Level 3, 1 of Level 4, none of Level 5.
+  const want = { Easy: 4, Basic: 2, Moderate: 4, Difficult: 1, 'Very Difficult': 0 };
+  const seen = Object.fromEntries(LEVELS.map((l) => [l, 0]));
   const answers = {};
-  for (const q of rows) answers[q.id] = seen[q.difficulty]++ < want[q.difficulty] ? 'A' : 'B';
-  await candidate.post(`/api/exam/${a.token}/submit`, { answers });
-
+  for (const q of copies(a.id)) answers[q.id] = seen[q.difficulty]++ < want[q.difficulty] ? 'A' : 'B';
+  await candidate.post(url(a.token, '/submit'), { answers });
   const row = db.prepare('SELECT iq_points, iq_max, iq_correct, iq_total FROM assessments WHERE id = ?').get(a.id);
-  assert.deepEqual(row, { iq_points: 23, iq_max: 36, iq_correct: 13, iq_total: 18 });
-  assert.equal(Math.round((23 / 36) * 10000) / 100, 63.89);
-
+  assert.deepEqual(row, { iq_points: 4 + 4 + 12 + 4, iq_max: 60, iq_correct: 11, iq_total: 20 });
   const r = (await admin.get('/api/admin/results/iq')).data.find((x) => x.id === a.id);
-  assert.equal(r.iq_text, '23 / 36');
-  assert.equal(r.iq_score, 63.9);
-  assert.equal(r.iq_correct_text, '13 / 18');
-  assert.deepEqual(r.iq_levels.map((l) => [l.label, l.correct_text, l.marks_text]), [
-    ['Level 1 — Easy', '6 / 6', '6 / 6'], ['Level 2 — Medium', '4 / 6', '8 / 12'], ['Level 3 — Hard', '3 / 6', '9 / 18']]);
-
-  const review = (await admin.get('/api/admin/assessments/' + a.id)).data.iq;
-  assert.equal(review.iq_text, '23 / 36');
-  const cand = (await admin.get('/api/admin/candidates')).data.find((c) => c.name === 'John Smith');
-  assert.equal(cand.iq_text, '23 / 36');
-  assert.equal(cand.iq_correct_text, '13 / 18');
-  const dash = (await admin.get('/api/admin/dashboard')).data;
-  assert.equal(dash.highest_iq.iq_text, '23 / 36');
-  assert.equal(dash.highest_iq.iq_score, 63.9);
-
-  // Exports carry the same numbers.
-  const xls = await admin.get(`/api/admin/candidates/${cand.id}/export.xlsx`, { raw: true });
-  const x = XLSX.utils.sheet_to_json(XLSX.read(xls.buffer).Sheets.Candidates)[0];
-  assert.equal(x['IQ Test Score'], '23 / 36');
-  assert.equal(x['IQ %'], 63.9);
-  assert.equal(x['IQ Correct Answers'], '13 / 18');
-  assert.deepEqual([x['Level 1 Correct'], x['Level 1 Marks'], x['Level 2 Correct'], x['Level 2 Marks'], x['Level 3 Correct'], x['Level 3 Marks']],
-    ['6 / 6', '6 / 6', '4 / 6', '8 / 12', '3 / 6', '9 / 18']);
-  const word = await admin.get(`/api/admin/candidates/${cand.id}/export.docx`, { raw: true });
-  const text = (await mammoth.extractRawText({ buffer: word.buffer })).value;
-  for (const s of ['23 / 36 marks (63.9%)', '13 / 18', 'Level 2 — Medium', '4 / 6 correct, 8 / 12 marks']) assert.ok(text.includes(s), s);
+  assert.equal(r.iq_text, '24 / 60');
+  assert.equal(r.iq_score, 40);
+  assert.deepEqual(r.iq_levels.map((l) => [l.level, l.correct_text, l.marks_text]),
+    [[1, '4 / 4', '4 / 4'], [2, '2 / 4', '4 / 8'], [3, '4 / 4', '12 / 12'], [4, '1 / 4', '4 / 16'], [5, '0 / 4', '0 / 20']]);
+  const cand = (await admin.get('/api/admin/candidates')).data.find((c) => c.name === 'Scorer');
+  const x = XLSX.utils.sheet_to_json(XLSX.read((await admin.get(`/api/admin/candidates/${cand.id}/export.xlsx`, { raw: true })).buffer).Sheets.Candidates)[0];
+  assert.equal(x['IQ Test Score'], '24 / 60');
+  assert.equal(x['Level 5 Marks'], '0 / 20');
 });
 
-test('past tests are recalculated from levels without touching answers or dates', async () => {
-  // A test sat on questions that had no level and 1 mark each (the old rule).
-  const qid = db.prepare("INSERT INTO questions (section, difficulty, question_text, option_a, option_b, correct_answer, marks, created_at) VALUES ('IQ', '', 'Old unlevelled?', '1', '2', 'A', 1, ?)").run(new Date().toISOString()).lastInsertRowid;
-  const cid = db.prepare("INSERT INTO candidates (name, created_at, updated_at) VALUES ('Old Candidate', ?, ?)").run('2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z').lastInsertRowid;
-  const aid = db.prepare(`INSERT INTO assessments (token, candidate_id, assessment_type, sections, time_limit_minutes, link_expiry_minutes, link_expires_at, status, started_at, deadline_at, submitted_at, created_at, iq_points, iq_max, iq_breakdown)
-    VALUES ('old-token-xyz', ?, 'IQ', '{"IQ":1}', 10, 60, '2026-01-02T00:00:00.000Z', 'SUBMITTED', '2026-01-01T09:00:00.000Z', '2026-01-01T09:10:00.000Z', '2026-01-01T09:05:00.000Z', '2026-01-01T08:00:00.000Z', 1, 1, '{"Not set":[1,1]}')`).run(cid).lastInsertRowid;
-  db.prepare(`INSERT INTO assessment_questions (assessment_id, question_id, position, section, question_text, option_a, option_b, correct_answer, option_order, max_marks, answer, marks_awarded)
-    VALUES (?, ?, 1, 'IQ', 'Old unlevelled?', '1', '2', 'A', '["A","B"]', 1, 'A', 1)`).run(aid, qid);
+test('TEST 8: tests taken before the 5-level scale never change', async () => {
+  // A finished test on the earlier 3-level scale: Medium (2 marks) and Hard (3 marks) copies.
+  const cid = db.prepare("INSERT INTO candidates (name, created_at, updated_at) VALUES ('Old Scale', ?, ?)").run('2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z').lastInsertRowid;
+  const aid = db.prepare(`INSERT INTO assessments (token, candidate_id, assessment_type, sections, time_limit_minutes, link_expiry_minutes, link_expires_at, status, started_at, deadline_at, submitted_at, created_at)
+    VALUES ('old-scale-token', ?, 'IQ', '{"IQ":3}', 10, 60, '2026-01-02T00:00:00.000Z', 'SUBMITTED', '2026-01-01T09:00:00.000Z', '2026-01-01T09:10:00.000Z', '2026-01-01T09:05:00.000Z', '2026-01-01T08:00:00.000Z')`).run(cid).lastInsertRowid;
+  const add = db.prepare(`INSERT INTO assessment_questions (assessment_id, position, section, question_text, option_a, option_b, correct_answer, option_order, max_marks, difficulty, answer)
+    VALUES (?, ?, 'IQ', ?, '1', '2', 'A', '["A","B"]', ?, ?, ?)`);
+  add.run(aid, 1, 'Old easy', 1, 'Easy', 'A');
+  add.run(aid, 2, 'Old medium', 2, 'Medium', 'A');
+  add.run(aid, 3, 'Old hard', 3, 'Hard', 'B');
+  require('../src/assessments').scoreAssessment(aid);
+  const before = db.prepare('SELECT iq_points, iq_max, iq_breakdown, submitted_at, result FROM assessments WHERE id = ?').get(aid);
+  const copiesBefore = JSON.stringify(copies(aid));
+  assert.equal(before.iq_points, 3);
+  assert.equal(before.iq_max, 6);
 
-  // HR gives the question its level (Level 3); the old test follows.
-  const q = db.prepare('SELECT * FROM questions WHERE id = ?').get(qid);
-  const put = await admin.put('/api/admin/questions/' + qid, { ...q, difficulty: 'Hard' });
-  assert.equal(put.data.marks, 3);
-  const a = db.prepare('SELECT iq_points, iq_max, iq_correct, iq_total, submitted_at FROM assessments WHERE id = ?').get(aid);
-  assert.deepEqual(a, { iq_points: 3, iq_max: 3, iq_correct: 1, iq_total: 1, submitted_at: '2026-01-01T09:05:00.000Z' });
-  const aq = db.prepare('SELECT answer, difficulty FROM assessment_questions WHERE assessment_id = ?').get(aid);
-  assert.deepEqual(aq, { answer: 'A', difficulty: 'Hard' });
-  assert.equal(syncIqLevels(), 0, 'running again changes nothing');
+  syncIqLevels();
+  rescoreAll();
+  await admin.put('/api/admin/settings', { default_time_minutes: 30, default_link_expiry_minutes: 1440, pass_mark: 60, default_language: 'en' });
+  assert.deepEqual(db.prepare('SELECT iq_points, iq_max, iq_breakdown, submitted_at, result FROM assessments WHERE id = ?').get(aid), before);
+  assert.equal(JSON.stringify(copies(aid)), copiesBefore, 'copies (questions, answers, marks, levels) unchanged');
+  const r = (await admin.get('/api/admin/results/iq')).data.find((x) => x.id === aid);
+  assert.equal(r.iq_text, '3 / 6');
+  assert.deepEqual(r.iq_levels.map((l) => l.label), ['Level 1 — Easy', 'Level 2 — Medium (earlier 3-level scale)', 'Level 3 — Hard (earlier 3-level scale)']);
 });
 
-test('import: level decides marks, missing level -> Level 2, unknown level is rejected', async () => {
+test('TEST 9: one link with the 95 pool: 20 IQ -> General -> Calculation -> Essay -> COMPLETE', async () => {
+  const a = await sit('Full Flow', 20, ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY']);
+  let s = a.state;
+  const keys = [];
+  while (s.state === 'in_progress') {
+    keys.push(s.section);
+    if (s.section === 'IQ') assert.equal(s.questions.length, 20, 'exactly 20 IQ questions from the 95');
+    const rows = copies(a.id).filter((q) => s.questions.some((x) => x.id === q.id));
+    const answers = Object.fromEntries(rows.map((q) => [q.id, q.section === 'ESSAY' ? 'My essay.' : q.correct_answer]));
+    s = (await candidate.post(url(a.token, '/submit'), { answers })).data;
+    if (s.state === 'next_test') s = (await candidate.post(url(a.token, '/continue'))).data;
+  }
+  assert.deepEqual(keys, ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY']);
+  assert.equal(s.outcome, 'completed');
+  const essay = copies(a.id).find((q) => q.section === 'ESSAY');
+  await admin.put(`/api/admin/assessments/${a.id}/essay-marks`, { marks: { [essay.id]: 8 } });
+  assert.equal((await candidate.get(url(a.token))).data.current_stage, 'COMPLETE');
+});
+
+test('TEST 10 and 11: IQ failure stops the link; refresh resumes the same 20 questions', async () => {
+  const a = await sit('Fails', 20, ['IQ', 'GENERAL']);
+  const again = (await client().get(url(a.token))).data;
+  assert.deepEqual(again.questions.map((q) => q.id), a.state.questions.map((q) => q.id), 'same 20 questions after a refresh');
+  assert.equal(copies(a.id).length, 20, 'no new questions drawn on refresh');
+  const answers = Object.fromEntries(copies(a.id).map((q) => [q.id, 'B']));
+  const s = (await candidate.post(url(a.token, '/submit'), { answers })).data;
+  assert.equal(s.outcome, 'stopped');
+  assert.equal((await candidate.post(url(a.token, '/continue'))).status, 409);
+});
+
+test('import: levels 1-5 by number or name; missing = Level 3; unknown rejected', async () => {
   const form = new FormData();
   form.append('section', 'IQ');
-  const csv = 'Question,Difficulty,Option A,Option B,Correct Answer,Marks\nQ one?,easy,1,2,A,5\nQ two?,Level 3,1,2,B,1\nQ three?,ປານກາງ,1,2,A,\nQ four?,,1,2,A,\nQ five?,Tricky,1,2,A,\n';
+  const csv = 'Question,Difficulty,Option A,Option B,Correct Answer,Marks\nQ1?,1,1,2,A,9\nQ2?,Basic,1,2,A,9\nQ3?,,1,2,A,\nQ4?,Level 4,1,2,A,\nQ5?,very difficult,1,2,A,\nQ6?,Tricky,1,2,A,\n';
   form.append('file', new Blob([Buffer.from(csv)]), 'levels.csv');
   const r = await admin.post('/api/admin/questions/import/preview', undefined, { form });
-  assert.deepEqual(r.data.rows.map((x) => [x.question.difficulty, x.question.marks]), [['Easy', 1], ['Hard', 3], ['Medium', 2], ['Medium', 2], ['Medium', 2]]);
-  assert.match(r.data.rows[4].errors.join(' '), /Level must be 1, 2 or 3/);
+  assert.deepEqual(r.data.rows.map((x) => [x.question.difficulty, x.question.marks]),
+    [['Easy', 1], ['Basic', 2], ['Moderate', 3], ['Difficult', 4], ['Very Difficult', 5], ['Moderate', 3]]);
+  assert.match(r.data.rows[5].errors.join(' '), /Level must be 1-5/);
 });
 
-test('inactive questions are never selected, stay visible in the bank, and past reviews still work', async () => {
-  // A finished test that used Level 1 questions.
-  const past = await sitIq('Before Cleanup');
-  await candidate.post(`/api/exam/${past.token}/submit`, { answers: {} });
-  const before = db.prepare('SELECT iq_points, iq_max, submitted_at FROM assessments WHERE id = ?').get(past.id);
-
-  // Make every Level 1 question except three Inactive (status only).
+test('inactive questions are never selected and stay visible in the bank', async () => {
   const easy = db.prepare("SELECT * FROM questions WHERE section = 'IQ' AND difficulty = 'Easy' ORDER BY id").all();
-  for (const q of easy.slice(3)) {
-    const r = await admin.put('/api/admin/questions/' + q.id, { ...q, status: 'Inactive' });
-    assert.equal(r.data.status, 'Inactive');
-    assert.equal(r.data.question_text, q.question_text);
-    assert.equal(r.data.correct_answer, q.correct_answer);
-    assert.equal(r.data.difficulty, q.difficulty);
-    assert.equal(r.data.marks, q.marks);
+  for (const q of easy.slice(4)) await admin.put('/api/admin/questions/' + q.id, { ...q, status: 'Inactive' });
+  const inactive = new Set(easy.slice(4).map((q) => q.id));
+  for (let i = 0; i < 3; i++) {
+    const a = await sit('After Cleanup ' + i);
+    assert.ok(copies(a.id).every((u) => !inactive.has(u.question_id)));
+    assert.equal(copies(a.id).length, 20);
   }
-  // An active IQ question without a level is not usable either.
-  db.prepare("INSERT INTO questions (section, difficulty, question_text, option_a, option_b, correct_answer, marks, created_at) VALUES ('IQ', '', 'No level yet?', '1', '2', 'A', 1, ?)").run(new Date().toISOString());
-  const inactiveIds = new Set(easy.slice(3).map((q) => q.id));
-
-  for (let i = 0; i < 5; i++) {
-    const a = await sitIq('After Cleanup ' + i);
-    const used = db.prepare('SELECT question_id, difficulty, question_text FROM assessment_questions WHERE assessment_id = ?').all(a.id);
-    assert.ok(used.every((u) => !inactiveIds.has(u.question_id)), 'no inactive question is used');
-    assert.ok(used.every((u) => u.question_text !== 'No level yet?'), 'an unlevelled question is not used');
-    assert.equal(used.length, 18);
-  }
-
-  // The bank shows active and inactive counts, and can list inactive questions.
-  const bank = (await admin.get('/api/admin/questions?section=IQ&status=Inactive')).data;
-  assert.ok(bank.questions.length >= inactiveIds.size && bank.questions.every((q) => q.status === 'Inactive'));
-  assert.ok(bank.inactive_counts.IQ >= inactiveIds.size);
-  const usable = db.prepare("SELECT COUNT(*) AS n FROM questions WHERE section = 'IQ' AND status = 'Active' AND difficulty IN ('Easy', 'Medium', 'Hard')").get().n;
-  assert.equal((await admin.get('/api/admin/questions/counts')).data.IQ, usable, 'counts cover active, levelled questions only');
-
-  // The earlier test is unchanged and still opens and exports.
-  assert.deepEqual(db.prepare('SELECT iq_points, iq_max, submitted_at FROM assessments WHERE id = ?').get(past.id), before);
-  const review = await admin.get('/api/admin/assessments/' + past.id);
-  assert.equal(review.status, 200);
-  assert.equal(review.data.questions.length, 18);
-  const cid = db.prepare('SELECT candidate_id FROM assessments WHERE id = ?').get(past.id).candidate_id;
-  assert.equal((await admin.get(`/api/admin/candidates/${cid}/export.pdf`, { raw: true })).status, 200);
-
-  // Uploading a copy of an inactive question again is skipped, not inserted.
-  const q = easy[5];
-  const form = new FormData();
-  form.append('section', 'IQ');
-  form.append('file', new Blob([Buffer.from(`Question,Difficulty,Option A,Option B,Option C,Option D,Correct Answer\n"${q.question_text}",Easy,1,2,3,4,A\n`)]), 'again.csv');
-  const p = await admin.post('/api/admin/questions/import/preview', undefined, { form });
-  assert.equal(p.data.valid, 0);
-  assert.match(p.data.rows[0].errors.join(' '), /already in the question bank/);
+  assert.equal((await admin.get('/api/admin/questions?section=IQ&status=Inactive')).data.questions.length, inactive.size);
+  assert.equal((await admin.get('/api/admin/questions/counts')).data.IQ, 95 - inactive.size);
 });

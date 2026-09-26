@@ -187,8 +187,10 @@ window.addEventListener('hashchange', () => { if (!$('app').classList.contains('
 // IQ result (weighted: Level 1 = 1 mark, Level 2 = 2, Level 3 = 3)
 // ---------------------------------------------------------------------------
 
-const LEVEL_NAMES = { Easy: 'Level 1 — Easy', Medium: 'Level 2 — Medium', Hard: 'Level 3 — Hard' };
-const LEVEL_MARK = { Easy: 1, Medium: 2, Hard: 3 };
+const LEVEL_NAMES = { Easy: 'Level 1 — Easy', Basic: 'Level 2 — Basic', Moderate: 'Level 3 — Moderate', Difficult: 'Level 4 — Difficult', 'Very Difficult': 'Level 5 — Very Difficult',
+  Medium: 'Medium (earlier 3-level scale)', Hard: 'Hard (earlier 3-level scale)' };
+const LEVEL_MARK = { Easy: 1, Basic: 2, Moderate: 3, Difficult: 4, 'Very Difficult': 5 };
+const IQ_LEVELS = [1, 2, 3, 4, 5];
 const levelOf = (r, n) => (r.iq_levels || []).find((l) => l.level === n);
 const levelMarksCell = (r, n) => { const l = levelOf(r, n); return l ? l.marks_text : '-'; };
 const levelCell = (r, n) => {
@@ -218,10 +220,10 @@ async function renderDashboard() {
   const stat = (label, value, sub, cls) => h('div', { class: 'stat ' + (cls || '') }, h('div', { class: 'label' }, label), h('div', { class: 'value' }, value), sub ? h('div', { class: 'sub' }, sub) : null);
   const recent = d.recent.length
     ? h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, ['Candidate', 'IQ Test Score', 'IQ %', 'Level 1', 'Level 2', 'Level 3', 'Result', 'Date'].map((t) => h('th', {}, t)))),
+      h('thead', {}, h('tr', {}, ['Candidate', 'IQ Test Score', 'IQ %', ...IQ_LEVELS.map((n) => 'L' + n), 'Result', 'Date'].map((t) => h('th', {}, t)))),
       h('tbody', {}, d.recent.map((c) => h('tr', { class: 'clickable', onclick: () => { location.hash = '#/candidates/' + c.id; } },
         h('td', {}, c.name), h('td', {}, c.iq_text ? h('strong', {}, c.iq_text) : '-'), h('td', {}, c.iq_text ? c.iq_score + '%' : '-'),
-        h('td', {}, levelMarksCell(c, 1)), h('td', {}, levelMarksCell(c, 2)), h('td', {}, levelMarksCell(c, 3)),
+        ...IQ_LEVELS.map((n) => h('td', { class: 'small' }, levelMarksCell(c, n))),
         h('td', {}, resultBadge(c.overall_result)), h('td', {}, fmtDate(c.last_test_date)))))))
     : h('p', { class: 'muted' }, 'No completed assessments yet. Start by uploading questions, then create an assessment link.');
 
@@ -514,14 +516,14 @@ function showPreview(container, p, onDone) {
 function editQuestion(q, onSaved) {
   q = q || { section: questionSection || 'IQ', marks: 1, status: 'Active', difficulty: 'Medium' };
   let showError = () => {};
-  const known = ['Easy', 'Medium', 'Hard'];
+  const known = ['Easy', 'Basic', 'Moderate', 'Difficult', 'Very Difficult'];
   const levelSelect = select('difficulty', [['', '-'], ...known.map((k) => [k, LEVEL_NAMES[k]]), ...(q.difficulty && !known.includes(q.difficulty) ? [[q.difficulty, q.difficulty]] : [])], q.difficulty || '');
   const marksInput = h('input', { name: 'marks', type: 'number', min: 0.5, max: 100, step: 0.5, value: q.marks });
-  // IQ questions: marks come from the level (1 / 2 / 3) and cannot be typed.
+  // IQ questions: marks come from the level (1-5) and cannot be typed.
   const syncMarks = () => {
     const isIq = form.elements.section.value === 'IQ';
     marksInput.disabled = isIq;
-    if (isIq) { if (!levelSelect.value) levelSelect.value = 'Medium'; marksInput.value = LEVEL_MARK[levelSelect.value] || 2; }
+    if (isIq) { if (!LEVEL_MARK[levelSelect.value]) levelSelect.value = 'Moderate'; marksInput.value = LEVEL_MARK[levelSelect.value]; }
   };
   const form = h('form', { class: 'grid' },
     field('Type', select('section', Object.entries(SECTION_LABEL), q.section)),
@@ -600,7 +602,7 @@ async function renderAssessments() {
     field('Link expires in', expirySelect),
     customField,
     testsBox,
-    h('p', { class: 'muted small wide' }, `The candidate gets ONE link, enters their details once, then takes the tests in order. Each test has its own timer. A test is passed at ${settings.pass_mark}% (Settings); if a test is not passed the assessment stops. Questions are random for each candidate and answers are shuffled. IQ: Level 1 → 2 → 3 (18 questions = 6 / 6 / 6, maximum 36 marks).`),
+    h('p', { class: 'muted small wide' }, `The candidate gets ONE link, enters their details once, then takes the tests in order. Each test has its own timer. A test is passed at ${settings.pass_mark}% (Settings); if a test is not passed the assessment stops. Questions are random for each candidate and answers are shuffled. IQ: Level 1 → 5, split evenly (18 questions = 4 / 3 / 3 / 4 / 4, maximum 55 marks; 20 = 4 each, maximum 60).`),
     h('div', { class: 'wide' }, h('button', { type: 'submit' }, 'Generate ONE Assessment Link')));
 
   form.addEventListener('submit', async (e) => {
@@ -790,15 +792,15 @@ async function renderResults() {
   const [list, iq] = await Promise.all([api('GET', '/candidates'), api('GET', '/results/iq')]);
   const iqCard = h('div', { class: 'card' }, h('h2', {}, 'IQ Test Results'),
     iq.length ? h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, ['Candidate', 'IQ Test Score', 'IQ %', 'Correct Answers', 'Level 1 — Easy', 'Level 2 — Medium', 'Level 3 — Hard', 'Assessment Date', ''].map((t) => h('th', {}, t)))),
+      h('thead', {}, h('tr', {}, ['Candidate', 'IQ Test Score', 'IQ %', 'Correct Answers', ...IQ_LEVELS.map((n) => 'Level ' + n), 'Assessment Date', ''].map((t) => h('th', {}, t)))),
       h('tbody', {}, iq.map((r) => h('tr', {},
         h('td', {}, r.candidate_id ? h('a', { href: '#/candidates/' + r.candidate_id }, r.candidate_name) : '-'),
         h('td', {}, h('strong', {}, r.iq_text)), h('td', {}, r.iq_score + '%'), h('td', {}, r.iq_correct_text || '-'),
-        h('td', {}, levelCell(r, 1)), h('td', {}, levelCell(r, 2)), h('td', {}, levelCell(r, 3)),
+        ...IQ_LEVELS.map((n) => h('td', {}, levelCell(r, n))),
         h('td', {}, fmtDate(r.iq_date)),
         h('td', {}, h('a', { class: 'button secondary small', href: '#/assessments/' + r.id }, 'Answers')))))))
       : h('p', { class: 'muted' }, 'No IQ tests submitted yet.'),
-    h('p', { class: 'muted small' }, 'IQ Test Score = marks earned out of the maximum. Each correct answer is worth 1 mark at Level 1, 2 at Level 2 and 3 at Level 3 (18 questions: maximum 36). It is a test score, not a clinical IQ measurement.'));
+    h('p', { class: 'muted small' }, 'IQ Test Score = marks earned out of the maximum. Each correct answer is worth its level: Level 1 = 1 mark up to Level 5 = 5 marks. The maximum comes from the questions the candidate actually got (e.g. 20 questions = 4 per level = 60). Tests taken before the 5-level scale keep their earlier Easy / Medium / Hard marks. It is a test score, not a clinical IQ measurement.'));
   view().replaceChildren(
     h('div', { class: 'row between' }, h('h1', {}, 'Results'), downloadLink('/export/candidates.xlsx', 'Export all candidates (Excel)', '')),
     iqCard,

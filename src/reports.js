@@ -60,14 +60,18 @@ function summarize(candidate, submitted, latestStarted) {
 
 // The IQ result of one assessment. The official IQ Test Score is the weighted
 // marks (Level 1 = 1, Level 2 = 2, Level 3 = 3 per correct answer), e.g. "21 / 36".
-const LEVELS = [['Easy', 'Level 1 — Easy'], ['Medium', 'Level 2 — Medium'], ['Hard', 'Level 3 — Hard']];
+// Level key, level number and label. "Medium" and "Hard" only appear in tests
+// taken on the earlier 3-level scale (then Level 2 and Level 3).
+const LEVELS = [['Easy', 1, 'Level 1 — Easy'], ['Basic', 2, 'Level 2 — Basic'], ['Moderate', 3, 'Level 3 — Moderate'],
+  ['Difficult', 4, 'Level 4 — Difficult'], ['Very Difficult', 5, 'Level 5 — Very Difficult'],
+  ['Medium', 2, 'Level 2 — Medium (earlier 3-level scale)'], ['Hard', 3, 'Level 3 — Hard (earlier 3-level scale)']];
 function iqResult(a) {
   if (!a || a.iq_max == null) return { iq_score: null, iq_text: null, iq_correct_text: null, iq_levels: [], iq_date: null };
   let breakdown = {};
   try { breakdown = JSON.parse(a.iq_breakdown || '{}') || {}; } catch { breakdown = {}; }
-  const levels = LEVELS.map(([key, label], i) => {
+  const levels = LEVELS.map(([key, number, label]) => {
     const b = breakdown[key];
-    return b && b.total ? { level: i + 1, key, label, correct: b.correct, total: b.total, marks: b.marks, max: b.max,
+    return b && b.total ? { level: number, key, label, correct: b.correct, total: b.total, marks: b.marks, max: b.max,
       correct_text: `${b.correct} / ${b.total}`, marks_text: `${b.marks} / ${b.max}` } : null;
   }).filter(Boolean);
   return {
@@ -163,12 +167,7 @@ const COLUMNS = [
   ['IQ Test Score', (c) => c.iq_text],
   ['IQ %', (c) => c.iq_score],
   ['IQ Correct Answers', (c) => c.iq_correct_text],
-  ['Level 1 Correct', (c) => levelText(c, 1)?.correct_text],
-  ['Level 1 Marks', (c) => levelText(c, 1)?.marks_text],
-  ['Level 2 Correct', (c) => levelText(c, 2)?.correct_text],
-  ['Level 2 Marks', (c) => levelText(c, 2)?.marks_text],
-  ['Level 3 Correct', (c) => levelText(c, 3)?.correct_text],
-  ['Level 3 Marks', (c) => levelText(c, 3)?.marks_text],
+  ...[1, 2, 3, 4, 5].flatMap((n) => [[`Level ${n} Correct`, (c) => levelText(c, n)?.correct_text], [`Level ${n} Marks`, (c) => levelText(c, n)?.marks_text]]),
   ['Character', (c) => c.character_note],
   ['Test Score', (c) => c.test_score],
   ['General Test', (c) => c.general_score],
@@ -222,7 +221,7 @@ function reportSections(c) {
   ];
 }
 
-const NOTE = 'Scores are percentages of available marks. IQ Test Score = marks earned (Level 1 = 1, Level 2 = 2, Level 3 = 3 per correct answer) out of the maximum; it is not a clinical IQ measurement.';
+const NOTE = 'Scores are percentages of available marks. IQ Test Score = marks earned (Level 1 = 1 up to Level 5 = 5 per correct answer) out of the maximum; it is not a clinical IQ measurement.';
 
 function candidatePdf(c) {
   return new Promise((resolve, reject) => {

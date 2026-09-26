@@ -98,13 +98,13 @@ test('candidates see pictures, can answer, and admin sees chosen / correct / mis
   const rows = review.data.questions;
   const byId = Object.fromEntries(rows.map((q) => [q.id, q]));
   assert.equal(byId[pic.id].answer, 'C');
-  assert.equal(byId[pic.id].marks_awarded, 2, 'no level given -> Level 2 -> 2 marks');
+  assert.equal(byId[pic.id].marks_awarded, 3, 'no level given -> Level 3 -> 3 marks');
   assert.equal(byId[pic.id].option_c_image, opts.option_c_image, 'review has the pictures of the chosen option');
   assert.equal(byId[maths.id].answer, 'A');
   assert.equal(byId[maths.id].marks_awarded, 0);
   const skipped = rows.find((q) => q.id !== pic.id && q.id !== maths.id);
   assert.equal(skipped.answer, null, 'missed question is recorded as not answered');
-  assert.equal(review.data.assessment.iq_points, 2);
+  assert.equal(review.data.assessment.iq_points, 3);
   assert.equal(review.data.iq.iq_correct_text, '1 / 3');
 });
 

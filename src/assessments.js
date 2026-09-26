@@ -28,46 +28,60 @@ function questionKey(q) {
   return [q.section, norm(q.question_text), ...SNAPSHOT_COLS.map((c) => norm(q[c]))].join('|');
 }
 
-// ---- IQ difficulty ------------------------------------------------------
-// An IQ test starts easy and gets harder. Questions without a difficulty
-// count as Medium.
-// Three IQ levels. The level alone decides a question's marks:
-// Level 1 Easy = 1 mark, Level 2 Medium = 2 marks, Level 3 Hard = 3 marks.
-const DIFFICULTIES = ['Easy', 'Medium', 'Hard'];
-const LEVEL_MARKS = { Easy: 1, Medium: 2, Hard: 3 };
+// ---- IQ levels ------------------------------------------------------------
+// Five IQ levels. The level alone decides a question's marks:
+// Level 1 Easy = 1, Level 2 Basic = 2, Level 3 Moderate = 3,
+// Level 4 Difficult = 4, Level 5 Very Difficult = 5.
+const DIFFICULTIES = ['Easy', 'Basic', 'Moderate', 'Difficult', 'Very Difficult'];
+const LEVEL_MARKS = { Easy: 1, Basic: 2, Moderate: 3, Difficult: 4, 'Very Difficult': 5 };
+// Tests taken before the 5-level scale keep their own copies tagged
+// "Medium" (2 marks) and "Hard" (3 marks). They are shown and scored exactly
+// as they were; new tests never use these names.
+const LEGACY_LEVELS = { Medium: { marks: 2, number: 2 }, Hard: { marks: 3, number: 3 } };
+
+// Reads a level typed by HR or found in a file: 1-5, "Level 4", or the name
+// (older words like Medium / Hard are read as Moderate / Difficult).
 function difficultyLevel(value) {
   const v = String(value || '').trim().toLowerCase();
+  if (/^(very\s*(difficult|hard)|ຍາກຫຼາຍ|(level\s*)?5$)/.test(v)) return 'Very Difficult';
   if (/^(easy|ງ່າຍ|(level\s*)?1$)/.test(v)) return 'Easy';
-  if (/^(medium|normal|ປານກາງ|(level\s*)?2$)/.test(v)) return 'Medium';
-  if (/^(hard|difficult|ຍາກ|(level\s*)?3$)/.test(v)) return 'Hard';
+  if (/^(basic|ພື້ນຖານ|(level\s*)?2$)/.test(v)) return 'Basic';
+  if (/^(moderate|medium|normal|ປານກາງ|(level\s*)?3$)/.test(v)) return 'Moderate';
+  if (/^(difficult|hard|ຍາກ|(level\s*)?4$)/.test(v)) return 'Difficult';
   return '';
 }
-// A question without a level is treated as Level 2 (Medium).
-const levelOf = (q) => difficultyLevel(q.difficulty) || 'Medium';
-const levelMarks = (q) => LEVEL_MARKS[levelOf(q)];
+// The level of a question (bank or copy). A question without a level counts as Level 3.
+function levelOf(q) {
+  if (LEGACY_LEVELS[q.difficulty]) return q.difficulty;
+  return difficultyLevel(q.difficulty) || 'Moderate';
+}
+const levelMarks = (q) => (LEGACY_LEVELS[levelOf(q)] ? LEGACY_LEVELS[levelOf(q)].marks : LEVEL_MARKS[levelOf(q)]);
+const levelNumber = (level) => (LEGACY_LEVELS[level] ? LEGACY_LEVELS[level].number : DIFFICULTIES.indexOf(level) + 1);
 
 // How many questions of each level an IQ test of n questions gets: as even as
-// possible, extra questions going to Level 3 first, then Level 1
-// (10 -> 3/3/4, 18 -> 6/6/6, 20 -> 7/6/7).
+// possible; extra questions go to Level 5, then 1, then 4, then 2
+// (18 -> 4/3/3/4/4, 20 -> 4/4/4/4/4, 10 -> 2/2/2/2/2).
 function levelSplit(n) {
-  const base = Math.floor(n / 3);
-  const extra = n % 3;
-  return { Easy: base + (extra === 2 ? 1 : 0), Medium: base, Hard: base + (extra >= 1 ? 1 : 0) };
+  const base = Math.floor(n / 5);
+  const want = Object.fromEntries(DIFFICULTIES.map((d) => [d, base]));
+  ['Very Difficult', 'Easy', 'Difficult', 'Basic'].slice(0, n % 5).forEach((d) => { want[d]++; });
+  return want;
 }
 
 // Picks n questions from an already shuffled pool: random within each level,
-// shown Level 1 first, then Level 2, then Level 3. If a level has too few
-// questions, the gap is filled from the other levels.
+// shown Level 1 first, up to Level 5. If a level has too few questions, the gap
+// is filled from the other levels. Never more than n.
 function pickProgressive(pool, n) {
-  const byLevel = { Easy: [], Medium: [], Hard: [] };
-  for (const q of pool) byLevel[levelOf(q)].push(q);
+  const byLevel = Object.fromEntries(DIFFICULTIES.map((d) => [d, []]));
+  const bucket = (q) => (byLevel[levelOf(q)] ? levelOf(q) : difficultyLevel(q.difficulty) || 'Moderate');
+  for (const q of pool) byLevel[bucket(q)].push(q);
   const want = levelSplit(n);
   const picked = [];
   for (const level of DIFFICULTIES) picked.push(...byLevel[level].splice(0, want[level]));
-  const rest = [...byLevel.Easy, ...byLevel.Medium, ...byLevel.Hard];
+  const rest = DIFFICULTIES.flatMap((d) => byLevel[d]);
   picked.push(...shuffle(rest).slice(0, n - picked.length));
-  const rank = (q) => DIFFICULTIES.indexOf(levelOf(q));
-  return picked.map((q, i) => [q, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([q]) => q);
+  const rank = (q) => DIFFICULTIES.indexOf(bucket(q));
+  return picked.slice(0, n).map((q, i) => [q, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([q]) => q);
 }
 
 const newToken = () => crypto.randomBytes(24).toString('base64url');
@@ -82,9 +96,9 @@ function shuffle(list) {
   return a;
 }
 
-// Questions a new assessment may use: Active, and for IQ also given a level
-// (Easy / Medium / Hard). Inactive questions are never selected.
-const USABLE = "status = 'Active' AND (section != 'IQ' OR difficulty IN ('Easy', 'Medium', 'Hard'))";
+// Questions a new assessment may use: Active, and for IQ also given one of the
+// five levels. Inactive questions are never selected.
+const USABLE = `status = 'Active' AND (section != 'IQ' OR difficulty IN (${DIFFICULTIES.map((d) => `'${d}'`).join(', ')}))`;
 
 function activeCounts() {
   const counts = Object.fromEntries(SECTIONS.map((s) => [s, 0]));
@@ -117,9 +131,14 @@ function createAssessment(input) {
   const sections = {};
   const minutes = {};
   for (const sec of tests) {
-    const n = Number(input.counts?.[sec] ?? 0);
-    if (!Number.isInteger(n) || n < 0 || n > 500) throw new InputError('Number of questions must be a whole number.');
-    if (n === 0) continue;
+    const raw = input.counts?.[sec];
+    const n = Number(raw ?? 0);
+    if (raw === '' || !Number.isInteger(n) || n < 0 || n > 500) throw new InputError(`Number of ${label(sec)} questions must be a whole number of at least 1.`);
+    if (n === 0) {
+      // Ticking a test with 0 questions is a mistake; with the older type choice, 0 just leaves it out.
+      if (Array.isArray(input.tests)) throw new InputError(`Please enter at least 1 ${label(sec)} question (the bank has ${available[sec]}).`);
+      continue;
+    }
     if (n > available[sec]) throw new InputError(`Only ${available[sec]} active ${label(sec)} questions are in the question bank.`);
     const m = Number(input.minutes?.[sec] || input.time_limit_minutes || settings.default_time_minutes);
     if (!Number.isInteger(m) || m < 1 || m > 600) throw new InputError(`Time for the ${label(sec)} test must be between 1 and 600 minutes.`);
@@ -438,28 +457,15 @@ function finalizeExpired() {
   return expired.length;
 }
 
-// 1. Bank IQ questions: marks follow the level.
-// 2. Candidates' IQ questions that were copied without a level take the level
-//    their bank question has now (answers and dates are never touched).
-// 3. Their marks follow the level, and changed tests are scored again.
 function syncIqLevels() {
+  // Bank IQ questions: marks follow the level. Candidates' copies are never
+  // changed here, so past results stay exactly as they were.
   const fixMarks = db.prepare("UPDATE questions SET marks = ? WHERE id = ? AND section = 'IQ' AND marks != ?");
+  let n = 0;
   for (const q of db.prepare("SELECT id, difficulty FROM questions WHERE section = 'IQ'").all()) {
-    if (difficultyLevel(q.difficulty)) fixMarks.run(levelMarks(q), q.id, levelMarks(q));
+    if (difficultyLevel(q.difficulty) && !LEGACY_LEVELS[q.difficulty]) n += fixMarks.run(levelMarks(q), q.id, levelMarks(q)).changes;
   }
-  db.prepare(`UPDATE assessment_questions SET difficulty = (SELECT q.difficulty FROM questions q WHERE q.id = assessment_questions.question_id)
-    WHERE section = 'IQ' AND difficulty = '' AND question_id IS NOT NULL
-      AND COALESCE((SELECT q.difficulty FROM questions q WHERE q.id = assessment_questions.question_id), '') != ''`).run();
-  const changed = new Set();
-  const setMax = db.prepare('UPDATE assessment_questions SET max_marks = ? WHERE id = ?');
-  for (const q of db.prepare("SELECT id, assessment_id, difficulty, max_marks FROM assessment_questions WHERE section = 'IQ'").all()) {
-    if (q.max_marks !== levelMarks(q)) { setMax.run(levelMarks(q), q.id); changed.add(q.assessment_id); }
-  }
-  // Results saved in the older format (lists instead of per-level marks) are recalculated too.
-  for (const a of db.prepare("SELECT id FROM assessments WHERE status = 'SUBMITTED' AND iq_max IS NOT NULL AND (iq_breakdown IS NULL OR iq_breakdown NOT LIKE '%\"marks\"%')").all()) changed.add(a.id);
-  const submitted = db.prepare("SELECT status FROM assessments WHERE id = ?");
-  for (const id of changed) if (submitted.get(id)?.status === 'SUBMITTED') scoreAssessment(id);
-  return changed.size;
+  return 0;
 }
 
 function setEssayMarks(assessmentId, marks) {
@@ -497,7 +503,7 @@ function regenerateLink(id) {
 
 module.exports = {
   stagesOf, continueAssessment, currentStage,
-  SECTIONS, TYPES, LANGUAGES, LETTERS, DIFFICULTIES, LEVEL_MARKS, InputError, label, questionKey, difficultyLevel, levelSplit, pickProgressive, syncIqLevels,
+  SECTIONS, TYPES, LANGUAGES, LETTERS, DIFFICULTIES, LEVEL_MARKS, LEGACY_LEVELS, levelOf, levelNumber, InputError, label, questionKey, difficultyLevel, levelSplit, pickProgressive, syncIqLevels,
   activeCounts, inactiveCounts, createAssessment, getAssessment, linkState, startAssessment, saveAnswer,
   isPastDeadline, submitAssessment, finalize, finalizeExpired, scoreAssessment, setEssayMarks, rescoreAll, regenerateLink,
 };
