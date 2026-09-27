@@ -130,14 +130,20 @@ test('dashboard shows totals and the highest IQ test score', async () => {
   assert.ok(d.average_test_score > 0);
 });
 
-test('changing the pass mark re-evaluates results', async () => {
+test('changing the pass marks applies to new links only; finished results never change', async () => {
   const before = (await admin.get('/api/admin/settings')).data;
-  await admin.put('/api/admin/settings', { ...before, pass_mark: 25 });
-  const low = db.prepare('SELECT result FROM assessments WHERE candidate_id = ?').get(failer);
-  assert.equal(low.result, 'Pass');
-  await admin.put('/api/admin/settings', { ...before, pass_mark: 60 });
-  assert.equal(db.prepare('SELECT result FROM assessments WHERE candidate_id = ?').get(failer).result, 'Not Pass');
-  assert.equal((await admin.put('/api/admin/settings', { ...before, pass_mark: 500 })).status, 400);
+  const result = () => db.prepare('SELECT result FROM assessments WHERE candidate_id = ?').get(failer).result;
+  const was = result();
+  const r = await admin.put('/api/admin/settings', { ...before, pass_iq: 5, pass_general: 5, pass_calculation: 5, pass_essay: 5, final_eligibility: 5 });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.pass_iq, 5);
+  assert.equal(result(), was, 'a finished assessment keeps the pass mark it was taken with');
+  const fresh = await admin.post('/api/admin/assessments', { tests: ['IQ'], counts: { IQ: 1 }, link_expiry_minutes: 60 });
+  assert.equal(fresh.data.stages[0].pass_mark, 5, 'new links use the new default');
+  assert.equal(fresh.data.eligibility_mark, 5);
+  await admin.put('/api/admin/settings', before);
+  assert.equal((await admin.put('/api/admin/settings', { ...before, pass_iq: 500 })).status, 400);
+  assert.equal((await admin.put('/api/admin/settings', { ...before, final_eligibility: -1 })).status, 400);
 });
 
 test('past results survive editing and deleting bank questions', async () => {

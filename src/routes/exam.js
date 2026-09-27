@@ -4,6 +4,7 @@
 const express = require('express');
 const { db } = require('../db');
 const A = require('../assessments');
+const reports = require('../reports');
 const images = require('../images');
 
 const router = express.Router();
@@ -24,17 +25,32 @@ function loadFresh(req) {
   return a;
 }
 
-// The tests of this link and where the candidate is. Scores are not sent.
+// The tests of this link and where the candidate is:
+// done (passed) / failed / pending (essay waiting for HR) / current / next /
+// upcoming (not started yet) / locked (an earlier test was not passed).
 function progress(stages, state) {
   const firstWaiting = stages.find((st) => st.status === 'NOT_STARTED');
+  const stopped = stages.some((st) => st.status === 'SUBMITTED' && st.result === 'Not Pass');
   return stages.map((st) => ({
     section: st.section,
     question_count: st.question_count,
     minutes: st.time_limit_minutes,
     status: st.status === 'IN_PROGRESS' ? 'current'
-      : st.status === 'SUBMITTED' ? (st.result === 'Not Pass' ? 'failed' : 'done')
-        : st === firstWaiting && (state === 'next_test' || state === 'ready') ? 'next' : 'upcoming',
+      : st.status === 'SUBMITTED' ? (st.result === 'Not Pass' ? 'failed' : st.result === 'Pending' ? 'pending' : 'done')
+        : stopped ? 'locked' : st === firstWaiting && (state === 'next_test' || state === 'ready') ? 'next' : 'upcoming',
   }));
+}
+
+// The result of the test the candidate finished last: score, percentage,
+// level, pass mark and PASS / NOT PASS (an essay waits for HR marking).
+// Only finished tests are reported, never the answers.
+function lastResult(a, stages) {
+  const done = stages.filter((st) => st.status === 'SUBMITTED');
+  const st = done[done.length - 1];
+  if (!st) return null;
+  const v = reports.stageView(a, st, stages);
+  return { section: v.section, result: v.result, points: v.points, max: v.max, percent: v.percent, level: v.level,
+    lalco_iq_score: v.lalco_iq_score, pass_mark: v.pass_mark };
 }
 
 function stateResponse(a) {
@@ -58,6 +74,7 @@ function stateResponse(a) {
     const last = done[done.length - 1];
     base.passed_section = last.section;
     base.auto_submitted = !!last.auto_submitted;
+    base.last_result = lastResult(a, stages);
     const next = stages.find((st) => st.status === 'NOT_STARTED');
     base.next_section = next.section;
     base.question_count = next.question_count;
@@ -91,6 +108,7 @@ function stateResponse(a) {
     base.auto_submitted = !!a.auto_submitted;
     // Stopped = a test was not passed, so the later tests were never opened.
     base.outcome = stages.some((st) => st.status === 'SUBMITTED' && st.result === 'Not Pass') ? 'stopped' : 'completed';
+    base.last_result = lastResult(a, stages);
   }
   return base;
 }

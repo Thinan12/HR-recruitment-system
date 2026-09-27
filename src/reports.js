@@ -3,27 +3,84 @@ const path = require('path');
 const PDFDocument = require('pdfkit');
 const XLSX = require('xlsx');
 const docx = require('docx');
-const { db } = require('./db');
+const { db, getSettings, PASS_KEYS } = require('./db');
 const A = require('./assessments');
 
 const TEST_NAMES = { IQ: 'IQ Test', GENERAL: 'General Test', CALCULATION: 'Calculation Test', ESSAY: 'Essay Test' };
 const RESULT_TEXT = { Pass: 'PASS', 'Not Pass': 'NOT PASS', Pending: 'Pending' };
+const round1 = (n) => Math.round(n * 10) / 10;
+const pct1 = (v) => (v == null ? null : Number(v).toFixed(1) + '%');
 
-// Every test of one assessment link, with its own score and result.
+// Level of a General / Calculation / Essay percentage, and of the final score.
+// (The IQ level comes from the LALCO IQ Score, see iqCategory.) A level is
+// not a pass or fail: that is decided by each test's own pass mark.
+const PERCENT_LEVELS = [[90, 'Exceptional'], [80, 'Very High'], [70, 'High'], [60, 'Average'], [50, 'Low'], [0, 'Very Low']];
+function percentLevel(percent) {
+  if (percent == null || !Number.isFinite(Number(percent))) return null;
+  return (PERCENT_LEVELS.find(([from]) => Number(percent) >= from) || PERCENT_LEVELS[PERCENT_LEVELS.length - 1])[1];
+}
+
+// Status of one test in a link:
+// PASS / NOT PASS / PENDING HR MARKING once finished, IN PROGRESS while running,
+// NOT STARTED if it is the next one the candidate may open, otherwise LOCKED
+// (an earlier test is not finished yet, or was not passed).
+function stageStatus(a, st, stages) {
+  if (st.status === 'IN_PROGRESS') return 'IN PROGRESS';
+  if (st.status === 'SUBMITTED') return st.result === 'Pass' ? 'PASS' : st.result === 'Not Pass' ? 'NOT PASS' : 'PENDING HR MARKING';
+  if (a.status === 'SUBMITTED' || stages.some((x) => x.status === 'IN_PROGRESS')) return 'LOCKED';
+  const before = stages.filter((x) => x.position < st.position);
+  return before.every((x) => x.status === 'SUBMITTED' && x.result === 'Pass') ? 'NOT STARTED' : 'LOCKED';
+}
+const COMPLETION = { PASS: 'Completed', 'NOT PASS': 'Completed', 'PENDING HR MARKING': 'Submitted', 'IN PROGRESS': 'In Progress', 'NOT STARTED': 'Not Started', LOCKED: 'Locked' };
+const STATUS_TEXT = { 'PENDING HR MARKING': 'Pending HR marking', 'IN PROGRESS': 'In progress', 'NOT STARTED': 'Not started', LOCKED: 'Locked' };
+
+// One test of a link with its score, percentage, level, pass mark and result.
+function stageView(a, st, stages) {
+  const state = stageStatus(a, st, stages);
+  const done = st.status === 'SUBMITTED';
+  const scored = done && st.result !== 'Pending';
+  const percent = scored ? st.percent : null;
+  const lalco = scored && st.section === 'IQ' ? lalcoIqScore(st.points, st.max) : null;
+  return {
+    section: st.section, name: TEST_NAMES[st.section], status: st.status, state, completion: COMPLETION[state],
+    result: done ? st.result : null, points: done ? st.points : null, max: done ? st.max : null,
+    percent, percent_text: pct1(percent),
+    level: !scored ? null : st.section === 'IQ' ? iqCategory(lalco) : percentLevel(percent),
+    lalco_iq_score: lalco,
+    pass_mark: st.pass_mark ?? getSettings()[PASS_KEYS[st.section]],
+    score_text: scored ? `${st.points} / ${st.max}` : null,
+    text: scored ? `${pct1(percent)} ${RESULT_TEXT[st.result]}` : STATUS_TEXT[state],
+  };
+}
+
+// FINAL OVERALL SCORE and COMPANY ELIGIBILITY of one link.
+// Final % = the average of the percentages of the tests in the link (only the
+// tests HR included), worked out once every test is finished and marked.
+// Eligible = every test passed AND final % >= the link's eligibility mark.
+// A test not passed means Not Eligible, with no final score made from tests
+// that were never taken. HR's own Final Result is separate and never changed.
+function finalAssessment(a, stages = a ? A.stagesOf(a) : []) {
+  const mark = a && a.eligibility_mark != null ? a.eligibility_mark : getSettings().final_eligibility;
+  const out = (eligibility, note, percent = null) => ({ final_percent: percent, final_percent_text: pct1(percent), final_level: percentLevel(percent),
+    eligibility, eligibility_note: note, eligibility_mark: mark });
+  if (!a || !stages.length || a.status === 'NOT_STARTED') return out('Pending', 'Assessment not started');
+  const failed = stages.find((st) => st.status === 'SUBMITTED' && st.result === 'Not Pass');
+  if (failed) return out('Not Eligible', `${TEST_NAMES[failed.section]} not passed`);
+  if (!stages.every((st) => st.status === 'SUBMITTED' && st.result === 'Pass')) {
+    const pending = stages.find((st) => st.status === 'SUBMITTED' && st.result === 'Pending');
+    return out('Pending', pending ? `${TEST_NAMES[pending.section]} pending HR marking` : 'Assessment not finished');
+  }
+  const percent = round1(stages.reduce((sum, st) => sum + (st.max > 0 ? (st.points / st.max) * 100 : 0), 0) / stages.length);
+  return percent >= mark ? out('Eligible', `All tests passed and the final score reaches ${mark}%`, percent)
+    : out('Not Eligible', `All tests passed but the final score is below ${mark}%`, percent);
+}
+
+// Every test of one assessment link with its own score and result, and the final result.
 function testResults(a) {
-  if (!a) return { tests: [], current_stage: null, assessment_result: null, assessment_date: null };
+  if (!a) return { tests: [], current_stage: null, assessment_result: null, assessment_date: null, ...finalAssessment(null) };
   const stages = A.stagesOf(a);
-  const tests = stages.map((st) => {
-    const done = st.status === 'SUBMITTED';
-    const text = !done ? (st.status === 'IN_PROGRESS' ? 'In progress' : a.status === 'SUBMITTED' ? 'Not taken' : 'Not started')
-      : st.result === 'Pending' ? 'Pending HR marking' : `${st.percent}% ${RESULT_TEXT[st.result]}`;
-    return {
-      section: st.section, name: TEST_NAMES[st.section], status: st.status, result: done ? st.result : null,
-      points: done ? st.points : null, max: done ? st.max : null, percent: done && st.result !== 'Pending' ? st.percent : null,
-      score_text: done && st.result !== 'Pending' ? `${st.points} / ${st.max}` : null, text,
-    };
-  });
-  return { tests, current_stage: A.currentStage(a, stages).label, assessment_result: a.result, assessment_date: a.submitted_at || a.started_at };
+  return { tests: stages.map((st) => stageView(a, st, stages)), current_stage: A.currentStage(a, stages).label,
+    assessment_result: a.result, assessment_date: a.submitted_at || a.started_at, ...finalAssessment(a, stages) };
 }
 
 const FONT = path.join(__dirname, 'assets', 'NotoSansLao-Regular.ttf');
@@ -145,8 +202,13 @@ function candidateSummary(id) {
   return summarize(c, submitted, latest);
 }
 
+// Summary counts and dashboard filters use each candidate's latest link.
+const testOf = (c, sec) => (c.tests || []).find((t) => t.section === sec);
+const LEVEL_NAMES = ['Exceptional', 'Very High', 'High', 'Average', 'Low', 'Very Low'];
+
 function dashboard() {
   const people = allCandidateSummaries();
+  const withResult = (sec, result) => people.filter((p) => testOf(p, sec)?.result === result).length;
   const scored = people.filter((p) => p.test_score != null);
   const withIq = people.filter((p) => p.iq_score != null).sort((a, b) => b.iq_score - a.iq_score);
   const nowIso = new Date().toISOString();
@@ -162,12 +224,28 @@ function dashboard() {
     pending_assessments: count(`SELECT COUNT(*) AS n FROM assessments WHERE status = 'IN_PROGRESS'
       OR (status = 'NOT_STARTED' AND enabled = 1 AND link_expires_at > ?)`, nowIso),
     recent: people.filter((p) => p.last_test_date).sort((a, b) => b.last_test_date.localeCompare(a.last_test_date)).slice(0, 8),
+    summary: {
+      total: people.length,
+      iq_passed: withResult('IQ', 'Pass'), iq_not_passed: withResult('IQ', 'Not Pass'),
+      general_passed: withResult('GENERAL', 'Pass'), general_not_passed: withResult('GENERAL', 'Not Pass'),
+      calculation_passed: withResult('CALCULATION', 'Pass'), calculation_not_passed: withResult('CALCULATION', 'Not Pass'),
+      essay_pending: people.filter((p) => testOf(p, 'ESSAY')?.state === 'PENDING HR MARKING').length,
+      iq_levels: Object.fromEntries(LEVEL_NAMES.map((l) => [l, people.filter((p) => testOf(p, 'IQ')?.level === l).length])),
+      eligible: people.filter((p) => p.eligibility === 'Eligible').length,
+      not_eligible: people.filter((p) => p.eligibility === 'Not Eligible').length,
+      pending: people.filter((p) => p.eligibility === 'Pending').length,
+    },
+    candidates: people,
   };
 }
 
 // ---- export fields -------------------------------------------------------
 
 const show = (v) => (v == null || v === '' ? '-' : String(v));
+const eligibilityText = (c) => (c.eligibility ? c.eligibility.toUpperCase() : null);
+// "27 / 36 · 75.0% · LALCO IQ 125 / 150 · Very High · PASS · Completed (pass mark 70%)"
+const testLine = (t) => [t.score_text, t.percent_text, t.lalco_iq_score != null ? `LALCO IQ ${t.lalco_iq_score} / 150` : null, t.level,
+  t.result && t.result !== 'Pending' ? RESULT_TEXT[t.result] : null, t.completion].filter(Boolean).join(' · ') + (t.pass_mark != null ? ` (pass mark ${t.pass_mark}%)` : '');
 const showPct = (v) => (v == null ? '-' : v + '%');
 // Dates in exports use Laos time (UTC+7), not the server's UTC clock.
 const TIME_ZONE = process.env.DISPLAY_TIME_ZONE || 'Asia/Vientiane';
@@ -206,6 +284,20 @@ const COLUMNS = [
     return [[`${name} Score`, (c) => t(c)?.score_text], [`${name} Result`, (c) => t(c)?.text]];
   }),
   ['IQ Result', (c) => (c.tests || []).find((x) => x.section === 'IQ')?.text],
+  ['IQ Level', (c) => testOf(c, 'IQ')?.level ?? c.iq_category],
+  ...['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'].flatMap((sec) => {
+    const name = TEST_NAMES[sec].replace(' Test', '');
+    return [
+      ...(sec === 'IQ' ? [] : [[`${name} %`, (c) => testOf(c, sec)?.percent], [`${name} Level`, (c) => testOf(c, sec)?.level]]),
+      [`${name} PASS / NOT PASS`, (c) => RESULT_TEXT[testOf(c, sec)?.result]],
+      [`${name} Status`, (c) => testOf(c, sec)?.state],
+      [`${name} Pass Mark %`, (c) => testOf(c, sec)?.pass_mark],
+    ];
+  }),
+  ['Final %', (c) => c.final_percent],
+  ['Final Level', (c) => c.final_level],
+  ['Company Eligibility', (c) => eligibilityText(c)],
+  ['Eligibility Note', (c) => c.eligibility_note],
   ['Current Stage', (c) => c.current_stage],
   ['Assessment Result', (c) => c.assessment_result],
   ['Interview', (c) => c.interview],
@@ -232,7 +324,7 @@ function reportSections(c) {
       ['LALCO IQ Score', c.lalco_iq_score != null ? `${c.lalco_iq_score} / 150 — ${c.iq_category}` : '-'],
       ['IQ Correct Answers', show(c.iq_correct_text)],
       ...(c.iq_levels || []).map((l) => [l.label, `${l.correct_text} correct, ${l.marks_text} marks`]),
-      ...(c.tests || []).map((t) => [t.name, t.score_text ? `${t.score_text} marks, ${t.text}` : t.text]),
+      ...(c.tests || []).map((t) => [t.name, `${testLine(t)} — ${t.text}`]),
       ['Current Stage', show(c.current_stage)],
       ['Assessment Result', show(c.assessment_result)],
       ['Character', show(c.character_note)],
@@ -243,13 +335,19 @@ function reportSections(c) {
       ['Interview', show(c.interview)], ['Interviewer', show(c.interviewer)], ['Interview Score', show(c.interview_score)],
       ['Remark', show(c.remark)], ['Chairman Interview', show(c.chairman_interview)],
     ]],
+    ['Final Assessment', [
+      ['Final Overall Score', c.final_percent_text || '-'],
+      ['Final Level', show(c.final_level)],
+      ['Company Eligibility', show(eligibilityText(c)) + (c.eligibility_note ? ` — ${c.eligibility_note}` : '')],
+    ]],
     ['Decision', [
-      ['Final Result', show(c.final_result)], ['Date Come to Work', show(c.date_come_to_work)],
+      ['HR Final Result', show(c.final_result)], ['Date Come to Work', show(c.date_come_to_work)],
     ]],
   ];
 }
 
-const NOTE = 'Scores are percentages of available marks. IQ Test Score = marks earned (Level 1 = 1 up to Level 5 = 5 per correct answer) out of the maximum; it is not a clinical IQ measurement. LALCO IQ Score: ' + LALCO_NOTE;
+const NOTE = 'Scores are percentages of available marks. IQ Test Score = marks earned (Level 1 = 1 up to Level 5 = 5 per correct answer) out of the maximum; it is not a clinical IQ measurement. LALCO IQ Score: ' + LALCO_NOTE
+  + ' Level: 90%+ Exceptional, 80%+ Very High, 70%+ High, 60%+ Average, 50%+ Low, below 50% Very Low (the IQ Level comes from the LALCO IQ Score). PASS / NOT PASS uses each test\'s own pass mark. Final Overall Score = the average of the included tests\' percentages. Company Eligibility = every test passed and the final score reaches the eligibility mark. HR Final Result is HR\'s own decision.';
 
 function candidatePdf(c) {
   return new Promise((resolve, reject) => {
@@ -343,4 +441,4 @@ function questionTemplateXlsx() {
   return XLSX.write(book, { type: 'buffer', bookType: 'xlsx' });
 }
 
-module.exports = { iqResult, lalcoIqScore, iqCategory, allCandidateSummaries, candidateSummary, dashboard, candidatePdf, candidateDocx, candidatesXlsx, questionTemplateXlsx };
+module.exports = { percentLevel, finalAssessment, stageView, iqResult, lalcoIqScore, iqCategory, allCandidateSummaries, candidateSummary, dashboard, candidatePdf, candidateDocx, candidatesXlsx, questionTemplateXlsx };

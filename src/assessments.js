@@ -1,7 +1,7 @@
 // Assessment links: create, start, answer, submit, score.
 // All time rules are enforced here on the server; the browser timer is only a display.
 const crypto = require('crypto');
-const { db, getSettings, now } = require('./db');
+const { db, getSettings, now, PASS_KEYS } = require('./db');
 
 const SECTIONS = ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'];
 const TYPES = {
@@ -130,6 +130,12 @@ function createAssessment(input) {
   const available = activeCounts();
   const sections = {};
   const minutes = {};
+  const passMarks = {};
+  const percentIn = (value, fallback, what) => {
+    const v = value === '' || value == null ? fallback : Number(value);
+    if (!Number.isFinite(v) || v < 0 || v > 100) throw new InputError(`${what} must be between 0 and 100%.`);
+    return v;
+  };
   for (const sec of tests) {
     const raw = input.counts?.[sec];
     const n = Number(raw ?? 0);
@@ -144,7 +150,9 @@ function createAssessment(input) {
     if (!Number.isInteger(m) || m < 1 || m > 600) throw new InputError(`Time for the ${label(sec)} test must be between 1 and 600 minutes.`);
     sections[sec] = n;
     minutes[sec] = m;
+    passMarks[sec] = percentIn(input.pass_marks?.[sec], settings[PASS_KEYS[sec]], `The ${label(sec)} pass mark`);
   }
+  const eligibility = percentIn(input.eligibility_mark, settings.final_eligibility, 'The final eligibility mark');
   const included = Object.keys(sections);
   if (included.length === 0) throw new InputError('Please choose at least one test with at least 1 question.');
 
@@ -163,11 +171,11 @@ function createAssessment(input) {
   const total = included.reduce((sum, sec) => sum + minutes[sec], 0);
   const id = db.transaction(() => {
     const aid = db.prepare(`INSERT INTO assessments
-      (token, candidate_id, assessment_type, sections, time_limit_minutes, link_expiry_minutes, link_expires_at, language, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(newToken(), candidateId, type, JSON.stringify(sections), total, expiry, addMinutes(created, expiry), language, created).lastInsertRowid;
-    const addStage = db.prepare('INSERT INTO assessment_stages (assessment_id, position, section, question_count, time_limit_minutes) VALUES (?, ?, ?, ?, ?)');
-    included.forEach((sec, i) => addStage.run(aid, i + 1, sec, sections[sec], minutes[sec]));
+      (token, candidate_id, assessment_type, sections, time_limit_minutes, link_expiry_minutes, link_expires_at, language, eligibility_mark, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(newToken(), candidateId, type, JSON.stringify(sections), total, expiry, addMinutes(created, expiry), language, eligibility, created).lastInsertRowid;
+    const addStage = db.prepare('INSERT INTO assessment_stages (assessment_id, position, section, question_count, time_limit_minutes, pass_mark) VALUES (?, ?, ?, ?, ?, ?)');
+    included.forEach((sec, i) => addStage.run(aid, i + 1, sec, sections[sec], minutes[sec], passMarks[sec]));
     return aid;
   })();
   return getAssessment(id);
@@ -182,8 +190,8 @@ function stagesOf(a) {
   const cols = { IQ: 'iq', GENERAL: 'general', CALCULATION: 'calc', ESSAY: 'essay' };
   const passMark = getSettings().pass_mark;
   const add = db.prepare(`INSERT OR IGNORE INTO assessment_stages
-    (assessment_id, position, section, question_count, time_limit_minutes, status, started_at, deadline_at, submitted_at, auto_submitted, points, max, percent, result)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    (assessment_id, position, section, question_count, time_limit_minutes, status, started_at, deadline_at, submitted_at, auto_submitted, points, max, percent, result, pass_mark)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const list = SECTIONS.filter((sec) => sections[sec]);
   list.forEach((sec, i) => {
     const points = a[cols[sec] + '_points'];
@@ -192,7 +200,7 @@ function stagesOf(a) {
     const result = a.status !== 'SUBMITTED' ? 'Pending' : list.length === 1 ? a.result
       : sec === 'ESSAY' && a.essay_pending ? 'Pending' : percent != null && percent >= passMark ? 'Pass' : 'Not Pass';
     add.run(a.id, i + 1, sec, sections[sec], a.time_limit_minutes, a.status, a.started_at, a.deadline_at, a.submitted_at, a.auto_submitted,
-      a.status === 'SUBMITTED' ? points : null, a.status === 'SUBMITTED' ? max : null, a.status === 'SUBMITTED' ? percent : null, result);
+      a.status === 'SUBMITTED' ? points : null, a.status === 'SUBMITTED' ? max : null, a.status === 'SUBMITTED' ? percent : null, result, passMark);
   });
   return db.prepare('SELECT * FROM assessment_stages WHERE assessment_id = ? ORDER BY position').all(a.id);
 }
@@ -370,9 +378,10 @@ function scoreAssessment(assessmentId) {
   const totalPoints = SECTIONS.reduce((s, k) => s + totals[k].points, 0);
   const totalMax = SECTIONS.reduce((s, k) => s + totals[k].max, 0);
   const testScore = totalMax > 0 ? round1((totalPoints / totalMax) * 100) : 0;
-  const passMark = getSettings().pass_mark;
-  // Each finished test: score, percentage and PASS / NOT PASS (an essay stays
-  // Pending until HR marks it). The assessment passes only if every test passed.
+  const settings = getSettings();
+  // Each finished test: score, percentage and PASS / NOT PASS against that
+  // test's own pass mark (an essay stays Pending until HR marks it). The
+  // assessment passes only if every test passed.
   const a = getAssessment(assessmentId);
   const stages = stagesOf(a);
   const setStage = db.prepare('UPDATE assessment_stages SET points = ?, max = ?, percent = ?, result = ? WHERE id = ?');
@@ -383,6 +392,7 @@ function scoreAssessment(assessmentId) {
     const points = marks.reduce((sum, m) => sum + (m || 0), 0);
     const max = qs.reduce((sum, q) => sum + q.max_marks, 0);
     const percent = max > 0 ? round1((points / max) * 100) : 0;
+    const passMark = st.pass_mark ?? settings[PASS_KEYS[st.section]];
     st.result = marks.some((m) => m == null) ? 'Pending' : percent >= passMark ? 'Pass' : 'Not Pass';
     setStage.run(points, max, percent, st.result, st.id);
   }
@@ -486,7 +496,7 @@ function setEssayMarks(assessmentId, marks) {
   return getAssessment(a.id);
 }
 
-// Re-scores submitted assessments after the pass mark changes.
+// Re-scores submitted assessments. Each test keeps its own pass mark, so the results stay the same.
 function rescoreAll() {
   const ids = db.prepare("SELECT id FROM assessments WHERE status = 'SUBMITTED'").all();
   db.transaction(() => ids.forEach(({ id }) => scoreAssessment(id)))();

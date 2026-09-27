@@ -39,6 +39,13 @@ const TEXT = {
     time_up_test: 'Time is up for this test. Your answers were submitted automatically.',
     submit_test: 'Submit Test',
     stopped: 'Thank you.\nYou did not meet the required score for this assessment.\nPlease contact HR.',
+    test_passed: '{name} Passed', test_not_passed: '{name} Not Passed', completed_title: 'Assessment Completed',
+    score: 'Score', percentage: 'Percentage', level: 'Level', iq_level: 'IQ Level', lalco_iq: 'LALCO IQ Score', result: 'Result', pass_mark: 'Pass mark',
+    pass: 'PASS', not_pass: 'NOT PASS', pending_hr: 'Pending HR marking',
+    essay_pending: 'Essay Result: Pending HR Marking.\nHR will mark your essay and review your results.',
+    stopped_short: 'Assessment stopped. The later tests are locked.\nPlease contact HR.',
+    thanks: 'Thank you. Your assessment has been submitted successfully.\nHR will review your results.',
+    levels: { Exceptional: 'Exceptional', 'Very High': 'Very High', High: 'High', Average: 'Average', Low: 'Low', 'Very Low': 'Very Low' },
   },
   lo: {
     title: 'ການທົດສອບ',
@@ -76,6 +83,13 @@ const TEXT = {
     time_up_test: 'ໝົດເວລາສຳລັບແບບທົດສອບນີ້. ຄຳຕອບຂອງທ່ານໄດ້ຖືກສົ່ງອັດຕະໂນມັດ.',
     submit_test: 'ສົ່ງແບບທົດສອບ',
     stopped: 'ຂອບໃຈ.\nທ່ານບໍ່ໄດ້ຄະແນນຕາມທີ່ກຳນົດສຳລັບການປະເມີນນີ້.\nກະລຸນາຕິດຕໍ່ຝ່າຍບຸກຄະລາກອນ (HR).',
+    test_passed: 'ທ່ານຜ່ານ{name}ແລ້ວ', test_not_passed: 'ທ່ານບໍ່ຜ່ານ{name}', completed_title: 'ການປະເມີນສຳເລັດແລ້ວ',
+    score: 'ຄະແນນ', percentage: 'ເປີເຊັນ', level: 'ລະດັບ', iq_level: 'ລະດັບ IQ', lalco_iq: 'ຄະແນນ LALCO IQ', result: 'ຜົນ', pass_mark: 'ເກນຜ່ານ',
+    pass: 'ຜ່ານ', not_pass: 'ບໍ່ຜ່ານ', pending_hr: 'ລໍຖ້າ HR ໃຫ້ຄະແນນ',
+    essay_pending: 'ຜົນແບບທົດສອບການຂຽນ: ລໍຖ້າ HR ໃຫ້ຄະແນນ.\nຝ່າຍບຸກຄະລາກອນ (HR) ຈະໃຫ້ຄະແນນ ແລະ ກວດຜົນຂອງທ່ານ.',
+    stopped_short: 'ການປະເມີນໄດ້ຢຸດລົງ. ແບບທົດສອບຕໍ່ໄປຖືກລັອກ.\nກະລຸນາຕິດຕໍ່ຝ່າຍບຸກຄະລາກອນ (HR).',
+    thanks: 'ຂອບໃຈ. ການປະເມີນຂອງທ່ານໄດ້ຖືກສົ່ງສຳເລັດແລ້ວ.\nຝ່າຍບຸກຄະລາກອນ (HR) ຈະກວດຜົນຂອງທ່ານ.',
+    levels: { Exceptional: 'ດີເລີດ', 'Very High': 'ສູງຫຼາຍ', High: 'ສູງ', Average: 'ປານກາງ', Low: 'ຕ່ຳ', 'Very Low': 'ຕ່ຳຫຼາຍ' },
   },
 };
 
@@ -128,11 +142,44 @@ function bigMessage(text, tests) {
   root.replaceChildren(h('div', { class: 'card big-message' }, text), tests && tests.length > 1 ? progressBox(tests) : null);
 }
 
-// ✓ done · → now / next · ○ later · ✗ not passed
+// ✓ passed · → now / next · ○ not started yet · ✕ not passed · 🔒 locked · … waiting for HR
 function progressBox(tests) {
-  const mark = { done: '✓', current: '→', next: '→', upcoming: '○', failed: '✗' };
+  const mark = { done: '✓', current: '→', next: '→', upcoming: '○', failed: '✕', locked: '🔒', pending: '…' };
   return h('div', { class: 'card progress-box' }, h('div', { class: 'progress' }, T.progress_title),
     tests.map((t) => h('div', { class: 'progress-item ' + t.status }, h('span', { class: 'mark' }, mark[t.status] || '○'), T.sections[t.section])));
+}
+
+// The result of the test just finished: score, percentage, level and PASS / NOT PASS.
+function resultTable(r) {
+  if (!r) return null;
+  const pct = (v) => Number(v).toFixed(1) + '%';
+  const row = (label, value, cls) => h('tr', {}, h('th', {}, label), h('td', { class: cls || null }, value));
+  if (r.result === 'Pending') return h('table', { class: 'result-table' }, h('tbody', {}, row(T.result, T.pending_hr)));
+  const iq = r.section === 'IQ';
+  return h('table', { class: 'result-table' }, h('tbody', {},
+    row(T.score, `${r.points} / ${r.max}`),
+    row(T.percentage, pct(r.percent)),
+    iq && r.lalco_iq_score != null ? row(T.lalco_iq, `${r.lalco_iq_score} / 150`) : null,
+    r.level ? row(iq ? T.iq_level : T.level, T.levels[r.level] || r.level) : null,
+    row(T.result, r.result === 'Pass' ? '✓ ' + T.pass : '✕ ' + T.not_pass, r.result === 'Pass' ? 'passed' : 'failed'),
+    r.pass_mark != null ? row(T.pass_mark, pct(r.pass_mark)) : null));
+}
+
+// After the last test, or after a test that was not passed.
+function renderFinished(data) {
+  stopTimer();
+  const r = data.last_result;
+  const name = r ? T.sections[r.section] : '';
+  const stopped = data.outcome === 'stopped';
+  const essayPending = r && r.result === 'Pending';
+  root.replaceChildren(
+    h('div', { class: 'card center' },
+      data.auto_submitted && exam ? h('p', { class: 'message error' }, T.time_up_test) : null,
+      stopped ? h('h1', { class: 'failed' }, '✕ ' + fill(T.test_not_passed, { name }))
+        : h('h1', { class: 'passed' }, r && !essayPending ? '✓ ' + fill(T.test_passed, { name }) : T.completed_title),
+      resultTable(r),
+      h('p', { class: 'message ' + (stopped ? 'error' : 'ok') }, stopped ? T.stopped_short : essayPending ? T.essay_pending : T.thanks)),
+    data.tests && data.tests.length > 1 ? progressBox(data.tests) : null);
 }
 
 // Between tests: the last one was passed; the next opens when the candidate is ready.
@@ -153,6 +200,7 @@ function renderNext(data) {
     h('div', { class: 'card center' },
       data.auto_submitted ? h('p', { class: 'message error' }, T.time_up_test) : null,
       h('h1', { class: 'passed' }, '✓ ' + fill(T.passed, { name: T.sections[data.passed_section] })),
+      resultTable(data.last_result),
       h('p', {}, h('span', { class: 'muted' }, T.next_test + ': '), h('strong', {}, T.sections[data.next_section])),
       h('p', { class: 'message ok' }, fillCount(T.next_rules, { m: data.time_limit_minutes, n: data.question_count })),
       button),
@@ -167,8 +215,10 @@ function show(data) {
     case 'in_progress': return renderExam(data);
     case 'next_test': return renderNext(data);
     // A test was not passed, so the assessment stopped there.
-    case 'submitted': if (data.outcome === 'stopped') return bigMessage(T.stopped, data.tests);
+    // Finished or stopped: the same result is shown every time the link is opened.
+    case 'submitted': if (data.last_result) return renderFinished(data);
       // "exam" is set when the candidate sat the test in this page.
+      if (data.outcome === 'stopped') return bigMessage(T.stopped, data.tests);
       return bigMessage(!exam ? T.already_submitted : data.auto_submitted ? T.auto_submitted : T.submitted, data.tests);
     case 'expired': return bigMessage(T.expired);
     case 'disabled': return bigMessage(T.disabled);

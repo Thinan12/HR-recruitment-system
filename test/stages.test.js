@@ -57,7 +57,9 @@ test('one link runs IQ -> General -> Calculation -> Essay in order, details ente
   assert.equal(s.passed_section, 'IQ');
   assert.equal(s.next_section, 'GENERAL');
   assert.equal(statuses(s), 'IQ:done GENERAL:next CALCULATION:upcoming ESSAY:upcoming');
-  assert.ok(!JSON.stringify(s).includes('percent') && !('points' in s), 'no scores are sent to the candidate');
+  // The candidate sees the result of the test just finished, never the answers.
+  assert.deepEqual(s.last_result, { section: 'IQ', result: 'Pass', points: 6, max: 6, percent: 100, level: 'Exceptional', lalco_iq_score: 150, pass_mark: 70 });
+  assert.ok(!JSON.stringify(s).includes('correct_answer'), 'no correct answers are sent');
 
   s = (await candidate.post(url(a.token, '/continue'))).data;
   assert.equal(s.section, 'GENERAL');
@@ -92,7 +94,7 @@ test('failing IQ stops the assessment: no later test can be opened', async () =>
   s = await answerAndSubmit(a.token, s, false);
   assert.equal(s.state, 'submitted');
   assert.equal(s.outcome, 'stopped');
-  assert.equal(statuses(s), 'IQ:failed GENERAL:upcoming CALCULATION:upcoming');
+  assert.equal(statuses(s), 'IQ:failed GENERAL:locked CALCULATION:locked');
 
   assert.equal((await candidate.post(url(a.token, '/continue'))).status, 409);
   assert.equal((await candidate.post(url(a.token, '/start'), CANDIDATE)).data.state, 'submitted');
@@ -192,13 +194,13 @@ test('General FAIL stops before Calculation; Calculation FAIL stops before Essay
   const all = ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'];
   const g = await run('Fails General', all, { IQ: true, GENERAL: false });
   assert.equal(g.s.outcome, 'stopped');
-  assert.equal(statuses(g.s), 'IQ:done GENERAL:failed CALCULATION:upcoming ESSAY:upcoming');
+  assert.equal(statuses(g.s), 'IQ:done GENERAL:failed CALCULATION:locked ESSAY:locked');
   assert.deepEqual(db.prepare('SELECT DISTINCT section FROM assessment_questions WHERE assessment_id = ?').all(g.a.id).map((r) => r.section), ['IQ', 'GENERAL']);
   assert.equal(g.s.current_stage, 'STOPPED');
 
   const c = await run('Fails Calculation', all, { IQ: true, GENERAL: true, CALCULATION: false });
   assert.equal(c.s.outcome, 'stopped');
-  assert.equal(statuses(c.s), 'IQ:done GENERAL:done CALCULATION:failed ESSAY:upcoming');
+  assert.equal(statuses(c.s), 'IQ:done GENERAL:done CALCULATION:failed ESSAY:locked');
   assert.equal((await candidate.post(url(c.a.token, '/continue'))).status, 409);
 });
 
@@ -254,15 +256,15 @@ test('results, candidate page and PDF / Word / Excel show every test of the link
   const { PDFParse } = require('pdf-parse');
   const r = await run('All Tests Person', ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'], { IQ: true, GENERAL: true, CALCULATION: true });
   const c = (await admin.get('/api/admin/candidates')).data.find((x) => x.name === 'All Tests Person');
-  assert.deepEqual(c.tests.map((t) => [t.section, t.text]), [['IQ', '100% PASS'], ['GENERAL', '100% PASS'], ['CALCULATION', '100% PASS'], ['ESSAY', 'Pending HR marking']]);
+  assert.deepEqual(c.tests.map((t) => [t.section, t.text]), [['IQ', '100.0% PASS'], ['GENERAL', '100.0% PASS'], ['CALCULATION', '100.0% PASS'], ['ESSAY', 'Pending HR marking']]);
   assert.equal(c.current_stage, 'Essay (pending HR marking)');
   assert.equal(c.assessment_result, 'Pending');
   assert.equal(c.final_result, 'Pending', 'HR decision stays separate');
 
   const x = XLSX.utils.sheet_to_json(XLSX.read((await admin.get(`/api/admin/candidates/${c.id}/export.xlsx`, { raw: true })).buffer).Sheets.Candidates)[0];
-  assert.equal(x['IQ Result'], '100% PASS');
-  assert.equal(x['General Result'], '100% PASS');
-  assert.equal(x['Calculation Result'], '100% PASS');
+  assert.equal(x['IQ Result'], '100.0% PASS');
+  assert.equal(x['General Result'], '100.0% PASS');
+  assert.equal(x['Calculation Result'], '100.0% PASS');
   assert.equal(x['Essay Result'], 'Pending HR marking');
   assert.equal(x['Assessment Result'], 'Pending');
   assert.ok(x['Level 1 Marks']);
@@ -273,6 +275,6 @@ test('results, candidate page and PDF / Word / Excel show every test of the link
   const pdf = (await p.getText()).text;
   await p.destroy();
   for (const text of [word, pdf]) {
-    for (const want of ['IQ Test', 'General Test', 'Calculation Test', 'Essay Test', '100% PASS', 'Pending HR marking', 'Level 1', 'Assessment Result']) assert.ok(text.includes(want), want);
+    for (const want of ['IQ Test', 'General Test', 'Calculation Test', 'Essay Test', '100.0% PASS', 'Pending HR marking', 'Level 1', 'Assessment Result']) assert.ok(text.includes(want), want);
   }
 });

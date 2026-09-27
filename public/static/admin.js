@@ -62,6 +62,19 @@ function resultBadge(result) {
   const cls = result === 'Pass' ? 'pass' : result === 'Not Pass' ? 'fail' : 'pending';
   return h('span', { class: 'badge ' + cls }, result === 'Pass' ? 'PASS' : result === 'Not Pass' ? 'NOT PASS' : 'Pending');
 }
+const fmtPct = (v) => (v == null ? '-' : Number(v).toFixed(1) + '%');
+// System assessment eligibility (never HR's own Final Result).
+function eligibilityBadge(e) {
+  if (!e) return '-';
+  return h('span', { class: 'badge ' + (e === 'Eligible' ? 'pass' : e === 'Not Eligible' ? 'fail' : 'pending') }, e.toUpperCase());
+}
+// PASS / NOT PASS / PENDING HR MARKING / IN PROGRESS / NOT STARTED / LOCKED of one test.
+function testStateBadge(state) {
+  if (!state) return '-';
+  const cls = { PASS: 'pass', 'NOT PASS': 'fail', 'PENDING HR MARKING': 'pending', 'IN PROGRESS': 'pending' }[state] || 'neutral';
+  return h('span', { class: 'badge ' + cls }, (state === 'LOCKED' ? '🔒 ' : '') + state);
+}
+const testOf = (c, sec) => (c.tests || []).find((t) => t.section === sec);
 function stateBadge(state) {
   const [text, cls] = STATE_LABEL[state] || [state, 'neutral'];
   return h('span', { class: 'badge ' + cls }, text);
@@ -206,7 +219,7 @@ function iqResultBlock(r) {
     h('div', { class: 'iq-row' }, h('span', { class: 'muted' }, 'IQ Weighted Score'), h('strong', {}, r.iq_text)),
     h('div', { class: 'iq-row' }, h('span', { class: 'muted' }, 'IQ Percentage'), h('strong', {}, r.iq_score + '%')),
     h('div', { class: 'iq-row' }, h('span', { class: 'muted' }, 'LALCO IQ Score'), h('strong', { class: 'iq-main' }, r.lalco_iq_score != null ? r.lalco_iq_score + ' / 150' : 'Not available')),
-    h('div', { class: 'iq-row' }, h('span', { class: 'muted' }, 'IQ Category'), r.iq_category ? h('span', { class: 'badge neutral' }, r.iq_category) : '-'),
+    h('div', { class: 'iq-row' }, h('span', { class: 'muted' }, 'IQ Level'), r.iq_category ? h('span', { class: 'badge neutral' }, r.iq_category) : '-'),
     h('div', { class: 'iq-levels' }, (r.iq_levels || []).map((l) => h('div', { class: 'iq-level' },
       h('div', { class: 'small' }, h('strong', {}, l.label)),
       h('div', {}, l.correct_text + ' correct'),
@@ -218,34 +231,95 @@ function iqResultBlock(r) {
 // Dashboard
 // ---------------------------------------------------------------------------
 
+const LEVELS = ['Exceptional', 'Very High', 'High', 'Average', 'Low', 'Very Low'];
+// Dashboard filters. Each looks at the candidate's latest assessment link.
+const DASHBOARD_FILTERS = [
+  ['all', 'All candidates', () => true],
+  ['eligible', 'Eligible', (c) => c.eligibility === 'Eligible'],
+  ['not_eligible', 'Not Eligible', (c) => c.eligibility === 'Not Eligible'],
+  ['pending', 'Eligibility pending', (c) => c.eligibility === 'Pending'],
+  ...['IQ', 'GENERAL', 'CALCULATION'].flatMap((sec) => [
+    [sec + '_pass', `${SECTION_LABEL[sec]} Passed`, (c) => testOf(c, sec)?.result === 'Pass'],
+    [sec + '_fail', `${SECTION_LABEL[sec]} Not Passed`, (c) => testOf(c, sec)?.result === 'Not Pass']]),
+  ['essay_pending', 'Essay Pending HR marking', (c) => testOf(c, 'ESSAY')?.state === 'PENDING HR MARKING'],
+  ...LEVELS.map((l) => ['iq_' + l, `IQ Level: ${l}`, (c) => testOf(c, 'IQ')?.level === l]),
+  ...LEVELS.map((l) => ['final_' + l, `Final Level: ${l}`, (c) => c.final_level === l]),
+];
+let dashboardFilter = 'all';
+
+// One row per candidate: every test's score, %, level and result, then the final result.
+function candidateResultsTable(list) {
+  if (!list.length) return h('p', { class: 'muted' }, 'No candidates match this filter.');
+  const TESTS = ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'];
+  const cols = (sec) => (sec === 'IQ' ? ['Score', 'LALCO IQ', '%', 'IQ Level', 'Result'] : ['Score', '%', 'Level', 'Result']);
+  const cells = (c, sec) => {
+    const t = testOf(c, sec);
+    const n = cols(sec).length;
+    if (!t) return Array.from({ length: n }, (_, i) => h('td', { class: i === 0 ? 'group-start muted' : 'muted' }, '-'));
+    return [
+      h('td', { class: 'group-start' }, t.score_text || '-'),
+      sec === 'IQ' ? h('td', {}, t.lalco_iq_score != null ? h('strong', {}, t.lalco_iq_score + ' / 150') : '-') : null,
+      h('td', {}, fmtPct(t.percent)), h('td', {}, fmt(t.level)), h('td', {}, testStateBadge(t.state)),
+    ].filter(Boolean);
+  };
+  return h('div', { class: 'table-wrap' }, h('table', { class: 'results-table' },
+    h('thead', {},
+      h('tr', {}, h('th', { rowspan: 2 }, 'Candidate'), TESTS.map((sec) => h('th', { class: 'group', colspan: cols(sec).length }, TYPE_LABEL[sec])),
+        h('th', { class: 'group', colspan: 3 }, 'Final Assessment'), h('th', { rowspan: 2, class: 'group-start' }, 'HR Final Result')),
+      h('tr', {}, TESTS.flatMap((sec) => cols(sec).map((t, i) => h('th', { class: i === 0 ? 'group-start' : null }, t))),
+        h('th', { class: 'group-start' }, 'Final %'), h('th', {}, 'Final Level'), h('th', {}, 'Company Eligibility'))),
+    h('tbody', {}, list.map((c) => h('tr', { class: 'clickable', onclick: () => { location.hash = '#/candidates/' + c.id; } },
+      h('td', {}, h('strong', {}, c.name)),
+      TESTS.flatMap((sec) => cells(c, sec)),
+      h('td', { class: 'group-start' }, c.final_percent_text || '-'), h('td', {}, fmt(c.final_level)),
+      h('td', { title: c.eligibility_note || '' }, eligibilityBadge(c.eligibility)),
+      h('td', { class: 'group-start' }, resultBadge(c.final_result || 'Pending')))))));
+}
+
 async function renderDashboard() {
   const d = await api('GET', '/dashboard');
+  const s = d.summary;
   const stat = (label, value, sub, cls) => h('div', { class: 'stat ' + (cls || '') }, h('div', { class: 'label' }, label), h('div', { class: 'value' }, value), sub ? h('div', { class: 'sub' }, sub) : null);
-  const recent = d.recent.length
-    ? h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, ['Candidate', 'IQ Weighted', 'IQ %', 'LALCO IQ Score', 'IQ Category', ...IQ_LEVELS.map((n) => 'L' + n), 'Assessment Result', 'HR Final Result', 'Date'].map((t) => h('th', {}, t)))),
-      h('tbody', {}, d.recent.map((c) => h('tr', { class: 'clickable', onclick: () => { location.hash = '#/candidates/' + c.id; } },
-        h('td', {}, c.name), h('td', {}, c.iq_text || '-'), h('td', {}, c.iq_text ? c.iq_score + '%' : '-'),
-        h('td', {}, c.lalco_iq_score != null ? h('strong', {}, c.lalco_iq_score + ' / 150') : '-'), h('td', {}, c.iq_category || '-'),
-        ...IQ_LEVELS.map((n) => h('td', { class: 'small' }, levelMarksCell(c, n))),
-        h('td', {}, c.assessment_result ? resultBadge(c.assessment_result) : '-'), h('td', {}, resultBadge(c.final_result || 'Pending')), h('td', {}, fmtDate(c.last_test_date)))))))
-    : h('p', { class: 'muted' }, 'No completed assessments yet. Start by uploading questions, then create an assessment link.');
+  const filter = select('dashboard_filter', DASHBOARD_FILTERS.map(([k, label]) => [k, label]), dashboardFilter);
+  filter.classList.add('inline-input');
+  const tableBox = h('div');
+  const count = h('span', { class: 'muted small' });
+  const draw = () => {
+    const f = (DASHBOARD_FILTERS.find(([k]) => k === dashboardFilter) || DASHBOARD_FILTERS[0])[2];
+    const list = d.candidates.filter(f);
+    count.textContent = `${list.length} of ${d.candidates.length} candidates`;
+    tableBox.replaceChildren(candidateResultsTable(list));
+  };
+  filter.addEventListener('change', () => { dashboardFilter = filter.value; draw(); });
+  // Clicking a summary card shows those candidates.
+  const pick = (key) => () => { dashboardFilter = key; filter.value = key; draw(); };
+  const card = (label, value, key, cls) => { const el = stat(label, value, null, cls); el.classList.add('clickable'); el.addEventListener('click', pick(key)); return el; };
 
   view().replaceChildren(
     h('h1', {}, 'Dashboard'),
     h('div', { class: 'stats' },
-      stat('Total Candidates', d.total_candidates),
-      stat('Passed', d.passed),
-      stat('Not Passed', d.not_passed),
-      stat('Average Test Score', d.average_test_score == null ? '-' : d.average_test_score + '%'),
+      card('Total Candidates', s.total, 'all'),
+      card('Eligible', s.eligible, 'eligible', 'highlight'),
+      card('Not Eligible', s.not_eligible, 'not_eligible'),
+      card('Pending', s.pending, 'pending'),
       stat('Highest LALCO IQ Score', d.highest_iq && d.highest_iq.lalco_iq_score != null ? d.highest_iq.lalco_iq_score + ' / 150' : '-',
-        d.highest_iq ? `${d.highest_iq.iq_category} · ${d.highest_iq.iq_text} (${d.highest_iq.iq_score}%) · ${d.highest_iq.name}` : 'No IQ results yet', 'highlight'),
+        d.highest_iq ? `${d.highest_iq.iq_category} · ${d.highest_iq.iq_text} (${d.highest_iq.iq_score}%) · ${d.highest_iq.name}` : 'No IQ results yet'),
       stat('Completed Assessments', d.completed_assessments),
       stat('Pending Assessments', d.pending_assessments)),
+    h('div', { class: 'stat-group-title' }, 'Test results'),
+    h('div', { class: 'stats' },
+      card('IQ Passed', s.iq_passed, 'IQ_pass'), card('IQ Not Passed', s.iq_not_passed, 'IQ_fail'),
+      card('General Passed', s.general_passed, 'GENERAL_pass'), card('General Not Passed', s.general_not_passed, 'GENERAL_fail'),
+      card('Calculation Passed', s.calculation_passed, 'CALCULATION_pass'), card('Calculation Not Passed', s.calculation_not_passed, 'CALCULATION_fail'),
+      card('Essay Pending', s.essay_pending, 'essay_pending')),
+    h('div', { class: 'stat-group-title' }, 'IQ Level'),
+    h('div', { class: 'stats' }, LEVELS.map((l) => card(l, s.iq_levels[l], 'iq_' + l))),
     h('div', { class: 'card' },
-      h('div', { class: 'row between' }, h('h2', {}, 'Recent results'),
-        h('div', { class: 'row' }, h('a', { class: 'button small', href: '#/assessments' }, 'Create assessment link'), downloadLink('/export/candidates.xlsx', 'Export all (Excel)'))),
-      recent));
+      h('div', { class: 'row between' }, h('h2', {}, 'Candidates'),
+        h('div', { class: 'row' }, filter, count, h('a', { class: 'button small', href: '#/assessments' }, 'Create assessment link'), downloadLink('/export/candidates.xlsx', 'Export all (Excel)'))),
+      tableBox,
+      h('p', { class: 'muted small' }, 'Each column group is one test of the candidate\'s latest assessment link. Level: 90%+ Exceptional, 80%+ Very High, 70%+ High, 60%+ Average, 50%+ Low, below 50% Very Low (IQ Level from the LALCO IQ Score). Result uses each test\'s pass mark. Final % = the average of the included tests; Company Eligibility = every test passed and Final % reaches the eligibility mark. HR Final Result is HR\'s own decision.')));
+  draw();
 }
 
 // ---------------------------------------------------------------------------
@@ -264,10 +338,11 @@ async function renderCandidates() {
   const load = async () => {
     const list = await api('GET', '/candidates?q=' + encodeURIComponent(search.value));
     body.replaceChildren(list.length ? h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, ['Name', 'Phone', 'Graduate From', 'IQ Test Score', 'Test Score', 'Interview', 'Final Result', 'Added'].map((t) => h('th', {}, t)))),
+      h('thead', {}, h('tr', {}, ['Name', 'Phone', 'Graduate From', 'IQ Test Score', 'Final %', 'Final Level', 'Company Eligibility', 'Interview', 'HR Final Result', 'Added'].map((t) => h('th', {}, t)))),
       h('tbody', {}, list.map((c) => h('tr', { class: 'clickable', onclick: () => { location.hash = '#/candidates/' + c.id; } },
-        h('td', {}, c.name), h('td', {}, fmt(c.phone)), h('td', {}, fmt(c.graduate_from)), h('td', {}, c.iq_text ? `${c.iq_text} (${c.iq_score}%)` : '-'),
-        h('td', {}, fmt(c.test_score)), h('td', {}, fmt(c.interview_score)), h('td', {}, resultBadge(c.overall_result)), h('td', {}, fmtDate(c.created_at)))))))
+        h('td', {}, c.name), h('td', {}, fmt(c.phone)), h('td', {}, fmt(c.graduate_from)), h('td', {}, c.iq_text ? `${c.iq_text} (${fmtPct(c.iq_score)})` : '-'),
+        h('td', {}, c.final_percent_text || '-'), h('td', {}, fmt(c.final_level)), h('td', { title: c.eligibility_note || '' }, eligibilityBadge(c.eligibility)),
+        h('td', {}, fmt(c.interview_score)), h('td', {}, resultBadge(c.final_result || 'Pending')), h('td', {}, fmtDate(c.created_at)))))))
       : h('p', { class: 'muted' }, 'No candidates found. Candidates are added automatically when they start an assessment, or you can add one here.'));
   };
   let timer;
@@ -308,19 +383,13 @@ async function renderCandidate(id) {
       ? select(name, [...new Set([...GRADUATE_OPTIONS, c.graduate_from])].map((o) => [o, o || '-']), c.graduate_from)
       : text(name, c[name])))),
     h('h2', { class: 'section-gap' }, 'Assessment Results'),
+    testsTable(c.tests),
+    finalBox(c, c.final_result),
+    h('h2', { class: 'section-gap' }, 'IQ Test Details'),
     h('div', { class: 'table-wrap' }, h('table', { class: 'kv' }, h('tbody', {},
-      h('tr', {}, h('th', {}, 'IQ Test Result'), h('td', {}, iqResultBlock(c), c.tests && c.tests.find((t) => t.section === 'IQ') ? h('div', { class: 'section-gap-sm' }, testCell(c, 'IQ')) : null)),
-      ...['GENERAL', 'CALCULATION', 'ESSAY'].filter((sec) => (c.tests || []).some((t) => t.section === sec)).map((sec) => {
-        const t = c.tests.find((x) => x.section === sec);
-        return h('tr', {}, h('th', {}, t.name), h('td', {}, t.score_text ? h('span', {}, h('strong', {}, t.score_text + ' marks'), ' ') : null, testCell(c, sec)));
-      }),
+      h('tr', {}, h('th', {}, 'IQ Test Result'), h('td', {}, iqResultBlock(c))),
       h('tr', {}, h('th', {}, 'Current Stage'), h('td', {}, fmt(c.current_stage))),
-      h('tr', {}, h('th', {}, 'Assessment Result'), h('td', {}, c.assessment_result ? resultBadge(c.assessment_result) : '-')),
-      h('tr', {}, h('th', {}, 'Test Score'), h('td', {}, c.test_score == null ? '-' : c.test_score + '%')),
-      h('tr', {}, h('th', {}, 'General Test'), h('td', {}, c.general_score == null ? '-' : c.general_score + '%')),
-      h('tr', {}, h('th', {}, 'Calculation Test'), h('td', {}, c.calc_score == null ? '-' : c.calc_score + '%')),
-      h('tr', {}, h('th', {}, 'Essay Test'), h('td', {}, c.essay_pending ? 'Waiting for HR marking' : c.essay_score == null ? '-' : c.essay_score + '%')),
-      h('tr', {}, h('th', {}, 'Result (test)'), h('td', {}, resultBadge(c.test_result)))))),
+      h('tr', {}, h('th', {}, 'Test Score (all marks)'), h('td', {}, fmtPct(c.test_score)))))),
     h('p', { class: 'muted small' }, 'Scores are percentages of available marks. The IQ Test Score is a test score, not a clinical IQ measurement.'),
     h('div', { class: 'grid' },
       field('Reference Results', area('reference_results', c.reference_results)),
@@ -331,7 +400,7 @@ async function renderCandidate(id) {
       field('Interviewer', text('interviewer', c.interviewer)),
       field('Interview Score (0-100)', h('input', { name: 'interview_score', type: 'number', min: 0, max: 100, step: 'any', value: c.interview_score ?? '' })),
       field('Chairman Interview', text('chairman_interview', c.chairman_interview)),
-      field('Final Result', select('final_result', [['Pending', 'Pending'], ['Pass', 'Pass'], ['Not Pass', 'Not Pass']], c.final_result)),
+      field('HR Final Result (HR decision, separate from Company Eligibility)', select('final_result', [['Pending', 'Pending'], ['Pass', 'Pass'], ['Not Pass', 'Not Pass']], c.final_result)),
       field('Date Come to Work', h('input', { name: 'date_come_to_work', type: 'date', value: c.date_come_to_work })),
       field('Remark', area('remark', c.remark), 'wide')),
     h('div', { class: 'row section-gap' }, h('button', { type: 'submit' }, 'Save changes')));
@@ -353,7 +422,7 @@ async function renderCandidate(id) {
 
   view().replaceChildren(
     h('p', {}, h('a', { href: '#/candidates' }, '< All candidates')),
-    h('div', { class: 'row between' }, h('h1', {}, c.name, ' ', resultBadge(c.overall_result)),
+    h('div', { class: 'row between' }, h('h1', {}, c.name, ' ', eligibilityBadge(c.eligibility)),
       h('div', { class: 'row' },
         downloadLink(`/candidates/${c.id}/export.pdf`, 'PDF'),
         downloadLink(`/candidates/${c.id}/export.docx`, 'Word'),
@@ -572,6 +641,8 @@ function editQuestion(q, onSaved) {
 
 // The LALCO IQ test has 18 questions unless HR chooses otherwise.
 const IQ_DEFAULT = 18;
+// Settings holding each test's default pass mark.
+const PASS_SETTING = { IQ: 'pass_iq', GENERAL: 'pass_general', CALCULATION: 'pass_calculation', ESSAY: 'pass_essay' };
 
 const EXPIRY_CHOICES = [[10, '10 minutes'], [30, '30 minutes'], [60, '1 hour'], [120, '2 hours'], [1440, '1 day'], [4320, '3 days'], [10080, '7 days'], ['custom', 'Custom (minutes)']];
 
@@ -590,11 +661,12 @@ async function renderAssessments() {
       const check = h('input', { type: 'checkbox', name: 'test_' + sec, checked: has, disabled: !has });
       const count = h('input', { name: 'count_' + sec, type: 'number', min: 1, max: counts[sec], value: Math.min(counts[sec], DEFAULT_COUNT[sec]) || '', class: 'inline-input small-num', disabled: !has });
       const minutes = h('input', { name: 'minutes_' + sec, type: 'number', min: 1, max: 600, value: settings.default_time_minutes, class: 'inline-input small-num', disabled: !has });
+      const pass = h('input', { name: 'pass_' + sec, type: 'number', min: 0, max: 100, step: 'any', value: settings[PASS_SETTING[sec]], class: 'inline-input small-num', disabled: !has });
       const quick = sec === 'IQ' && has ? h('span', { class: 'small' }, ' Quick: ', [10, 15, 18, 20, 30].map((n) =>
         h('button', { type: 'button', class: 'secondary small', disabled: n > counts[sec], onclick: () => { count.value = n; } }, String(n)))) : null;
       return h('div', { class: 'test-row' },
         h('label', { class: 'test-name' }, check, ` ${i + 1}. ${TYPE_LABEL[sec]}`),
-        has ? h('span', { class: 'row small' }, count, 'questions', minutes, 'minutes', quick, h('span', { class: 'muted' }, `(bank has ${counts[sec]})`))
+        has ? h('span', { class: 'row small' }, count, 'questions', minutes, 'minutes', 'pass at', pass, '%', quick, h('span', { class: 'muted' }, `(bank has ${counts[sec]})`))
           : h('span', { class: 'muted small' }, 'No active questions in the bank yet'));
     }));
 
@@ -612,7 +684,8 @@ async function renderAssessments() {
     field('Link expires in', expirySelect),
     customField,
     testsBox,
-    h('p', { class: 'muted small wide' }, `The candidate gets ONE link, enters their details once, then takes the tests in order. Each test has its own timer. A test is passed at ${settings.pass_mark}% (Settings); if a test is not passed the assessment stops. Questions are random for each candidate and answers are shuffled. IQ: Level 1 → 5, split evenly (18 questions = 4 / 3 / 3 / 4 / 4, maximum 55 marks; 20 = 4 each, maximum 60).`),
+    field('Final eligibility mark (%): every test passed AND final score at least', h('input', { name: 'eligibility_mark', type: 'number', min: 0, max: 100, step: 'any', value: settings.final_eligibility })),
+    h('p', { class: 'muted small wide' }, 'The candidate gets ONE link, enters their details once, then takes the tests in order. Each test has its own timer and its own pass mark (defaults in Settings); if a test is not passed the assessment stops and the later tests stay locked. Final score = the average of the included tests. Questions are random for each candidate and answers are shuffled. IQ: Level 1 → 5, split evenly (18 questions = 4 / 3 / 3 / 4 / 4, maximum 55 marks; 20 = 4 each, maximum 60).'),
     h('div', { class: 'wide' }, h('button', { type: 'submit' }, 'Generate ONE Assessment Link')));
 
   form.addEventListener('submit', async (e) => {
@@ -626,6 +699,8 @@ async function renderAssessments() {
       link_expiry_minutes: Number(v.expiry_choice === 'custom' ? v.expiry_custom : v.expiry_choice),
       counts: Object.fromEntries(tests.map((sec) => [sec, Number(v['count_' + sec] || 0)])),
       minutes: Object.fromEntries(tests.map((sec) => [sec, Number(v['minutes_' + sec] || 0)])),
+      pass_marks: Object.fromEntries(tests.map((sec) => [sec, v['pass_' + sec]])),
+      eligibility_mark: v.eligibility_mark,
     };
     if (!tests.length) return output.replaceChildren(message('Please tick at least one test.'));
     try {
@@ -636,7 +711,8 @@ async function renderAssessments() {
       const who = v.candidate_id ? (candidates.find((c) => String(c.id) === String(v.candidate_id)) || {}).name : 'New candidate (fills in their own details)';
       output.replaceChildren(h('div', { class: 'message ok' },
         h('strong', {}, 'Assessment Created'), h('br'), `Candidate: ${who}`, h('br'),
-        `Tests: ${a.stages.map((st) => TYPE_LABEL[st.section]).join(' → ')}`, h('br'),
+        `Tests: ${a.stages.map((st) => `${TYPE_LABEL[st.section]} (pass ${st.pass_mark}%)`).join(' → ')}`, h('br'),
+        `Company eligibility: every test passed and final score at least ${a.eligibility_mark}%`, h('br'),
         `The link must be opened before ${fmtDateTime(a.link_expires_at)}.`),
         h('div', { class: 'link-box' }, input, copy));
       input.select();
@@ -660,6 +736,32 @@ function testCell(c, sec) {
   if (!t) return '-';
   const cls = t.result === 'Pass' ? 'pass' : t.result === 'Not Pass' ? 'fail' : t.result === 'Pending' ? 'pending' : 'neutral';
   return h('span', { class: 'badge ' + cls }, t.text);
+}
+
+// Test | Score | % | Level | Result | Status | Pass mark, one row per test of the link.
+function testsTable(tests) {
+  if (!tests || !tests.length) return h('p', { class: 'muted' }, 'No assessment started yet.');
+  return h('div', { class: 'table-wrap' }, h('table', {},
+    h('thead', {}, h('tr', {}, ['Test', 'Score', '%', 'Level', 'Result', 'Status', 'Pass Mark'].map((t) => h('th', {}, t)))),
+    h('tbody', {}, tests.map((t) => h('tr', {},
+      h('td', {}, h('strong', {}, t.name)),
+      h('td', {}, t.score_text || '-', t.lalco_iq_score != null ? h('div', { class: 'small' }, 'LALCO IQ Score ', h('strong', {}, t.lalco_iq_score + ' / 150')) : null),
+      h('td', {}, fmtPct(t.percent)),
+      h('td', {}, t.level ? h('span', { class: 'badge neutral' }, (t.section === 'IQ' ? 'IQ Level: ' : '') + t.level) : '-'),
+      h('td', {}, t.result === 'Pass' || t.result === 'Not Pass' ? resultBadge(t.result) : testStateBadge(t.state)),
+      h('td', {}, t.completion || '-'),
+      h('td', {}, t.pass_mark != null ? t.pass_mark + '%' : '-'))))));
+}
+
+// FINAL OVERALL SCORE, FINAL LEVEL and COMPANY ELIGIBILITY, with HR's own decision shown apart.
+function finalBox(f, hrResult) {
+  return h('div', { class: 'final-box section-gap' },
+    h('div', { class: 'final-row' }, h('span', { class: 'muted' }, 'Final Overall Score'), h('strong', {}, f.final_percent_text || '-')),
+    h('div', { class: 'final-row' }, h('span', { class: 'muted' }, 'Final Level'), h('strong', {}, fmt(f.final_level))),
+    h('div', { class: 'final-row' }, h('span', { class: 'muted' }, 'Company Eligibility'), eligibilityBadge(f.eligibility)),
+    f.eligibility_note ? h('div', { class: 'muted small' }, f.eligibility_note + (f.eligibility_mark != null ? ` (eligibility mark ${f.eligibility_mark}%)` : '')) : null,
+    hrResult !== undefined ? h('div', { class: 'final-row' }, h('span', { class: 'muted' }, 'HR Final Result'), resultBadge(hrResult || 'Pending')) : null,
+    h('div', { class: 'muted small' }, 'Final % = the average of the included tests. Eligible = every test passed and Final % reaches the eligibility mark. HR Final Result is HR\'s own decision.'));
 }
 
 function testsChain(stages) {
@@ -707,7 +809,7 @@ function assessmentTable(list, showCandidate) {
 }
 
 async function renderAssessment(id) {
-  const { assessment: a, stages, iq, candidate, questions } = await api('GET', '/assessments/' + id);
+  const { assessment: a, stages, tests, final, iq, candidate, questions } = await api('GET', '/assessments/' + id);
   const essayInputs = [];
   const count = { correct: 0, wrong: 0, missed: 0 };
   const submitted = a.status === 'SUBMITTED';
@@ -771,16 +873,20 @@ async function renderAssessment(id) {
       h('tr', {}, h('th', {}, 'Test Score'), h('td', {}, a.test_score == null ? '-' : a.test_score + '%')),
       h('tr', {}, h('th', {}, 'Result'), h('td', {}, a.status === 'SUBMITTED' ? resultBadge(a.result) : '-'))))));
 
-  const stageStatus = (st) => (st.status === 'IN_PROGRESS' ? 'In progress' : st.status === 'NOT_STARTED' ? (a.status === 'SUBMITTED' ? 'Not taken' : 'Not started') : 'Finished');
   const stagesCard = h('div', { class: 'card' }, h('h2', {}, 'Tests in this link'),
     h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, ['#', 'Test', 'Questions', 'Time', 'Status', 'Started', 'Finished', 'Score', '%', 'Result'].map((t) => h('th', {}, t)))),
-      h('tbody', {}, stages.map((st) => h('tr', {},
-        h('td', {}, st.position), h('td', {}, TYPE_LABEL[st.section]), h('td', {}, st.question_count), h('td', {}, st.time_limit_minutes + ' min'),
-        h('td', {}, stageStatus(st), st.auto_submitted ? h('div', { class: 'muted small' }, 'time ran out') : null),
-        h('td', { class: 'small' }, fmtDateTime(st.started_at)), h('td', { class: 'small' }, fmtDateTime(st.submitted_at)),
-        h('td', {}, st.status === 'SUBMITTED' ? `${st.points} / ${st.max}` : '-'), h('td', {}, st.status === 'SUBMITTED' ? st.percent + '%' : '-'),
-        h('td', {}, st.status === 'SUBMITTED' ? resultBadge(st.result) : '-')))))));
+      h('thead', {}, h('tr', {}, ['#', 'Test', 'Questions', 'Time', 'Status', 'Started', 'Finished', 'Score', '%', 'Level', 'Pass Mark', 'Result'].map((t) => h('th', {}, t)))),
+      h('tbody', {}, stages.map((st, i) => {
+        const t = tests[i];
+        return h('tr', {},
+          h('td', {}, st.position), h('td', {}, TYPE_LABEL[st.section]), h('td', {}, st.question_count), h('td', {}, st.time_limit_minutes + ' min'),
+          h('td', {}, t.completion, st.auto_submitted ? h('div', { class: 'muted small' }, 'time ran out') : null),
+          h('td', { class: 'small' }, fmtDateTime(st.started_at)), h('td', { class: 'small' }, fmtDateTime(st.submitted_at)),
+          h('td', {}, st.status === 'SUBMITTED' ? `${st.points} / ${st.max}` : '-', t.lalco_iq_score != null ? h('div', { class: 'small' }, `LALCO IQ ${t.lalco_iq_score} / 150`) : null),
+          h('td', {}, fmtPct(t.percent)), h('td', {}, fmt(t.level)), h('td', {}, t.pass_mark != null ? t.pass_mark + '%' : '-'),
+          h('td', {}, testStateBadge(t.state)));
+      })))),
+    finalBox(final));
 
   view().replaceChildren(
     h('p', {}, h('a', { href: '#/assessments' }, '< All assessments')),
@@ -802,7 +908,7 @@ async function renderResults() {
   const [list, iq] = await Promise.all([api('GET', '/candidates'), api('GET', '/results/iq')]);
   const iqCard = h('div', { class: 'card' }, h('h2', {}, 'IQ Test Results'),
     iq.length ? h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, ['Candidate', 'IQ Weighted Score', 'IQ %', 'LALCO IQ Score', 'IQ Category', 'Correct Answers', ...IQ_LEVELS.map((n) => 'Level ' + n), 'Assessment Date', ''].map((t) => h('th', {}, t)))),
+      h('thead', {}, h('tr', {}, ['Candidate', 'IQ Weighted Score', 'IQ %', 'LALCO IQ Score', 'IQ Level', 'Correct Answers', ...IQ_LEVELS.map((n) => 'Level ' + n), 'Assessment Date', ''].map((t) => h('th', {}, t)))),
       h('tbody', {}, iq.map((r) => h('tr', {},
         h('td', {}, r.candidate_id ? h('a', { href: '#/candidates/' + r.candidate_id }, r.candidate_name) : '-'),
         h('td', {}, r.iq_text), h('td', {}, r.iq_score + '%'),
@@ -817,17 +923,17 @@ async function renderResults() {
     h('div', { class: 'row between' }, h('h1', {}, 'Results'), downloadLink('/export/candidates.xlsx', 'Export all candidates (Excel)', '')),
     iqCard,
     h('div', { class: 'card' }, h('h2', {}, 'All candidates'), list.length ? h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, ['Candidate', 'IQ', 'General', 'Calculation', 'Essay', 'Current Stage', 'Assessment Result', 'Final Result', 'Date', 'Export'].map((t) => h('th', {}, t)))),
+      h('thead', {}, h('tr', {}, ['Candidate', 'IQ', 'General', 'Calculation', 'Essay', 'Current Stage', 'Final %', 'Final Level', 'Company Eligibility', 'HR Final Result', 'Date', 'Export'].map((t) => h('th', {}, t)))),
       h('tbody', {}, list.map((c) => h('tr', {},
         h('td', {}, h('a', { href: '#/candidates/' + c.id }, c.name)),
         h('td', {}, testCell(c, 'IQ'), c.iq_text ? h('div', { class: 'muted small' }, `${c.iq_text} · LALCO ${c.lalco_iq_score ?? '-'} / 150 · ${c.iq_category || '-'}`) : null),
         h('td', {}, testCell(c, 'GENERAL')), h('td', {}, testCell(c, 'CALCULATION')), h('td', {}, testCell(c, 'ESSAY')),
         h('td', { class: 'small' }, fmt(c.current_stage)),
-        h('td', {}, c.assessment_result ? resultBadge(c.assessment_result) : '-'),
+        h('td', {}, c.final_percent_text || '-'), h('td', {}, fmt(c.final_level)), h('td', { title: c.eligibility_note || '' }, eligibilityBadge(c.eligibility)),
         h('td', {}, resultBadge(c.final_result || 'Pending')), h('td', {}, fmtDate(c.assessment_date || c.created_at)),
         h('td', { class: 'nowrap' }, downloadLink(`/candidates/${c.id}/export.pdf`, 'PDF'), ' ', downloadLink(`/candidates/${c.id}/export.docx`, 'Word'), ' ', downloadLink(`/candidates/${c.id}/export.xlsx`, 'Excel')))))))
       : h('p', { class: 'muted' }, 'No candidates yet.')),
-    h('p', { class: 'muted small' }, 'Each test shows its percentage and PASS / NOT PASS (pass mark in Settings). Assessment Result: any test NOT PASS = NOT PASS; all tests PASS = PASS; otherwise Pending. Final Result is HR\'s own decision on the candidate page.'));
+    h('p', { class: 'muted small' }, 'Each test shows its percentage and PASS / NOT PASS against its own pass mark. Final % = the average of the included tests, once all are finished and marked. Company Eligibility: every test passed and Final % at least the eligibility mark; a test not passed = NOT ELIGIBLE. HR Final Result is HR\'s own decision on the candidate page.'));
 }
 
 // ---------------------------------------------------------------------------
@@ -839,16 +945,18 @@ async function renderSettings() {
   const form = h('form', { class: 'grid' },
     field('Default Exam Time (minutes)', h('input', { name: 'default_time_minutes', type: 'number', min: 1, max: 600, value: s.default_time_minutes })),
     field('Default Link Expiry (minutes)', h('input', { name: 'default_link_expiry_minutes', type: 'number', min: 1, value: s.default_link_expiry_minutes })),
-    field('Pass Mark (%)', h('input', { name: 'pass_mark', type: 'number', min: 0, max: 100, step: 'any', value: s.pass_mark })),
     field('Default Language', select('default_language', Object.entries(LANG_LABEL), s.default_language)),
+    h('h2', { class: 'wide section-gap' }, 'Pass marks'),
+    ...[['pass_iq', 'IQ Test pass (%)'], ['pass_general', 'General Test pass (%)'], ['pass_calculation', 'Calculation Test pass (%)'], ['pass_essay', 'Essay Test pass (%)'],
+      ['final_eligibility', 'Final company eligibility (%)']].map(([name, label]) => field(label, h('input', { name, type: 'number', min: 0, max: 100, step: 'any', value: s[name] }))),
     h('div', { class: 'wide' }, h('button', { type: 'submit' }, 'Save settings')));
   const card = h('div', { class: 'card' }, h('h2', {}, 'Assessment defaults'), form,
-    h('p', { class: 'muted small' }, `Current link expiry default: ${fmtMinutes(s.default_link_expiry_minutes)}. Changing the pass mark updates the result of every submitted assessment.`));
+    h('p', { class: 'muted small' }, `Current link expiry default: ${fmtMinutes(s.default_link_expiry_minutes)}. A test is passed when its percentage reaches its pass mark. A candidate is ELIGIBLE when every test in the link is passed and the final score (the average of the tests) reaches the final eligibility mark. These are the defaults for new assessment links (they can be changed on each new link); links already created keep their own marks, so saving never changes an existing result.`));
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const v = formValues(form);
     try {
-      await api('PUT', '/settings', { ...v, default_time_minutes: Number(v.default_time_minutes), default_link_expiry_minutes: Number(v.default_link_expiry_minutes), pass_mark: Number(v.pass_mark) });
+      await api('PUT', '/settings', { ...v, default_time_minutes: Number(v.default_time_minutes), default_link_expiry_minutes: Number(v.default_link_expiry_minutes) });
       flash(card, 'Settings saved.', 'ok');
     } catch (ex) { flash(card, ex.message); }
   });

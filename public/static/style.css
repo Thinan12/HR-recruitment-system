@@ -223,3 +223,21 @@ table.kv th { width: 200px; background: transparent; }
 .progress-item.upcoming { color: var(--muted); }
 .progress-item.failed .mark { color: var(--fail); }
 .passed { color: var(--pass); }
+.progress-item.upcoming, .progress-item.locked { color: var(--muted); }
+.progress-item.pending .mark { color: var(--pending); }
+h1.failed, td.failed { color: var(--fail); }
+td.passed { font-weight: 700; }
+td.failed { font-weight: 700; }
+.result-table { width: auto; min-width: 260px; margin: 12px auto 16px; }
+.result-table th { background: transparent; font-size: 14px; }
+.result-table td { font-size: 16px; font-weight: 600; }
+/* admin: all candidates on the dashboard */
+.results-table th, .results-table td { font-size: 13px; padding: 7px 8px; white-space: nowrap; }
+.results-table th.group { text-align: center; border-left: 2px solid var(--line); }
+.results-table td.group-start, .results-table th.group-start { border-left: 2px solid var(--line); }
+.final-box { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; display: grid; gap: 6px; max-width: 520px; }
+.final-row { display: flex; justify-content: space-between; gap: 12px; }
+.final-row strong { font-size: 16px; }
+.stat-group-title { font-size: 13px; color: var(--muted); font-weight: 600; margin: 12px 0 4px; }
+.stat.clickable { cursor: pointer; }
+.stat.clickable:hover { border-color: var(--primary); }

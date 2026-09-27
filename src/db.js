@@ -174,12 +174,24 @@ for (const table of ['questions', 'assessment_questions']) {
 addMissingColumns('assessment_questions', [['difficulty', "TEXT NOT NULL DEFAULT ''"]]);
 addMissingColumns('assessments', [['iq_correct', 'INTEGER'], ['iq_total', 'INTEGER'], ['iq_breakdown', 'TEXT']]);
 
+// Each test keeps the pass mark it was created with, and each link the final
+// eligibility mark, so changing Settings later never changes a finished result.
+addMissingColumns('assessment_stages', [['pass_mark', 'REAL']]);
+addMissingColumns('assessments', [['eligibility_mark', 'REAL']]);
+
 const DEFAULT_SETTINGS = {
   default_time_minutes: '30',
   default_link_expiry_minutes: '1440',
-  pass_mark: '60',
+  pass_mark: '60', // the single pass mark used before each test had its own
+  pass_iq: '70',
+  pass_general: '60',
+  pass_calculation: '60',
+  pass_essay: '60',
+  final_eligibility: '70',
   default_language: 'en',
 };
+// Settings key of each test's default pass mark.
+const PASS_KEYS = { IQ: 'pass_iq', GENERAL: 'pass_general', CALCULATION: 'pass_calculation', ESSAY: 'pass_essay' };
 
 function getSettings() {
   const out = { ...DEFAULT_SETTINGS };
@@ -188,9 +200,15 @@ function getSettings() {
     default_time_minutes: Number(out.default_time_minutes),
     default_link_expiry_minutes: Number(out.default_link_expiry_minutes),
     pass_mark: Number(out.pass_mark),
+    ...Object.fromEntries(Object.values(PASS_KEYS).map((k) => [k, Number(out[k])])),
+    final_eligibility: Number(out.final_eligibility),
     default_language: out.default_language,
   };
 }
+
+// Tests created before each test had its own pass mark were scored with the
+// single pass mark; record it on them so their results never change.
+db.prepare('UPDATE assessment_stages SET pass_mark = ? WHERE pass_mark IS NULL').run(getSettings().pass_mark);
 
 function saveSettings(values) {
   const upsert = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
@@ -201,4 +219,4 @@ function saveSettings(values) {
 
 const now = () => new Date().toISOString();
 
-module.exports = { db, getSettings, saveSettings, now, DB_PATH };
+module.exports = { db, getSettings, saveSettings, now, DB_PATH, PASS_KEYS };

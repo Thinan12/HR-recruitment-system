@@ -254,7 +254,9 @@ router.get('/assessments/:id', (req, res) => {
   if (!a) return notFound(res);
   const candidate = a.candidate_id ? db.prepare('SELECT id, name, phone FROM candidates WHERE id = ?').get(a.candidate_id) : null;
   const questions = db.prepare('SELECT * FROM assessment_questions WHERE assessment_id = ? ORDER BY position').all(a.id);
-  res.json({ assessment: { ...a, state: A.linkState(a), current_stage: A.currentStage(a) }, stages: A.stagesOf(a), iq: reports.iqResult(a), candidate, questions });
+  const stages = A.stagesOf(a);
+  res.json({ assessment: { ...a, state: A.linkState(a), current_stage: A.currentStage(a, stages) }, stages,
+    tests: stages.map((st) => reports.stageView(a, st, stages)), final: reports.finalAssessment(a, stages), iq: reports.iqResult(a), candidate, questions });
 });
 
 router.post('/assessments/:id/:action(enable|disable)', (req, res) => {
@@ -284,18 +286,27 @@ router.delete('/assessments/:id', (req, res) => {
 
 router.get('/settings', (req, res) => res.json(getSettings()));
 
+// Pass marks and the final eligibility mark are defaults for NEW assessment
+// links. Each link keeps the marks it was created with, so saving here never
+// changes a result that already exists.
+const PERCENT_SETTINGS = [['pass_iq', 'IQ pass mark'], ['pass_general', 'General pass mark'], ['pass_calculation', 'Calculation pass mark'],
+  ['pass_essay', 'Essay pass mark'], ['final_eligibility', 'Final eligibility mark']];
+
 router.put('/settings', (req, res) => {
   const b = req.body || {};
+  const current = getSettings();
   const time = Number(b.default_time_minutes);
   const expiry = Number(b.default_link_expiry_minutes);
-  const pass = Number(b.pass_mark);
   if (!Number.isInteger(time) || time < 1 || time > 600) return bad(res, 'Default exam time must be between 1 and 600 minutes.');
   if (!Number.isInteger(expiry) || expiry < 1 || expiry > 60 * 24 * 90) return bad(res, 'Default link expiry must be between 1 minute and 90 days.');
-  if (!Number.isFinite(pass) || pass < 0 || pass > 100) return bad(res, 'Pass mark must be between 0 and 100.');
   if (!A.LANGUAGES.includes(b.default_language)) return bad(res, 'Please choose a language.');
-  const before = getSettings().pass_mark;
-  saveSettings({ default_time_minutes: time, default_link_expiry_minutes: expiry, pass_mark: pass, default_language: b.default_language });
-  if (before !== pass) A.rescoreAll();
+  const values = { default_time_minutes: time, default_link_expiry_minutes: expiry, default_language: b.default_language };
+  for (const [key, name] of PERCENT_SETTINGS) {
+    const v = b[key] === undefined || b[key] === '' ? current[key] : Number(b[key]);
+    if (!Number.isFinite(v) || v < 0 || v > 100) return bad(res, `${name} must be between 0 and 100%.`);
+    values[key] = v;
+  }
+  saveSettings(values);
   res.json(getSettings());
 });
 
