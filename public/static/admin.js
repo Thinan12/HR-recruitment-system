@@ -458,7 +458,7 @@ async function renderQuestions() {
 }
 
 function uploadCard(onImported) {
-  const fileInput = h('input', { type: 'file', class: 'inline-input', accept: '.xlsx,.xls,.docx,.doc,.pdf,.csv,.txt' });
+  const fileInput = h('input', { type: 'file', class: 'inline-input', accept: '.xlsx,.xls,.docx,.doc,.pdf,.csv,.tsv,.txt' });
   const section = select('section', Object.entries(SECTION_LABEL).map(([k, v]) => [k, v + ' questions']), questionSection || 'IQ');
   section.classList.add('inline-input');
   const result = h('div');
@@ -466,7 +466,7 @@ function uploadCard(onImported) {
   const card = h('div', { class: 'card' },
     h('h2', {}, 'Upload questions'),
     h('p', { class: 'muted small' },
-      'Excel, Word, PDF, CSV or TXT. Use columns Question, Option A-D, Correct Answer (optional: Type, Category, Difficulty, Marks), or numbered questions with "Answer: B" lines. ',
+      'Excel, Word, PDF, CSV, TSV or TXT. Either a table with columns such as Question, Option A-D, Correct Answer (optional: Type, Category, Level, Marks), or numbered questions (1. / Q1) with options A-D and the answer as an "Answer: B" line or in an Answer Key section at the end. Essay questions need no options. ',
       h('a', { href: '/api/admin/questions/template.xlsx' }, 'Download Excel template')),
     h('div', { class: 'row' }, fileInput, h('span', { class: 'muted small' }, 'If the file has no Type column, questions are added as:'), section, button),
     result);
@@ -500,16 +500,21 @@ function showPreview(container, p, onDone) {
       onDone();
     } catch (ex) { flash(container, ex.message); importBtn.disabled = false; }
   });
+  const validRows = p.rows.filter((r) => r.errors.length === 0);
   container.replaceChildren(h('div', {}, // h() skips the null sections; replaceChildren would print "null"
+    h('h2', {}, 'Import Preview'),
+    h('p', { class: 'small' }, h('strong', {}, 'Test Type: '), SECTION_LABEL[p.test_type] || '-', ' · ', h('strong', {}, 'File: '), p.file || '-',
+      p.format ? [' · ', h('strong', {}, 'Detected format: '), p.format] : null, p.answer_key ? [' · ', h('strong', {}, 'Answer key entries: '), p.answer_key] : null),
     h('div', { class: 'stats' },
-      ...[['Questions found', p.found], ['Valid', p.valid], ['Invalid', p.invalid]].map(([l, v]) => h('div', { class: 'stat' }, h('div', { class: 'label' }, l), h('div', { class: 'value' }, v))),
+      ...[['Found', p.found], ['Valid', p.valid], ['Invalid', p.invalid], ['Duplicates', p.duplicates ?? 0], ['Answer Conflicts', p.conflicts ?? 0]].map(([l, v]) => h('div', { class: 'stat' }, h('div', { class: 'label' }, l), h('div', { class: 'value' }, v))),
       ...Object.entries(p.by_section).filter(([, n]) => n > 0).map(([s, n]) => h('div', { class: 'stat' }, h('div', { class: 'label' }, SECTION_LABEL[s] + ' questions'), h('div', { class: 'value' }, n)))),
     invalid.length ? h('div', {}, h('h2', {}, 'Rows that will be skipped'), h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, h('th', {}, 'Row'), h('th', {}, 'Question'), h('th', {}, 'Problem'))),
-      h('tbody', {}, invalid.slice(0, 50).map((r) => h('tr', {}, h('td', {}, r.row), h('td', { class: 'question-cell' }, fmt(r.question.question_text).slice(0, 160)), h('td', {}, r.errors.join(' ')))))))) : null,
-    valid.length ? h('div', {}, h('h2', { class: 'section-gap' }, 'First questions'), h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, ['Question', 'Type', 'Level', 'Options', 'Answer', 'Marks'].map((t) => h('th', {}, t)))),
-      h('tbody', {}, valid.slice(0, 5).map((q) => h('tr', {},
+      h('thead', {}, h('tr', {}, h('th', {}, 'Question'), h('th', {}, 'Text'), h('th', {}, 'Problem'))),
+      h('tbody', {}, invalid.slice(0, 100).map((r) => h('tr', {}, h('td', {}, r.number != null ? r.number : 'Row ' + r.row), h('td', { class: 'question-cell' }, fmt(r.question.question_text).slice(0, 160)), h('td', {}, r.errors.join(' ')))))))) : null,
+    valid.length ? h('div', {}, h('h2', { class: 'section-gap' }, validRows.length > 100 ? 'First 100 questions to import' : 'Questions to import'), h('div', { class: 'table-wrap' }, h('table', {},
+      h('thead', {}, h('tr', {}, ['#', 'Question', 'Type', 'Level', 'Options', 'Correct Answer', 'Marks'].map((t) => h('th', {}, t)))),
+      h('tbody', {}, validRows.slice(0, 100).map((r) => [r, r.question]).map(([r, q]) => h('tr', {},
+        h('td', {}, r.number != null ? r.number : r.row),
         h('td', { class: 'question-cell' }, h('div', { class: 'pre' }, q.question_text), q.image_id ? h('div', { class: 'thumb-row' }, thumb(q.image_id)) : null),
         h('td', {}, SECTION_LABEL[q.section]), h('td', { class: 'nowrap' }, LEVEL_NAMES[q.difficulty] || fmt(q.difficulty)),
         h('td', { class: 'small' }, h('div', { class: 'thumb-row' }, LETTERS.filter((l) => q['option_' + l] || q['option_' + l + '_image'])

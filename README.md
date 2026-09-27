@@ -32,7 +32,7 @@ Questions already in the bank are skipped, so uploading the same file twice is s
 Only **Question**, the **options** and **Correct Answer** are required. The Correct Answer can be the letter (`B`) or the option text (`32`).
 The **Type** is IQ, General, Calculation or Essay. If there is no Type column, the type chosen on the upload form is used. An Excel sheet named "IQ" is treated as IQ questions.
 
-**Numbered text** (Word, PDF, TXT):
+**Numbered text** (Word, PDF, TXT) — no column headers needed. Questions numbered `1.` `1)` `Q1` `Q.1` or `Question 1`; options `A.` `A)` `(A)` `a)` or just `A Sydney`, one per line or several on one line; questions and options may wrap onto more lines and across pages. The answer can be an `Answer: B` line or an **Answer Key** section at the end (heading "Answer Key", "Answers", "Correct Answers" or "Solutions"; entries like `1. C`, `1 - C`, `1: C Canberra`, `1. Canberra` or `1. C 2. B 3. D`). If a key gives a letter and text that disagree, or text that matches no single option, the question is marked for review instead of guessed. Page headers, titles and "Name: ____" lines are ignored. Example:
 
 ```
 1. What number comes next: 3, 6, 9, ?
@@ -83,7 +83,7 @@ Node.js 24 LTS, Express, SQLite (`better-sqlite3`), plain HTML/JS frontend (no b
 ```
 npm install
 ADMIN_PASSWORD=choose-a-password npm start    # http://localhost:3000
-npm test                                       # 87 tests, uses temporary databases
+npm test                                       # 99 tests, uses temporary databases
 ```
 
 ```

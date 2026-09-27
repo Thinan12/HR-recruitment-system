@@ -134,14 +134,16 @@ test('invalid files are handled safely', async () => {
 
   const corruptZip = await preview(Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.alloc(200, 7)]), 'broken.docx');
   assert.equal(corruptZip.status, 400);
-  assert.match(corruptZip.data.error, /Unable to import this file/);
+  assert.match(corruptZip.data.error, /Unable to read this file/);
 
   const noQuestions = await preview(Buffer.from('hello\nworld'), 'notes.txt');
   assert.equal(noQuestions.status, 400);
 
   const wrongColumns = await preview(workbook([['Name', 'Phone'], ['A', 'B']], 'xlsx'), 'people.xlsx');
   assert.equal(wrongColumns.status, 400);
-  assert.match(wrongColumns.data.error, /Question\nOptions\nCorrect Answer/);
+  assert.match(wrongColumns.data.error, /Could not detect a valid question structure/);
+  assert.match(wrongColumns.data.error, /Questions found: 0/);
+  assert.match(noQuestions.data.error, /Could not detect a valid question structure[\s\S]*Questions found:/);
 
   const tooBig = await preview(Buffer.alloc(11 * 1024 * 1024, 65), 'big.txt');
   assert.equal(tooBig.status, 400);

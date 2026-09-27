@@ -198,12 +198,15 @@ router.post('/questions/import/preview', (req, res, next) => {
       for (const r of rows) {
         if (r.errors.length) continue;
         const key = A.questionKey(r.question);
-        if (seen.has(key)) r.errors.push('This question is already in the question bank (or repeated in this file).');
+        if (seen.has(key)) r.errors.push('Duplicate — not imported: this question is already in the question bank (or repeated in this file).');
         seen.add(key);
       }
       const valid = rows.filter((r) => r.errors.length === 0);
       const bySection = Object.fromEntries(A.SECTIONS.map((s) => [s, valid.filter((r) => r.question.section === s).length]));
-      res.json({ found: rows.length, valid: valid.length, invalid: rows.length - valid.length, by_section: bySection, rows });
+      const duplicates = rows.filter((r) => r.errors.some((e) => /already in the question bank/.test(e))).length;
+      const conflicts = rows.filter((r) => r.errors.some((e) => /conflict/i.test(e))).length;
+      res.json({ found: rows.length, valid: valid.length, invalid: rows.length - valid.length, duplicates, conflicts,
+        format: rows.format, answer_key: rows.keyCount, test_type: defaultSection, file: req.file.originalname, by_section: bySection, rows });
     } catch (e) {
       if (e instanceof ImportError) return bad(res, e.message);
       next(e);

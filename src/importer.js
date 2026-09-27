@@ -22,13 +22,30 @@ const ALLOWED = {
   '.xlsx': 'zip', '.docx': 'zip',
   '.xls': 'ole', '.doc': 'ole',
   '.pdf': 'pdf',
-  '.csv': 'text', '.txt': 'text',
+  '.csv': 'text', '.tsv': 'text', '.txt': 'text',
 };
 
 class ImportError extends Error {}
 
-const GENERIC_ERROR =
-  'Unable to import this file.\n\nPlease check that the file contains:\nQuestion\nOptions\nCorrect Answer';
+const NO_STRUCTURE = 'Could not detect a valid question structure in this file.';
+
+// What was found in a file, shown when nothing could be imported.
+function diagnostics(rows, checked) {
+  const optionsFound = rows.reduce((n, r) => n + ['a', 'b', 'c', 'd', 'e'].filter((l) => r['option_' + l] || r['option_' + l + '_image']).length, 0);
+  const answersFound = rows.filter((r) => String(r.correct_answer || '').trim()).length;
+  const conflicts = checked.filter((r) => r.errors.some((e) => /conflict/i.test(e))).length;
+  return `${NO_STRUCTURE}
+
+Detected format: ${rows.format || 'table (header row)'}
+Questions found: ${rows.length}
+Options found: ${optionsFound}
+Answers found: ${answersFound}${rows.keyCount ? ` (answer key: ${rows.keyCount})` : ''}
+Valid questions: 0
+Invalid questions: ${checked.length}
+Answer conflicts: ${conflicts}
+
+A question needs its text, options A, B, C ... (not for Essay or short-answer Calculation) and a correct answer (inline "Answer: B" or an Answer Key section).`;
+}
 
 // ---- helpers ---------------------------------------------------------------
 
@@ -44,7 +61,7 @@ function sectionFrom(value) {
 
 // Header text -> field name. Headers are compared without spaces/punctuation.
 const HEADER_ALIASES = {
-  question_text: ['question', 'questiontext', 'questions', 'text', 'ຄຳຖາມ'],
+  question_text: ['question', 'questiontext', 'questions', 'text', 'q', 'prompt', 'essayquestion', 'ຄຳຖາມ'],
   section: ['type', 'section', 'test', 'testtype', 'questiontype', 'ປະເພດ'],
   category: ['category', 'topic', 'subject', 'ໝວດ'],
   difficulty: ['difficulty', 'level', 'ລະດັບ'],
@@ -53,7 +70,8 @@ const HEADER_ALIASES = {
   option_c: ['optionc', 'c', 'choicec', 'answerc'],
   option_d: ['optiond', 'd', 'choiced', 'answerd'],
   option_e: ['optione', 'e', 'choicee', 'answere'],
-  correct_answer: ['correctanswer', 'answer', 'correct', 'key', 'answerkey', 'ຄຳຕອບ', 'ຄຳຕອບທີ່ຖືກ'],
+  correct_answer: ['correctanswer', 'answer', 'correct', 'correctoption', 'rightanswer', 'solution', 'key', 'answerkey', 'ຄຳຕອບ', 'ຄຳຕອບທີ່ຖືກ'],
+  options: ['options', 'choices', 'answeroptions'],
   marks: ['marks', 'mark', 'points', 'point', 'score', 'ຄະແນນ'],
 };
 
@@ -83,6 +101,12 @@ function rowsFromTable(table, defaultSection) {
       const raw = {};
       for (const [field, i] of Object.entries(map)) raw[field] = cells[i] == null ? '' : String(cells[i]).trim();
       raw.section = sectionFrom(raw.section) || defaultSection;
+      if (raw.options && !['a', 'b', 'c', 'd', 'e'].some((l) => raw['option_' + l])) {
+        const marked = splitOptionLine(raw.options, 'A');
+        const parts = marked && marked.options.length > 1 ? marked.options.map(([, t]) => t) : raw.options.split(/\s*[;|\n]\s*/).filter(Boolean);
+        parts.slice(0, 5).forEach((t, k) => { raw['option_' + 'abcde'[k]] = t; });
+      }
+      delete raw.options;
       rows.push(raw);
     }
     return rows;
@@ -90,68 +114,191 @@ function rowsFromTable(table, defaultSection) {
   return null;
 }
 
-function splitInlineOptions(line) {
-  // "A. 10  B. 20  C. 30  D. 40" -> ["A. 10", "B. 20", ...]
-  return line.split(/\s+(?=\(?[B-E]\s*[.)]\s)/);
-}
+// Reads questions out of plain text (PDF, Word, TXT, legacy .doc). Nothing
+// here needs column headers; the layout is recognised from the text itself:
+//
+//   1. What is the capital of Australia?      <- "1." "1)" "Q1" "Q.1" "Question 1"
+//   A Sydney B Melbourne C Canberra D Perth    <- "A" "A." "A)" "(A)" "a)", one or many per line
+//   Answer: C                                  <- optional, per question
+//   ...
+//   ANSWER KEY                                 <- or Answers / Correct Answers / Solutions
+//   1. C Canberra                              <- "1. C", "1 - C", "1: C", "1. Canberra"
+//
+// An answer is only accepted when it clearly points at one option; anything
+// unclear is marked for review instead of guessed.
+const LETTER_LIST = ['A', 'B', 'C', 'D', 'E'];
 
-const RE_QUESTION = /^(?:q(?:uestion)?\s*)?(\d{1,4})\s*[.):]\s*(.+)$/i;
+const RE_QUESTION = /^(?:(?:q|question)\s*\.?\s*(\d{1,4})\s*[.):\-–]?\s+|(\d{1,4})\s*[.):]\s*)(.+)$/i;
 const RE_QUESTION_LABEL = /^question\s*[:.]\s*(.+)$/i;
-const RE_OPTION = /^\(?([A-Ea-e])\s*[.):]\s*(.*)$/;
 const RE_ANSWER = /^(?:correct\s*answer|answer|ans|correct|key|ຄຳຕອບ)\s*[:=：-]\s*(.+)$/i;
 const RE_META = /^(type|section|category|difficulty|level|marks?|points?)\s*[:=：]\s*(.+)$/i;
+const RE_KEY_HEADING = /^(?:answer\s*key|answers|correct\s*answers|answer\s*sheet|solutions?(?:\s*\/\s*answer\s*key)?)\s*[:\-–]?\s*(?:page\s*\d+(?:\s*(?:of|\/)\s*\d+)?)?\s*$/i;
+const RE_PAGE_LINE = /(^|\s)page\s*\d+(\s*(of|\/)\s*\d+)?\s*$/i;
+const RE_BLANK_FIELD = /_{3,}/;
 
-// Parses numbered question blocks out of plain text.
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// Text used to compare an answer with an option: letters and digits only.
+const norm = (v) => String(v ?? '').toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}]+/gu, '');
+
+// If the line starts with option letter L, returns { style, text } where
+// style is 'mark' ("A." "A)" "(A)" "a)") or 'bare' ("A Sydney").
+function optionStart(line, L) {
+  let m = line.match(new RegExp(`^\\(?[${L}${L.toLowerCase()}]\\)?\\s*[.):]\\s*(.*)$`));
+  if (m) return { style: 'mark', text: m[1] };
+  m = line.match(new RegExp(`^${L}\\s+(\\S.*)$`));
+  if (m) return { style: 'bare', text: m[1] };
+  return null;
+}
+
+// Splits one line into options, cutting only at the next letter in order.
+function splitOptionLine(line, first) {
+  const start = optionStart(line, first);
+  if (!start) return null;
+  const out = [];
+  let letter = first;
+  let rest = start.text;
+  for (let i = LETTER_LIST.indexOf(first) + 1; i < LETTER_LIST.length; i++) {
+    const next = LETTER_LIST[i];
+    const re = start.style === 'mark'
+      ? new RegExp(`\\s+\\(?[${next}${next.toLowerCase()}]\\)?\\s*[.):]\\s*`)
+      : new RegExp(`\\s+${next}\\s+(?=\\S)`);
+    const m = rest.match(re);
+    if (!m) break;
+    out.push([letter, rest.slice(0, m.index).trim()]);
+    rest = rest.slice(m.index + m[0].length);
+    letter = next;
+  }
+  out.push([letter, rest.trim()]);
+  return { style: start.style, options: out };
+}
+
+// "C Canberra" -> { letter: 'C', text: 'Canberra' }; "Canberra" -> { letter: null, text: 'Canberra' }.
+// A capital letter may be followed by a space; a small letter needs "." ")" or ":".
+function parseKeyValue(v) {
+  const s = String(v).trim();
+  const m = s.match(/^\(?([A-E])\)?(?:\s*[.):\-–]\s*|\s+|$)(.*)$/) || s.match(/^\(?([a-e])\)?(?:\s*[.):\-–]\s*|$)(.*)$/);
+  return m ? { letter: m[1].toUpperCase(), text: m[2].trim() } : { letter: null, text: s };
+}
+
+// Reads answer-key lines: "1. C", "1 - C", "1: C Canberra", "1. Canberra",
+// or several on one line ("1. C  2. B  3. D").
+function readAnswerKey(lines) {
+  const key = new Map();
+  for (const line of lines) {
+    if (RE_KEY_HEADING.test(line) || (RE_PAGE_LINE.test(line) && !/^\d/.test(line))) continue;
+    if (/^(\s*\d{1,4}\s*[.):\-–]\s*[A-Ea-e]\s*[,;]?)+\s*$/.test(line) && (line.match(/\d{1,4}\s*[.):\-–]/g) || []).length > 1) {
+      for (const x of line.matchAll(/(\d{1,4})\s*[.):\-–]\s*([A-Ea-e])/g)) key.set(Number(x[1]), { letter: x[2].toUpperCase(), text: '' });
+      continue;
+    }
+    const m = line.match(/^(?:q(?:uestion)?\s*\.?\s*)?(\d{1,4})\s*[.):\-–]?\s*(.+)$/i);
+    if (m) key.set(Number(m[1]), parseKeyValue(m[2]));
+  }
+  return key;
+}
+
+// Applies the answer key to parsed questions (by question number).
+function applyAnswerKey(rows, key) {
+  for (const row of rows) {
+    if (row.number == null || !key.has(row.number)) continue;
+    const { letter, text } = key.get(row.number);
+    const options = LETTER_LIST.filter((L) => row['option_' + L.toLowerCase()]);
+    let answer = null;
+    if (!options.length) {
+      answer = text || letter; // short-answer question: the key is the answer itself
+    } else if (letter) {
+      const optText = row['option_' + letter.toLowerCase()];
+      if (!optText) row.answer_error = `Correct answer — review required: the answer key says ${letter}, but there is no option ${letter}.`;
+      else if (text && norm(text) !== norm(optText)) row.answer_error = `Answer conflict — review required: the answer key says "${letter} ${text}", but option ${letter} is "${optText}".`;
+      else answer = letter;
+    } else {
+      const matches = options.filter((L) => norm(row['option_' + L.toLowerCase()]) === norm(text));
+      if (matches.length === 1) answer = matches[0];
+      else row.answer_error = `Correct answer — review required: "${text}" does not match exactly one option.`;
+    }
+    if (answer == null) continue;
+    if (row.correct_answer && norm(row.correct_answer) !== norm(answer) && norm(row.correct_answer) !== norm(row['option_' + String(answer).toLowerCase()])) {
+      row.answer_error = `Answer conflict — review required: the question says "${row.correct_answer}", the answer key says "${answer}".`;
+    } else {
+      row.correct_answer = answer;
+    }
+  }
+}
+
 function rowsFromText(text, defaultSection) {
   const lines = String(text).replace(/\r/g, '').split('\n').map((l) => l.replace(/ /g, ' ').trim());
 
-  // Tab-separated tables (from .doc files and .txt exports) are handled as tables.
+  // Tab-separated tables (from .doc files, .tsv and .txt exports) are handled as tables.
   const tabbed = lines.filter((l) => l.includes('\t')).map((l) => l.split('\t').map((c) => c.trim()));
   if (tabbed.length > 1) {
     const rows = rowsFromTable(tabbed, defaultSection);
-    if (rows && rows.length) return rows;
+    if (rows && rows.length) { rows.format = 'table (header row)'; return rows; }
   }
+
+  // Split off the answer key: everything after an "Answer Key" style heading
+  // that comes after at least one numbered question.
+  const firstQuestion = lines.findIndex((l) => RE_QUESTION.test(l));
+  const keyAt = lines.findIndex((l, i) => i > firstQuestion && firstQuestion >= 0 && RE_KEY_HEADING.test(l));
+  const body = keyAt >= 0 ? lines.slice(0, keyAt) : lines;
+  const key = keyAt >= 0 ? readAnswerKey(lines.slice(keyAt + 1).filter(Boolean)) : new Map();
+  const numbered = firstQuestion >= 0;
 
   const rows = [];
   let cur = null;
   let lastOption = null;
-  const start = (textValue) => {
-    cur = { question_text: textValue, section: defaultSection, option_a: '', option_b: '', option_c: '', option_d: '', option_e: '', correct_answer: '', category: '', difficulty: '', marks: '' };
+  let optionStyle = null;
+  const start = (textValue, number) => {
+    cur = { question_text: textValue, section: defaultSection, option_a: '', option_b: '', option_c: '', option_d: '', option_e: '', correct_answer: '', category: '', difficulty: '', marks: '', number };
     rows.push(cur);
     lastOption = null;
   };
+  const nextLetter = () => (lastOption ? LETTER_LIST[LETTER_LIST.indexOf(lastOption.slice(-1).toUpperCase()) + 1] : 'A');
 
-  for (const line of lines) {
+  for (let i = 0; i < body.length; i++) {
+    const line = body[i];
     if (!line) continue;
+    // Page headers/footers and form fields ("Name: ____") are not questions.
+    if (RE_PAGE_LINE.test(line) && !RE_QUESTION.test(line)) continue;
+    if (RE_BLANK_FIELD.test(line) && !RE_QUESTION.test(line)) continue;
+    if (numbered && i < firstQuestion) continue; // title / instructions before question 1
+
     let m;
     if ((m = line.match(RE_ANSWER)) && cur) { cur.correct_answer = m[1].trim(); continue; }
     if ((m = line.match(RE_META)) && cur) {
-      const key = m[1].toLowerCase();
+      const k = m[1].toLowerCase();
       const value = m[2].trim();
-      if (key === 'type' || key === 'section') cur.section = sectionFrom(value) || cur.section;
-      else if (key === 'category') cur.category = value;
-      else if (key === 'difficulty' || key === 'level') cur.difficulty = value;
+      if (k === 'type' || k === 'section') cur.section = sectionFrom(value) || cur.section;
+      else if (k === 'category') cur.category = value;
+      else if (k === 'difficulty' || k === 'level') cur.difficulty = value;
       else cur.marks = value;
       continue;
     }
-    if (RE_OPTION.test(line) && cur) {
-      for (const part of splitInlineOptions(line)) {
-        const om = part.match(RE_OPTION);
-        if (!om) continue;
-        lastOption = 'option_' + om[1].toLowerCase();
-        cur[lastOption] = om[2].trim();
+    // Options: the next letter in order ("A" first). Bare letters ("A Sydney")
+    // count only when the options clearly continue (B on the same or next line).
+    if (cur && !cur.correct_answer) {
+      const want = nextLetter();
+      const parsed = want && splitOptionLine(line, want);
+      const bareOk = parsed && (parsed.style === 'mark' || parsed.options.length > 1 || lastOption
+        || (body[i + 1] && optionStart(body[i + 1], LETTER_LIST[LETTER_LIST.indexOf(want) + 1] || 'Z')));
+      if (parsed && bareOk && (!optionStyle || optionStyle === parsed.style || parsed.style === 'mark')) {
+        optionStyle = optionStyle || parsed.style;
+        for (const [L, t] of parsed.options) { lastOption = 'option_' + L.toLowerCase(); cur[lastOption] = t; }
+        continue;
       }
-      continue;
+      // Marked options may also come out of order (e.g. "C. x" alone).
+      const any = line.match(/^\(?([A-Ea-e])\s*[.):]\s*(.*)$/);
+      if (any) { lastOption = 'option_' + any[1].toLowerCase(); cur[lastOption] = any[2].trim(); continue; }
     }
-    if ((m = line.match(RE_QUESTION)) || (m = line.match(RE_QUESTION_LABEL))) {
-      start((m[2] ?? m[1]).trim());
-      continue;
-    }
+    if ((m = line.match(RE_QUESTION))) { start(m[3].trim(), Number(m[1] || m[2])); continue; }
+    if ((m = line.match(RE_QUESTION_LABEL))) { start(m[1].trim(), null); continue; }
     // Continuation line: part of the question, or of the last option.
-    if (!cur || cur.correct_answer) start(line);
-    else if (lastOption) cur[lastOption] += ' ' + line;
+    if (!cur || (!numbered && cur.correct_answer)) { if (!numbered) start(line, null); continue; }
+    if (lastOption) cur[lastOption] += ' ' + line;
     else cur.question_text += '\n' + line;
   }
+
+  applyAnswerKey(rows, key);
+  rows.format = numbered ? (key.size ? 'numbered questions with an answer key' : 'numbered questions') : rows.length ? 'question blocks' : 'no question structure found';
+  rows.keyCount = key.size;
   return rows;
 }
 
@@ -205,14 +352,17 @@ function validateQuestion(input) {
   if (q.section === 'ESSAY') {
     // Essays are marked by HR; options are ignored.
     LETTERS.forEach((L) => { q['option_' + L.toLowerCase()] = ''; q['option_' + L.toLowerCase() + '_image'] = null; });
+  } else if (input.answer_error) {
+    errors.push(input.answer_error);
   } else if (filled.length >= 2) {
     const letter = resolveAnswerLetter(q.correct_answer, q);
-    if (!letter) errors.push('Correct answer must be one of the options (A, B, C, D or E).');
+    if (!q.correct_answer) errors.push('Correct answer is missing (no "Answer:" line and not in an answer key).');
+    else if (!letter) errors.push('Correct answer must be one of the options (A, B, C, D or E).');
     else if (!filled.includes(letter)) errors.push(`Correct answer ${letter} has no option text or picture.`);
     else q.correct_answer = letter;
   } else if (filled.length === 1) {
     errors.push('A multiple-choice question needs at least 2 options.');
-  } else if (q.section === 'CALCULATION') {
+  } else if (q.section === 'CALCULATION' && input.answer_error == null) {
     if (!q.correct_answer) errors.push('Correct answer is missing.');
   } else {
     errors.push('Options are missing (need Option A, Option B, ...).');
@@ -296,16 +446,18 @@ async function parseFile(buffer, originalName, defaultSection) {
     }
   } catch (e) {
     if (e instanceof ImportError) throw e;
-    throw new ImportError(GENERIC_ERROR);
+    throw new ImportError('Unable to read this file. It may be damaged or password-protected; please save it again and retry.');
   }
 
-  if (!rows || rows.length === 0) throw new ImportError(GENERIC_ERROR);
+  if (!rows || rows.length === 0) throw new ImportError(`${NO_STRUCTURE}\n\nDetected format: ${(rows && rows.format) || 'no question structure found'}\nQuestions found: 0\n\nA question needs its text, options A, B, C ... (not for Essay or short-answer Calculation) and a correct answer.`);
   if (rows.length > MAX_ROWS) throw new ImportError(`This file has more than ${MAX_ROWS} questions. Please split it into smaller files.`);
   const checked = rows.map((raw, i) => {
     const { question, errors } = validateQuestion(raw);
-    return { row: i + 1, question, errors };
+    return { row: i + 1, number: raw.number ?? null, question, errors };
   });
-  if (!checked.some((r) => r.errors.length === 0)) throw new ImportError(GENERIC_ERROR);
+  if (!checked.some((r) => r.errors.length === 0)) throw new ImportError(diagnostics(rows, checked));
+  checked.format = rows.format || 'table (header row)';
+  checked.keyCount = rows.keyCount || 0;
   return checked;
 }
 
