@@ -203,12 +203,15 @@ function iqResultBlock(r) {
   if (!r || !r.iq_text) return h('span', {}, '-');
   return h('div', { class: 'iq-result' },
     h('div', { class: 'iq-row' }, h('span', { class: 'muted' }, 'Correct Answers'), h('strong', {}, r.iq_correct_text || '-')),
-    h('div', { class: 'iq-row' }, h('span', { class: 'muted' }, 'IQ Test Score'), h('strong', { class: 'iq-main' }, r.iq_text)),
+    h('div', { class: 'iq-row' }, h('span', { class: 'muted' }, 'IQ Weighted Score'), h('strong', {}, r.iq_text)),
     h('div', { class: 'iq-row' }, h('span', { class: 'muted' }, 'IQ Percentage'), h('strong', {}, r.iq_score + '%')),
+    h('div', { class: 'iq-row' }, h('span', { class: 'muted' }, 'LALCO IQ Score'), h('strong', { class: 'iq-main' }, r.lalco_iq_score != null ? r.lalco_iq_score + ' / 150' : 'Not available')),
+    h('div', { class: 'iq-row' }, h('span', { class: 'muted' }, 'IQ Category'), r.iq_category ? h('span', { class: 'badge neutral' }, r.iq_category) : '-'),
     h('div', { class: 'iq-levels' }, (r.iq_levels || []).map((l) => h('div', { class: 'iq-level' },
       h('div', { class: 'small' }, h('strong', {}, l.label)),
       h('div', {}, l.correct_text + ' correct'),
-      h('div', {}, l.marks_text + ' marks')))));
+      h('div', {}, l.marks_text + ' marks')))),
+    h('div', { class: 'muted small' }, 'LALCO IQ Score: calculated from the LALCO weighted IQ assessment score on a 50–150 scale (a recruitment score, not a clinical IQ).'));
 }
 
 // ---------------------------------------------------------------------------
@@ -220,11 +223,12 @@ async function renderDashboard() {
   const stat = (label, value, sub, cls) => h('div', { class: 'stat ' + (cls || '') }, h('div', { class: 'label' }, label), h('div', { class: 'value' }, value), sub ? h('div', { class: 'sub' }, sub) : null);
   const recent = d.recent.length
     ? h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, ['Candidate', 'IQ Test Score', 'IQ %', ...IQ_LEVELS.map((n) => 'L' + n), 'Result', 'Date'].map((t) => h('th', {}, t)))),
+      h('thead', {}, h('tr', {}, ['Candidate', 'IQ Weighted', 'IQ %', 'LALCO IQ Score', 'IQ Category', ...IQ_LEVELS.map((n) => 'L' + n), 'Assessment Result', 'HR Final Result', 'Date'].map((t) => h('th', {}, t)))),
       h('tbody', {}, d.recent.map((c) => h('tr', { class: 'clickable', onclick: () => { location.hash = '#/candidates/' + c.id; } },
-        h('td', {}, c.name), h('td', {}, c.iq_text ? h('strong', {}, c.iq_text) : '-'), h('td', {}, c.iq_text ? c.iq_score + '%' : '-'),
+        h('td', {}, c.name), h('td', {}, c.iq_text || '-'), h('td', {}, c.iq_text ? c.iq_score + '%' : '-'),
+        h('td', {}, c.lalco_iq_score != null ? h('strong', {}, c.lalco_iq_score + ' / 150') : '-'), h('td', {}, c.iq_category || '-'),
         ...IQ_LEVELS.map((n) => h('td', { class: 'small' }, levelMarksCell(c, n))),
-        h('td', {}, resultBadge(c.overall_result)), h('td', {}, fmtDate(c.last_test_date)))))))
+        h('td', {}, c.assessment_result ? resultBadge(c.assessment_result) : '-'), h('td', {}, resultBadge(c.final_result || 'Pending')), h('td', {}, fmtDate(c.last_test_date)))))))
     : h('p', { class: 'muted' }, 'No completed assessments yet. Start by uploading questions, then create an assessment link.');
 
   view().replaceChildren(
@@ -234,7 +238,8 @@ async function renderDashboard() {
       stat('Passed', d.passed),
       stat('Not Passed', d.not_passed),
       stat('Average Test Score', d.average_test_score == null ? '-' : d.average_test_score + '%'),
-      stat('Highest IQ Test Score', d.highest_iq ? d.highest_iq.iq_text : '-', d.highest_iq ? `IQ Percentage ${d.highest_iq.iq_score}% · ${d.highest_iq.name}` : 'No IQ results yet', 'highlight'),
+      stat('Highest LALCO IQ Score', d.highest_iq && d.highest_iq.lalco_iq_score != null ? d.highest_iq.lalco_iq_score + ' / 150' : '-',
+        d.highest_iq ? `${d.highest_iq.iq_category} · ${d.highest_iq.iq_text} (${d.highest_iq.iq_score}%) · ${d.highest_iq.name}` : 'No IQ results yet', 'highlight'),
       stat('Completed Assessments', d.completed_assessments),
       stat('Pending Assessments', d.pending_assessments)),
     h('div', { class: 'card' },
@@ -792,10 +797,12 @@ async function renderResults() {
   const [list, iq] = await Promise.all([api('GET', '/candidates'), api('GET', '/results/iq')]);
   const iqCard = h('div', { class: 'card' }, h('h2', {}, 'IQ Test Results'),
     iq.length ? h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, ['Candidate', 'IQ Test Score', 'IQ %', 'Correct Answers', ...IQ_LEVELS.map((n) => 'Level ' + n), 'Assessment Date', ''].map((t) => h('th', {}, t)))),
+      h('thead', {}, h('tr', {}, ['Candidate', 'IQ Weighted Score', 'IQ %', 'LALCO IQ Score', 'IQ Category', 'Correct Answers', ...IQ_LEVELS.map((n) => 'Level ' + n), 'Assessment Date', ''].map((t) => h('th', {}, t)))),
       h('tbody', {}, iq.map((r) => h('tr', {},
         h('td', {}, r.candidate_id ? h('a', { href: '#/candidates/' + r.candidate_id }, r.candidate_name) : '-'),
-        h('td', {}, h('strong', {}, r.iq_text)), h('td', {}, r.iq_score + '%'), h('td', {}, r.iq_correct_text || '-'),
+        h('td', {}, r.iq_text), h('td', {}, r.iq_score + '%'),
+        h('td', {}, r.lalco_iq_score != null ? h('strong', {}, r.lalco_iq_score + ' / 150') : '-'), h('td', {}, r.iq_category || '-'),
+        h('td', {}, r.iq_correct_text || '-'),
         ...IQ_LEVELS.map((n) => h('td', {}, levelCell(r, n))),
         h('td', {}, fmtDate(r.iq_date)),
         h('td', {}, h('a', { class: 'button secondary small', href: '#/assessments/' + r.id }, 'Answers')))))))
@@ -808,7 +815,7 @@ async function renderResults() {
       h('thead', {}, h('tr', {}, ['Candidate', 'IQ', 'General', 'Calculation', 'Essay', 'Current Stage', 'Assessment Result', 'Final Result', 'Date', 'Export'].map((t) => h('th', {}, t)))),
       h('tbody', {}, list.map((c) => h('tr', {},
         h('td', {}, h('a', { href: '#/candidates/' + c.id }, c.name)),
-        h('td', {}, testCell(c, 'IQ'), c.iq_text ? h('div', { class: 'muted small' }, c.iq_text) : null),
+        h('td', {}, testCell(c, 'IQ'), c.iq_text ? h('div', { class: 'muted small' }, `${c.iq_text} · LALCO ${c.lalco_iq_score ?? '-'} / 150 · ${c.iq_category || '-'}`) : null),
         h('td', {}, testCell(c, 'GENERAL')), h('td', {}, testCell(c, 'CALCULATION')), h('td', {}, testCell(c, 'ESSAY')),
         h('td', { class: 'small' }, fmt(c.current_stage)),
         h('td', {}, c.assessment_result ? resultBadge(c.assessment_result) : '-'),

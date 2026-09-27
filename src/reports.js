@@ -65,8 +65,27 @@ function summarize(candidate, submitted, latestStarted) {
 const LEVELS = [['Easy', 1, 'Level 1 — Easy'], ['Basic', 2, 'Level 2 — Basic'], ['Moderate', 3, 'Level 3 — Moderate'],
   ['Difficult', 4, 'Level 4 — Difficult'], ['Very Difficult', 5, 'Level 5 — Very Difficult'],
   ['Medium', 2, 'Level 2 — Medium (earlier 3-level scale)'], ['Hard', 3, 'Level 3 — Hard (earlier 3-level scale)']];
+// LALCO IQ Score: the weighted IQ marks turned into a 50-150 scale,
+// 50 + (marks / maximum marks x 100), rounded, always against the maximum of
+// that candidate's own test, so every test length gives a comparable score.
+// It is a recruitment score, not a clinical IQ. Returns null when there is no
+// maximum to compare with (nothing is guessed).
+function lalcoIqScore(points, max) {
+  const p = Number(points);
+  const m = Number(max);
+  if (points == null || max == null || !Number.isFinite(p) || !Number.isFinite(m) || m <= 0) return null;
+  return Math.min(150, Math.max(50, Math.round(50 + (p / m) * 100)));
+}
+
+const IQ_CATEGORIES = [[130, 'Exceptional'], [115, 'Very High'], [100, 'High'], [85, 'Average'], [70, 'Low'], [50, 'Very Low']];
+function iqCategory(score) {
+  if (score == null) return null;
+  return (IQ_CATEGORIES.find(([from]) => score >= from) || IQ_CATEGORIES[IQ_CATEGORIES.length - 1])[1];
+}
+const LALCO_NOTE = 'Calculated from the LALCO weighted IQ assessment score on a 50–150 scale.';
+
 function iqResult(a) {
-  if (!a || a.iq_max == null) return { iq_score: null, iq_text: null, iq_correct_text: null, iq_levels: [], iq_date: null };
+  if (!a || a.iq_max == null) return { iq_score: null, iq_text: null, iq_correct_text: null, iq_levels: [], iq_date: null, lalco_iq_score: null, iq_category: null };
   let breakdown = {};
   try { breakdown = JSON.parse(a.iq_breakdown || '{}') || {}; } catch { breakdown = {}; }
   const levels = LEVELS.map(([key, number, label]) => {
@@ -84,6 +103,8 @@ function iqResult(a) {
     iq_correct_text: a.iq_total != null ? `${a.iq_correct} / ${a.iq_total}` : null,
     iq_levels: levels,
     iq_date: a.submitted_at,
+    lalco_iq_score: lalcoIqScore(a.iq_points, a.iq_max),
+    iq_category: iqCategory(lalcoIqScore(a.iq_points, a.iq_max)),
   };
 }
 const levelText = (c, n) => { const l = (c.iq_levels || []).find((x) => x.level === n); return l ? l : null; };
@@ -135,7 +156,8 @@ function dashboard() {
     passed: people.filter((p) => p.overall_result === 'Pass').length,
     not_passed: people.filter((p) => p.overall_result === 'Not Pass').length,
     average_test_score: scored.length ? Math.round((scored.reduce((s, p) => s + p.test_score, 0) / scored.length) * 10) / 10 : null,
-    highest_iq: withIq[0] ? { id: withIq[0].id, name: withIq[0].name, iq_score: withIq[0].iq_score, iq_text: withIq[0].iq_text, iq_correct_text: withIq[0].iq_correct_text } : null,
+    highest_iq: withIq[0] ? { id: withIq[0].id, name: withIq[0].name, iq_score: withIq[0].iq_score, iq_text: withIq[0].iq_text, iq_correct_text: withIq[0].iq_correct_text,
+      lalco_iq_score: withIq[0].lalco_iq_score, iq_category: withIq[0].iq_category } : null,
     completed_assessments: count("SELECT COUNT(*) AS n FROM assessments WHERE status = 'SUBMITTED'"),
     pending_assessments: count(`SELECT COUNT(*) AS n FROM assessments WHERE status = 'IN_PROGRESS'
       OR (status = 'NOT_STARTED' AND enabled = 1 AND link_expires_at > ?)`, nowIso),
@@ -165,9 +187,14 @@ const COLUMNS = [
   ['GPA / Mark', (c) => c.gpa],
   ['Reference Results', (c) => c.reference_results],
   ['IQ Test Score', (c) => c.iq_text],
+  ['IQ Weighted Score', (c) => c.iq_points],
+  ['IQ Max Marks', (c) => c.iq_max],
   ['IQ %', (c) => c.iq_score],
+  ['LALCO IQ Score', (c) => c.lalco_iq_score],
+  ['IQ Category', (c) => c.iq_category],
   ['IQ Correct Answers', (c) => c.iq_correct_text],
-  ...[1, 2, 3, 4, 5].flatMap((n) => [[`Level ${n} Correct`, (c) => levelText(c, n)?.correct_text], [`Level ${n} Marks`, (c) => levelText(c, n)?.marks_text]]),
+  ...[1, 2, 3, 4, 5].flatMap((n) => [[`Level ${n} Correct`, (c) => levelText(c, n)?.correct_text], [`Level ${n} Marks`, (c) => levelText(c, n)?.marks_text],
+    [`Level ${n} Max Marks`, (c) => levelText(c, n)?.max]]),
   ['Character', (c) => c.character_note],
   ['Test Score', (c) => c.test_score],
   ['General Test', (c) => c.general_score],
@@ -201,7 +228,8 @@ function reportSections(c) {
     ]],
     ['Assessment Results', [
       ['Reference Results', show(c.reference_results)],
-      ['IQ Test Score', c.iq_text ? `${c.iq_text} marks (${c.iq_score}%)` : '-'],
+      ['IQ Weighted Score', c.iq_text ? `${c.iq_text} marks (${c.iq_score}%)` : '-'],
+      ['LALCO IQ Score', c.lalco_iq_score != null ? `${c.lalco_iq_score} / 150 — ${c.iq_category}` : '-'],
       ['IQ Correct Answers', show(c.iq_correct_text)],
       ...(c.iq_levels || []).map((l) => [l.label, `${l.correct_text} correct, ${l.marks_text} marks`]),
       ...(c.tests || []).map((t) => [t.name, t.score_text ? `${t.score_text} marks, ${t.text}` : t.text]),
@@ -221,7 +249,7 @@ function reportSections(c) {
   ];
 }
 
-const NOTE = 'Scores are percentages of available marks. IQ Test Score = marks earned (Level 1 = 1 up to Level 5 = 5 per correct answer) out of the maximum; it is not a clinical IQ measurement.';
+const NOTE = 'Scores are percentages of available marks. IQ Test Score = marks earned (Level 1 = 1 up to Level 5 = 5 per correct answer) out of the maximum; it is not a clinical IQ measurement. LALCO IQ Score: ' + LALCO_NOTE;
 
 function candidatePdf(c) {
   return new Promise((resolve, reject) => {
@@ -315,4 +343,4 @@ function questionTemplateXlsx() {
   return XLSX.write(book, { type: 'buffer', bookType: 'xlsx' });
 }
 
-module.exports = { iqResult, allCandidateSummaries, candidateSummary, dashboard, candidatePdf, candidateDocx, candidatesXlsx, questionTemplateXlsx };
+module.exports = { iqResult, lalcoIqScore, iqCategory, allCandidateSummaries, candidateSummary, dashboard, candidatePdf, candidateDocx, candidatesXlsx, questionTemplateXlsx };
