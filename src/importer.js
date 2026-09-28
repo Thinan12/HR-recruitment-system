@@ -13,6 +13,7 @@ const WordExtractor = require('word-extractor');
 const { PDFParse } = require('pdf-parse');
 const { readScannedPdf } = require('./pdfOcr');
 const { difficultyLevel, LEVEL_MARKS } = require('./assessments');
+const { bulletQuestions, pdfLines, docxLines } = require('./bulletImport');
 
 const MAX_ROWS = 2000;
 const SECTIONS = ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY']; // the core test types (see testTypes.js for all)
@@ -394,6 +395,10 @@ function rowsFromText(text, defaultSection) {
     if (rows && rows.length) { rows.format = 'table (header row)'; return rows; }
   }
 
+  // Unnumbered bullet questions (e.g. interview questions grouped by competency).
+  const bullets = bulletQuestions(lines.map((t, i) => ({ text: t, blankBefore: i > 0 && !lines[i - 1] })));
+  if (bullets) return bulletRows(bullets, defaultSection);
+
   // Split off the answer key: everything after an "Answer Key" style heading
   // that comes after at least one numbered question.
   const firstQuestion = lines.findIndex((l) => RE_QUESTION.test(l));
@@ -438,6 +443,26 @@ function rowsFromText(text, defaultSection) {
   rows.format = (sections.length > 1 ? 'document with sections — ' : '') + (numbered ? (key.size ? 'numbered questions with an answer key' : 'numbered questions') : rows.length ? 'question blocks' : 'no question structure found');
   rows.keyCount = key.size;
   rows.sections = summary;
+  return rows;
+}
+
+// Rows from bullet questions. Behavioural / interview questions go to the
+// managed interview test type; when there is none, HR is asked to create one
+// (or choose an existing type) - they are never put into IQ, General,
+// Calculation or Essay without HR choosing it.
+const INTERVIEW_TYPE_NAME = 'Behavioural Interview';
+function bulletRows({ rows: found, document }, defaultSection) {
+  const interview = document.behavioural ? T.interviewType() : null;
+  const section = document.behavioural ? interview : defaultSection;
+  const rows = found.map((r) => ({
+    question_text: r.question_text, section, ...(section ? {} : { type_name: INTERVIEW_TYPE_NAME, type_behavior: 'interview' }),
+    option_a: '', option_b: '', option_c: '', option_d: '', option_e: '', correct_answer: r.correct_answer || '',
+    category: r.category, difficulty: '', marks: '', number: r.number, section_key: 'bullets', confidence: r.confidence, review: r.review,
+  }));
+  document.detected_type = document.behavioural ? (interview ? T.name(interview) : INTERVIEW_TYPE_NAME) : null;
+  rows.format = document.structure.toLowerCase() + (document.behavioural ? ' (behavioural interview)' : '');
+  rows.sections = [{ key: 'bullets', title: document.structure, kind: 'questions', section, questions: rows.length, lines: rows.length }];
+  rows.document = document;
   return rows;
 }
 
@@ -489,7 +514,7 @@ function validateQuestion(input, { allowMissingAnswer = false } = {}) {
     q[key] = Number.isInteger(id) && id > 0 ? id : null;
   }
   const typeName = String(input.type_name || (typeof input.section === 'string' ? input.section : '') || '').trim();
-  if (!q.section && typeName) { q.type_name = typeName; errors.push(`Test Type "${typeName}" does not exist.`); }
+  if (!q.section && typeName) { q.type_name = typeName; if (input.type_behavior) q.type_behavior = String(input.type_behavior); errors.push(`Test Type "${typeName}" does not exist.`); }
   else if (!q.section) errors.push(`Type must be one of: ${T.all().filter((t) => t.active).map((t) => t.name).join(', ')}.`);
   if (q.section === 'IQ') {
     // IQ: the level decides the marks (1-5). No level given -> Level 3 (Moderate).
@@ -519,8 +544,9 @@ function validateQuestion(input, { allowMissingAnswer = false } = {}) {
 
   const filled = LETTERS.filter((L) => q['option_' + L.toLowerCase()] || q['option_' + L.toLowerCase() + '_image']);
   const format = T.behavior(q.section);
-  if (format === 'essay') {
-    // Essays are marked by HR; options are ignored.
+  if (format === 'essay' || format === 'interview' || (!q.section && input.type_behavior === 'interview')) {
+    // Essays and interview questions are answered in writing and marked by HR:
+    // no options and no correct answer (a guide, if any, is HR only).
     LETTERS.forEach((L) => { q['option_' + L.toLowerCase()] = ''; q['option_' + L.toLowerCase() + '_image'] = null; if (q.lo_status) q[`option_${L.toLowerCase()}_lo`] = ''; });
   } else if (input.answer_error) {
     errors.push(input.answer_error);
@@ -595,15 +621,21 @@ async function parseFile(buffer, originalName, defaultSection) {
       rows = rowsFromWorkbook(XLSX.read(decodeText(buffer), { type: 'string', raw: true }), defaultSection);
     } else if (ext === '.docx') {
       const { value: html } = await mammoth.convertToHtml({ buffer });
-      rows = htmlTables(html).map((t) => rowsFromTable(t, defaultSection)).find((r) => r && r.length);
-      if (!rows) rows = rowsFromText((await mammoth.extractRawText({ buffer })).value, defaultSection);
+      // List items and table cells keep their meaning (bullet questions under a category).
+      const bullets = bulletQuestions(docxLines(html));
+      if (bullets) rows = bulletRows(bullets, defaultSection);
+      else rows = htmlTables(html).map((t) => rowsFromTable(t, defaultSection)).find((r) => r && r.length);
+      if (!rows || !rows.length) rows = rowsFromText((await mammoth.extractRawText({ buffer })).value, defaultSection);
     } else if (ext === '.doc') {
       const doc = await new WordExtractor().extract(buffer);
       rows = rowsFromText(doc.getBody(), defaultSection);
     } else if (ext === '.pdf') {
-      rows = rowsFromText(await pdfText(buffer), defaultSection);
+      // Bullet questions in columns (e.g. a competency table) are read from the page layout.
+      let bullets = null;
+      try { bullets = bulletQuestions(await pdfLines(buffer)); } catch { bullets = null; }
+      rows = bullets ? bulletRows(bullets, defaultSection) : rowsFromText(await pdfText(buffer), defaultSection);
       // Pages that are pictures have no text to read: fall back to OCR.
-      if (!rows.some((r) => validateQuestion(r).errors.length === 0)) {
+      if (!rows.document && !rows.some((r) => validateQuestion(r).errors.length === 0)) {
         try {
           const scanned = await readScannedPdf(buffer, defaultSection);
           if (scanned.length) rows = scanned;
@@ -624,11 +656,14 @@ async function parseFile(buffer, originalName, defaultSection) {
   if (rows.length > MAX_ROWS) throw new ImportError(`This file has more than ${MAX_ROWS} questions. Please split it into smaller files.`);
   const checked = rows.map((raw, i) => {
     const { question, errors } = validateQuestion(raw, { allowMissingAnswer: true });
-    return { row: i + 1, number: raw.number ?? null, question, errors, section_key: raw.section_key || 's0', answer_required: !!question.answer_required };
+    return { row: i + 1, number: raw.number ?? null, question, errors, section_key: raw.section_key || 's0', answer_required: !!question.answer_required,
+      ...(raw.confidence ? { confidence: raw.confidence, review: raw.review || '' } : {}) };
   });
-  if (!checked.some((r) => r.errors.length === 0)) throw new ImportError(diagnostics(rows, checked));
+  // A question whose only problem is a test type that does not exist yet is fine: HR decides the type.
+  if (!checked.some((r) => r.errors.length === 0 || (r.question.type_name && r.errors.length === 1))) throw new ImportError(diagnostics(rows, checked));
   checked.format = rows.format || 'table (header row)';
   checked.keyCount = rows.keyCount || 0;
+  checked.document = rows.document || null;
   checked.sections = rows.sections || [{ key: 's0', title: '', kind: 'questions', section: defaultSection, questions: checked.length, lines: checked.length }];
   return checked;
 }

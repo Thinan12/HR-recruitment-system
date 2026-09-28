@@ -54,10 +54,11 @@ const LANG_LABEL = { en: 'English', lo: 'Lao' };
 // ---------------------------------------------------------------------------
 
 let TEST_TYPES = [];
-const FORMAT_LABEL = { iq: 'IQ (levels 1–5, weighted marks)', mcq: 'Multiple choice', calculation: 'Calculation (multiple choice or short answer)', essay: 'Essay (marked by HR)' };
+const FORMAT_LABEL = { iq: 'IQ (levels 1–5, weighted marks)', mcq: 'Multiple choice', calculation: 'Calculation (multiple choice or short answer)', essay: 'Essay (marked by HR)', interview: 'Behavioural / Interview (written answer, marked by HR)' };
+const HR_MARKED = ['essay', 'interview']; // written answers marked by HR: no options, no correct answer
 const typeOf = (key) => TEST_TYPES.find((t) => t.key === key);
 const activeTypes = () => TEST_TYPES.filter((t) => t.active);
-const isEssayType = (key) => (typeOf(key) || { behavior: key === 'ESSAY' ? 'essay' : '' }).behavior === 'essay';
+const isEssayType = (key) => HR_MARKED.includes((typeOf(key) || { behavior: key === 'ESSAY' ? 'essay' : '' }).behavior);
 const typeFormat = (key) => (typeOf(key) || {}).behavior || '';
 // Options for a "test type" select: active ones (plus `keep`, e.g. an existing question's own type).
 const typeOptions = (keep, suffix = '') => TEST_TYPES.filter((t) => t.active || t.key === keep).map((t) => [t.key, t.name + suffix + (t.active ? '' : ' (inactive)')]);
@@ -102,7 +103,7 @@ function editTestType(t) {
     field('Test Type Name', h('input', { name: 'name', value: t ? t.name : '', required: true, maxlength: 60, placeholder: 'e.g. Technical Test' })),
     field('Lao title (shown to Lao candidates)', h('input', { name: 'name_lo', lang: 'lo', value: t ? t.name_lo : '', maxlength: 80 })),
     t ? field('Question format (fixed)', h('input', { value: FORMAT_LABEL[t.behavior] || t.behavior, disabled: true }))
-      : field('Question format', select('behavior', [['mcq', FORMAT_LABEL.mcq], ['calculation', FORMAT_LABEL.calculation], ['essay', FORMAT_LABEL.essay]], 'mcq')),
+      : field('Question format', select('behavior', [['mcq', FORMAT_LABEL.mcq], ['calculation', FORMAT_LABEL.calculation], ['essay', FORMAT_LABEL.essay], ['interview', FORMAT_LABEL.interview]], 'mcq')),
     field('Display order (tabs and test order in links)', h('input', { name: 'display_order', type: 'number', min: 1, max: 999, value: t ? t.display_order : Math.max(0, ...TEST_TYPES.map((x) => x.display_order)) + 1 })),
     field('Default pass mark (%)' + (t && t.core ? ' — set in Settings for this test' : ''), h('input', { name: 'pass_mark', type: 'number', min: 0, max: 100, step: 'any', value: t ? t.pass_mark : 60, disabled: !!(t && t.core) })),
     field('Available for new assessments', select('in_assessments', [['1', 'Yes'], ['0', 'No']], t ? String(t.in_assessments) : '1')),
@@ -350,7 +351,7 @@ let dashboardFilter = 'all';
 // The filter list with one entry per IQ classification (known once the dashboard data has arrived).
 const dashboardFilters = () => {
   const i = DASHBOARD_FILTERS.findIndex(([k]) => k.startsWith('final_'));
-  const passFail = TEST_TYPES.filter((t) => t.behavior !== 'essay').flatMap((t) => [
+  const passFail = TEST_TYPES.filter((t) => !HR_MARKED.includes(t.behavior)).flatMap((t) => [
     [t.key + '_pass', `${t.name} Passed`, (c) => testOf(c, t.key)?.result === 'Pass'], [t.key + '_fail', `${t.name} Not Passed`, (c) => testOf(c, t.key)?.result === 'Not Pass']]);
   return [...DASHBOARD_FILTERS.slice(0, 4), ...passFail, ...DASHBOARD_FILTERS.slice(4, i), ...IQ_CLASSES.map((c) => ['iq_' + c.description, `IQ Classification: ${c.description} (${c.range})`, (x) => testOf(x, 'IQ')?.level === c.description]), ...DASHBOARD_FILTERS.slice(i)];
 };
@@ -947,20 +948,23 @@ function uploadCard(onImported) {
 function showPreview(container, p, onDone) {
   const valid = p.rows.filter((r) => r.errors.length === 0).map((r) => r.question);
   const invalid = p.rows.filter((r) => r.errors.length > 0);
-  const typePending = p.rows.filter((r) => r.question.type_name && r.errors.length === 1).length;
-  const importBtn = h('button', { type: 'button', disabled: valid.length + typePending === 0 }, `Import ${valid.length + typePending} questions`);
+  const isPending = (r) => !!r.question.type_name && r.errors.length === 1 && r.errors[0].startsWith('Test Type "');
+  const reviewBox = h('input', { type: 'checkbox', onchange: () => updateCount() });
+  const wanted = (r) => !r.review || reviewBox.checked; // "Needs review" questions only when HR ticks them in
+  const typePending = p.rows.filter((r) => isPending(r) && wanted(r)).length;
+  const importBtn = h('button', { type: 'button', disabled: valid.length + typePending === 0 }, `Import ${p.rows.filter((r) => (r.errors.length === 0 || isPending(r)) && wanted(r)).length} questions`);
   // Document analysis: one line per section that holds questions (tick = import, and as which test);
   // interview notes, scoring guides and other text are shown but never imported.
   const questionSections = (p.sections || []).filter((x) => x.kind === 'questions' && x.valid > 0);
   const picks = Object.fromEntries(questionSections.map((x) => [x.key, {
     on: h('input', { type: 'checkbox', checked: true, onchange: () => updateCount() }),
     as: select('import_as_' + x.key, typeOptions(), x.section) }]));
-  const chosen = () => p.rows.filter((r) => r.errors.length === 0 && (!picks[r.section_key] || picks[r.section_key].on.checked))
+  const chosen = () => p.rows.filter((r) => r.errors.length === 0 && wanted(r) && (!picks[r.section_key] || picks[r.section_key].on.checked))
     .map((r) => ({ ...r.question, section: picks[r.section_key] ? picks[r.section_key].as.value : r.question.section }));
-  const updateCount = () => { const n = chosen().length; importBtn.textContent = `Import ${n} questions`; importBtn.disabled = n === 0; };
+  const updateCount = () => { const n = chosen().length + p.rows.filter((r) => isPending(r) && wanted(r)).length; importBtn.textContent = `Import ${n} questions`; importBtn.disabled = n === 0; };
   const notImported = (p.sections || []).filter((x) => x.kind !== 'questions');
   const sum = (kind) => notImported.filter((x) => x.kind === kind).reduce((a, x) => a + x.lines, 0);
-  const sectionsBox = questionSections.length && ((p.sections || []).length > 1 || p.type_mismatch) ? h('div', { class: 'card inner' }, h('h2', {}, 'Document analysis'),
+  const sectionsBox = !p.document && questionSections.length && ((p.sections || []).length > 1 || p.type_mismatch) ? h('div', { class: 'card inner' }, h('h2', {}, 'Document analysis'),
     p.type_mismatch ? message(p.type_mismatch) : null,
     h('div', { class: 'table-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Import', 'Section', 'Detected', 'Questions', 'Answer required', 'Import as'].map((t) => h('th', {}, t)))),
       h('tbody', {}, questionSections.map((x) => h('tr', {}, h('td', {}, picks[x.key].on), h('td', {}, x.title || '-', x.level ? h('div', { class: 'muted small' }, x.level) : null),
@@ -969,17 +973,32 @@ function showPreview(container, p, onDone) {
     notImported.length ? h('p', { class: 'muted small' }, 'Not imported: ' + [sum('interview') ? `interview material (${sum('interview')} lines)` : null, sum('scoring') ? `scoring guides (${sum('scoring')} lines)` : null,
       sum('other') ? `other text — memo, instructions, policy, tables (${sum('other')} lines)` : null].filter(Boolean).join(' · ') + '.') : null) : null;
   Object.values(picks).forEach((x) => x.as.addEventListener('change', updateCount));
+  const doc = p.document;
+  const docBox = doc ? h('div', { class: 'card inner' }, h('h2', {}, 'Document analysis'),
+    h('div', { class: 'stats' }, ...[['Document type', doc.type], ['Question structure', doc.structure], ['Detected test type', doc.detected_type || SECTION_LABEL[p.test_type] || '-'],
+      ['Questions found', p.found], ['Categories found', doc.categories.filter((c) => c.name).length], ['Valid', p.valid + (p.pending_type || 0)], ['Needs review', p.needs_review || 0],
+      ['Invalid', p.invalid - (p.pending_type || 0) - (p.duplicates || 0)], ['Duplicates', p.duplicates || 0]]
+      .map(([l, v]) => h('div', { class: 'stat' }, h('div', { class: 'label' }, l), h('div', { class: 'value' + (String(v).length > 6 ? ' small' : '') }, v)))),
+    h('p', { class: 'muted small' }, 'No options or correct answers are needed: each question is the prompt the candidate answers, and HR marks the answer. Not imported: '
+      + [`${doc.not_imported.headings} headings (categories, group and table headers)`, `${doc.not_imported.page_text} page headers, footers and page numbers`,
+        doc.not_imported.other ? `${doc.not_imported.other} other lines` : null, doc.not_imported.low_confidence ? `${doc.not_imported.low_confidence} low-confidence lines` : null].filter(Boolean).join(' · ') + '.'),
+    doc.categories.length ? h('details', { open: doc.categories.length <= 12 }, h('summary', {}, `Categories (${doc.categories.length})`),
+      h('div', { class: 'table-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, h('th', {}, 'Category'), h('th', {}, 'Questions'))),
+        h('tbody', {}, doc.categories.map((c) => h('tr', {}, h('td', {}, c.name || h('span', { class: 'badge pending' }, 'Needs Category Review')), h('td', {}, c.questions))))))) : null,
+    p.needs_review ? h('p', { class: 'small section-gap-sm' }, h('label', {}, reviewBox, ` Also import the ${p.needs_review} question(s) marked "Needs review" (check them in the list below first)`)) : null) : null;
   // One choice per category name that is not in the list: create it, or use an existing one.
   const decisionSelects = (p.category_decisions || []).map((d) => ({ d, el: h('select', { class: 'inline-input' },
     h('option', { value: '' }, 'Choose…'), d.inactive ? null : h('option', { value: 'create' }, `Create category "${d.name}"`),
     (p.categories || []).filter((c) => c.section === d.section).map((c) => h('option', { value: 'use:' + c.id }, `Use existing: ${c.name}`))) }));
   // One choice per test type name in the file that does not exist: create it (with a format) or use an existing one.
   const typeSelects = (p.type_decisions || []).map((d) => ({ d, el: h('select', { class: 'inline-input' }, h('option', { value: '' }, 'Choose…'),
-    ['mcq', 'calculation', 'essay'].map((b) => h('option', { value: 'create:' + b }, `Create test type "${d.name}" — ${FORMAT_LABEL[b]}`)),
+    (d.behavior ? [d.behavior, ...['mcq', 'calculation', 'essay', 'interview'].filter((b) => b !== d.behavior)] : ['mcq', 'calculation', 'essay', 'interview'])
+      .map((b) => h('option', { value: 'create:' + b, selected: b === d.behavior }, `Create test type "${d.name}" — ${FORMAT_LABEL[b]}` + (b === d.behavior ? ' (detected)' : ''))),
     activeTypes().map((t) => h('option', { value: 'use:' + t.key }, `Use existing: ${t.name}`))) }));
   const typeBox = typeSelects.length ? h('div', { class: 'message error' }, h('strong', {}, 'Test types to decide before importing'), h('br'),
     typeSelects.map(({ d, el }) => h('div', { class: 'row small section-gap-sm' }, `Test Type "${d.name}" does not exist (${d.count} question${d.count === 1 ? '' : 's'}):`, el))) : null;
-  const decisionBox = decisionSelects.length ? h('div', { class: 'message error' }, h('strong', {}, 'Categories to decide before importing'), h('br'),
+  const createAll = decisionSelects.some(({ d }) => !d.inactive) ? h('button', { type: 'button', class: 'secondary small', onclick: () => decisionSelects.forEach(({ d, el }) => { if (!d.inactive) el.value = 'create'; }) }, 'Create all new categories') : null;
+  const decisionBox = decisionSelects.length ? h('div', { class: 'message error' }, h('strong', {}, 'Categories to decide before importing'), ' ', createAll, h('br'),
     decisionSelects.map(({ d, el }) => h('div', { class: 'row small section-gap-sm' }, `Category "${d.name}" ${d.inactive ? 'is inactive' : 'does not exist'} for ${SECTION_LABEL[d.section]} (${d.count} question${d.count === 1 ? '' : 's'}):`, el))) : null;
   importBtn.addEventListener('click', async () => {
     importBtn.disabled = true;
@@ -995,37 +1014,41 @@ function showPreview(container, p, onDone) {
         type_decisions[d.key] = el.value.startsWith('create:') ? { create: true, behavior: el.value.slice(7) } : { key: el.value.slice(4) };
       }
       // Rows whose only problem is an unknown test type go too, with HR's decision.
-      const pendingType = typeSelects.length ? p.rows.filter((r) => r.question.type_name && r.errors.length === 1).map((r) => ({ ...r.question, type_name: r.question.type_name })) : [];
+      const pendingType = typeSelects.length ? p.rows.filter((r) => isPending(r) && wanted(r)).map((r) => ({ ...r.question, type_name: r.question.type_name })) : [];
       const r = await api('POST', '/questions/import', { questions: [...chosen(), ...pendingType], category_decisions, type_decisions });
       container.replaceChildren(message(`Imported ${r.imported} questions.` + (r.skipped ? ` Skipped ${r.skipped}.` : '')
         + (r.answer_required ? ` ${r.answer_required} short-answer question(s) are Inactive until you enter the correct answer (Questions → status "Needs answer" → Edit).` : ''), 'ok'));
       onDone();
     } catch (ex) { flash(container, ex.message); importBtn.disabled = false; }
   });
-  const validRows = p.rows.filter((r) => r.errors.length === 0);
+  const validRows = p.rows.filter((r) => r.errors.length === 0 || isPending(r));
+  const showConfidence = validRows.some((r) => r.confidence);
   container.replaceChildren(h('div', {}, // h() skips the null sections; replaceChildren would print "null"
     h('h2', {}, 'Import Preview'),
     h('p', { class: 'small' }, h('strong', {}, 'Test Type: '), SECTION_LABEL[p.test_type] || '-', ' · ', h('strong', {}, 'File: '), p.file || '-',
       p.format ? [' · ', h('strong', {}, 'Detected format: '), p.format] : null, p.answer_key ? [' · ', h('strong', {}, 'Answer key entries: '), p.answer_key] : null),
     h('div', { class: 'stats' },
-      ...[['Found', p.found], ['Valid', p.valid], ['Invalid', p.invalid], ['Duplicates', p.duplicates ?? 0], ['Answer Conflicts', p.conflicts ?? 0]].map(([l, v]) => h('div', { class: 'stat' }, h('div', { class: 'label' }, l), h('div', { class: 'value' }, v))),
+      ...[['Found', p.found], ['Valid', p.valid + (p.pending_type || 0)], ['Invalid', p.invalid - (p.pending_type || 0)], ['Duplicates', p.duplicates ?? 0], ['Answer Conflicts', p.conflicts ?? 0]].map(([l, v]) => h('div', { class: 'stat' }, h('div', { class: 'label' }, l), h('div', { class: 'value' }, v))),
       ...Object.entries(p.by_section).filter(([, n]) => n > 0).map(([s, n]) => h('div', { class: 'stat' }, h('div', { class: 'label' }, SECTION_LABEL[s] + ' questions'), h('div', { class: 'value' }, n)))),
     sectionsBox,
     typeBox,
     decisionBox,
     p.answer_required ? h('p', { class: 'message pending-note' }, `${p.answer_required} short-answer question(s) have no correct answer in the file. They will be imported as "Answer required" (Inactive) and cannot be used in a test until HR enters the answer. Answers are never guessed.`) : null,
     p.missing_category ? h('p', { class: 'muted small' }, `${p.missing_category} question(s) have no category (IQ ones are listed under "Needs category" after importing; set it with Set category).`) : null,
-    invalid.length ? h('div', {}, h('h2', {}, 'Rows that will be skipped'), h('div', { class: 'table-wrap' }, h('table', {},
+    docBox,
+    invalid.filter((r) => !isPending(r)).length ? h('div', {}, h('h2', {}, 'Rows that will be skipped'), h('div', { class: 'table-wrap' }, h('table', {},
       h('thead', {}, h('tr', {}, h('th', {}, 'Question'), h('th', {}, 'Text'), h('th', {}, 'Problem'))),
-      h('tbody', {}, invalid.slice(0, 100).map((r) => h('tr', {}, h('td', {}, r.number != null ? r.number : 'Row ' + r.row), h('td', { class: 'question-cell' }, fmt(r.question.question_text).slice(0, 160)), h('td', {}, r.errors.join(' ')))))))) : null,
-    valid.length ? h('div', {}, h('h2', { class: 'section-gap' }, validRows.length > 100 ? 'First 100 questions to import' : 'Questions to import'), h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, ['#', 'Status', 'Question', 'Type', 'Category', 'Level', 'Options', 'Correct Answer', 'Marks'].map((t) => h('th', {}, t)))),
+      h('tbody', {}, invalid.filter((r) => !isPending(r)).slice(0, 100).map((r) => h('tr', {}, h('td', {}, r.number != null ? r.number : 'Row ' + r.row), h('td', { class: 'question-cell' }, fmt(r.question.question_text).slice(0, 160)), h('td', {}, r.errors.join(' ')))))))) : null,
+    validRows.length ? h('div', {}, h('h2', { class: 'section-gap' }, validRows.length > 100 ? 'First 100 questions to import' : 'Questions to import'), h('div', { class: 'table-wrap' }, h('table', {},
+      h('thead', {}, h('tr', {}, ['#', 'Status', ...(showConfidence ? ['Confidence'] : []), 'Question', 'Type', 'Category', 'Level', 'Options', 'Correct Answer', 'Marks'].map((t) => h('th', {}, t)))),
       h('tbody', {}, validRows.slice(0, 100).map((r) => [r, r.question]).map(([r, q]) => h('tr', {},
         h('td', {}, r.number != null ? r.number : r.row),
-        h('td', {}, r.answer_required ? h('span', { class: 'badge pending' }, 'VALID — ANSWER REQUIRED') : h('span', { class: 'badge pass' }, 'VALID')),
+        h('td', {}, r.review ? h('div', {}, h('span', { class: 'badge pending' }, 'NEEDS REVIEW'), h('div', { class: 'muted small' }, r.review))
+          : r.answer_required ? h('span', { class: 'badge pending' }, 'VALID — ANSWER REQUIRED') : h('span', { class: 'badge pass' }, 'VALID')),
+        showConfidence ? h('td', {}, r.confidence || '-') : null,
         h('td', { class: 'question-cell' }, h('div', { class: 'pre' }, q.question_text), q.image_id ? h('div', { class: 'thumb-row' }, thumb(q.image_id)) : null),
-        h('td', {}, SECTION_LABEL[q.section]),
-        h('td', {}, q.category || null, r.category_state === 'missing' ? h('span', { class: 'badge pending' }, q.section === 'IQ' ? 'Missing — Review Required' : 'None')
+        h('td', {}, q.section ? SECTION_LABEL[q.section] : h('span', {}, q.type_name, h('div', { class: 'muted small' }, 'test type to choose above'))),
+        h('td', {}, q.category || null, !q.section && !q.category ? h('span', { class: 'badge pending' }, 'Needs Category Review') : null, r.category_state === 'missing' ? h('span', { class: 'badge pending' }, q.section === 'IQ' ? 'Missing — Review Required' : 'None')
           : r.category_state === 'unknown' ? h('div', {}, h('span', { class: 'badge pending' }, 'Not in the list')) : r.category_state === 'inactive' ? h('div', {}, h('span', { class: 'badge pending' }, 'Inactive')) : null),
         h('td', { class: 'nowrap' }, (q.section === 'IQ' && LEVEL_NAMES[q.difficulty]) || fmt(q.difficulty)),
         h('td', { class: 'small' }, h('div', { class: 'thumb-row' }, LETTERS.filter((l) => q['option_' + l] || q['option_' + l + '_image'])

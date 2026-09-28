@@ -6,6 +6,8 @@
 //   mcq         - multiple choice (like General)
 //   calculation - multiple choice or short answer
 //   essay       - written answer, marked by HR
+//   interview   - behavioural / interview question: written answer, marked by HR
+//                 (no options, no correct answer; like essay, but its own format)
 const { db, now, audit, getSettings, PASS_KEYS } = require('./db');
 
 const CORE = [
@@ -14,7 +16,7 @@ const CORE = [
   { key: 'CALCULATION', name: 'Calculation', name_lo: 'ແບບທົດສອບການຄິດໄລ່', behavior: 'calculation', display_order: 3, description: 'Calculation, multiple choice or short answer' },
   { key: 'ESSAY', name: 'Essay', name_lo: 'ແບບທົດສອບການຂຽນ', behavior: 'essay', display_order: 4, description: 'Written answer, marked by HR' },
 ];
-const BEHAVIORS = ['mcq', 'calculation', 'essay']; // formats HR can give a new test type (IQ is IQ only)
+const BEHAVIORS = ['mcq', 'calculation', 'essay', 'interview']; // formats HR can give a new test type (IQ is IQ only)
 
 db.exec(`CREATE TABLE IF NOT EXISTS test_types (
   key TEXT PRIMARY KEY,
@@ -43,8 +45,15 @@ const keys = () => all().map((t) => t.key);
 const activeKeys = () => all().filter((t) => t.active).map((t) => t.key);
 const assessmentKeys = () => all().filter((t) => t.active && t.in_assessments).map((t) => t.key);
 const behavior = (key) => (get(key) || {}).behavior || null;
-const isEssay = (key) => behavior(key) === 'essay';
-const essayKeys = () => all().filter((t) => t.behavior === 'essay').map((t) => t.key);
+// HR-marked written answers: essays and interview questions.
+const HR_MARKED = ['essay', 'interview'];
+const isEssay = (key) => HR_MARKED.includes(behavior(key));
+const essayKeys = () => all().filter((t) => HR_MARKED.includes(t.behavior)).map((t) => t.key);
+// The active type for behavioural / interview questions: the interview format first, then by name.
+const interviewType = () => {
+  const active = all().filter((t) => t.active);
+  return (active.find((t) => t.behavior === 'interview') || active.find((t) => /behaviou?r|interview|ສໍາພາດ|ສຳພາດ/i.test(t.name)) || {}).key || null;
+};
 // "General" (short name) and "General Test" (title) for screens and exports.
 const name = (key) => (get(key) || {}).name || String(key || '');
 const title = (key) => { const n = name(key); return /\btest$/i.test(n) ? n : `${n} Test`; };
@@ -125,7 +134,7 @@ function checkPass(v, fallback) {
 function create(input, actor) {
   const n = checkName(input.name);
   const b = String(input.behavior || 'mcq');
-  if (!BEHAVIORS.includes(b)) throw new TypeError_('Please choose the question format: multiple choice, calculation or essay.');
+  if (!BEHAVIORS.includes(b)) throw new TypeError_('Please choose the question format: multiple choice, calculation, essay or behavioural / interview.');
   const key = newKey(n);
   const stamp = now();
   const order = checkOrder(input.display_order, Math.max(0, ...all().map((t) => t.display_order)) + 1);
@@ -174,4 +183,4 @@ function remove(key, actor) {
   return { deleted: true };
 }
 
-module.exports = { CORE, BEHAVIORS, all, get, keys, activeKeys, assessmentKeys, behavior, isEssay, essayKeys, name, title, defaultPassMark, resolve, usage, list, create, update, setActive, remove, TypeError: TypeError_ };
+module.exports = { CORE, BEHAVIORS, all, get, keys, activeKeys, assessmentKeys, behavior, isEssay, essayKeys, interviewType, HR_MARKED, name, title, defaultPassMark, resolve, usage, list, create, update, setActive, remove, TypeError: TypeError_ };

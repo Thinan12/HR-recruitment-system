@@ -353,10 +353,12 @@ router.post('/questions/import/preview', (req, res, next) => {
       const defaultSection = chosen && chosen.active ? chosen.key : (T.get('GENERAL') && T.get('GENERAL').active ? 'GENERAL' : T.activeKeys()[0]);
       const rows = await parseFile(req.file.buffer, req.file.originalname, defaultSection);
       const seen = existingQuestionKeys();
+      const typePending = (r) => !!r.question.type_name && r.errors.length === 1 && r.errors[0].startsWith('Test Type "');
       for (const r of rows) {
-        if (r.errors.length) continue;
-        const key = A.questionKey(r.question);
-        if (seen.has(key)) r.errors.push('Duplicate — not imported: this question is already in the question bank (or repeated in this file).');
+        // Rows waiting for HR's test type decision are checked too (within the file).
+        if (r.errors.length && !typePending(r)) continue;
+        const key = A.questionKey(r.question.section ? r.question : { ...r.question, section: 'NEW:' + r.question.type_name.toLowerCase() });
+        if (seen.has(key)) (r.errors = r.errors.filter((e) => !/^Test Type "/.test(e))).push('Duplicate — not imported: this question is already in the question bank (or repeated in this file).');
         seen.add(key);
       }
       const valid = rows.filter((r) => r.errors.length === 0);
@@ -377,9 +379,9 @@ router.post('/questions/import/preview', (req, res, next) => {
       const bySection = Object.fromEntries(T.keys().map((s) => [s, valid.filter((r) => r.question.section === s).length]));
       // Test types named in the file that do not exist: HR creates them or picks an existing one.
       const typeDecisions = new Map();
-      for (const r of rows) if (r.question.type_name && r.errors.length === 1) {
+      for (const r of rows) if (typePending(r)) {
         const k = r.question.type_name.trim().toLowerCase().replace(/\s+/g, ' ');
-        const d = typeDecisions.get(k) || { key: k, name: r.question.type_name.trim(), count: 0 };
+        const d = typeDecisions.get(k) || { key: k, name: r.question.type_name.trim(), count: 0, behavior: r.question.type_behavior || null };
         d.count++; typeDecisions.set(k, d);
       }
       // What the document contains, per section, and whether it matches the chosen type.
@@ -395,7 +397,8 @@ router.post('/questions/import/preview', (req, res, next) => {
         format: rows.format, answer_key: rows.keyCount, test_type: defaultSection, file: req.file.originalname, by_section: bySection,
         category_decisions: [...decisions.values()], missing_category: valid.filter((r) => r.category_state === 'missing').length,
         type_decisions: [...typeDecisions.values()], test_types: T.list().filter((t) => t.active), sections, type_mismatch: mismatch, answer_required: valid.filter((r) => r.answer_required).length,
-        categories: categories.list({ status: 'active' }), rows });
+        categories: categories.list({ status: 'active' }), document: rows.document || null,
+        pending_type: rows.filter(typePending).length, needs_review: rows.filter((r) => r.review && (!r.errors.length || typePending(r))).length, rows });
     } catch (e) {
       if (e instanceof ImportError) return bad(res, e.message);
       next(e);
@@ -418,6 +421,7 @@ router.post('/questions/import', (req, res) => {
   // Test types named in the file that do not exist: { "technical": { "create": true, "behavior": "mcq" } } or { ...: { "key": "GENERAL" } }.
   const typeDecided = req.body?.type_decisions && typeof req.body.type_decisions === 'object' ? req.body.type_decisions : {};
   const typeKeys = new Map();
+  const fromDecision = new Set(); // rows placed by a type decision: their document categories are created as needed
   for (const row of rows) {
     const tn = String(row.type_name || '').trim();
     if (!tn || T.get(row.section)) continue;
@@ -430,6 +434,7 @@ router.post('/questions/import', (req, res) => {
       else return bad(res, `Please choose what to do with the test type "${tn}".`);
     }
     row.section = typeKeys.get(k);
+    fromDecision.add(row);
   }
   const inactiveType = rows.map((r) => T.get(r.section)).find((t) => t && !t.active);
   if (inactiveType) return bad(res, `The ${inactiveType.name} test type is inactive; reactivate it to import questions into it.`);
@@ -438,7 +443,7 @@ router.post('/questions/import', (req, res) => {
   for (const row of rows) {
     const { question, errors } = validateQuestion(row, { allowMissingAnswer: true });
     const name = String(question.category || '').trim();
-    if (errors.length || !name) continue;
+    if (errors.length || !name || fromDecision.has(row)) continue;
     const c = categories.byName(question.section, name);
     const key = question.section + '|' + categories.normalize(name);
     if ((!c || !c.active) && !decided[key] && !(req.body?.create_missing_categories === true && !c) && !undecided.has(key)) undecided.set(key, `${name} (${question.section})`);
@@ -453,7 +458,7 @@ router.post('/questions/import', (req, res) => {
       const name = String(question.category || '').trim();
       if (name) {
         const d = decided[question.section + '|' + categories.normalize(name)];
-        const choice = d && d.category_id ? { category_id: d.category_id } : { category: name, create_category: !!(d && d.create) || req.body?.create_missing_categories === true };
+        const choice = d && d.category_id ? { category_id: d.category_id } : { category: name, create_category: !!(d && d.create) || req.body?.create_missing_categories === true || fromDecision.has(row) };
         const cat = categories.resolveForQuestion(question.section, choice, null);
         question.category_id = cat.id;
         question.category = cat.name;
