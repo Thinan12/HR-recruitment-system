@@ -51,6 +51,15 @@ Options may also be on one line (`A. Red  B. Blue  C. Green  D. Chair`).
 - **Essay** questions need no options. HR enters the marks on the assessment review page.
 - **Calculation** questions can have options, or just one exact answer (e.g. `Answer: 1250`). Spaces and commas are ignored when marking.
 
+### Lao questions
+
+- Every question keeps its **English** text as the source; its **Lao** text is stored next to it on the same question (same id, options, correct letter, level and marks). There is one question bank, not two.
+- **Lao status** of each question: *English only* (no Lao yet), *Lao ready* (translated, not yet reviewed by HR), *Lao reviewed* (checked by HR), *Needs review* (e.g. a problem in the English source, or the English was changed after translating), *Failed*. Only *Lao ready* / *Lao reviewed* questions are used in a Lao assessment.
+- Before a Lao text can be ready it is checked: every option has Lao, the numbers and maths symbols are exactly the same as in English, the question contains Lao script, no HTML, no broken characters. Numbers, codes and letter sequences (e.g. 2, 4, 8, ?  /  A, C, E, ?  /  PEN = QFO) stay as they are; pictures are not changed.
+- **Questions page:** the Lao text is shown under the English, with the Lao status and a filter (Lao ready / English only / Needs review / Failed). **Edit Lao** shows the English read-only next to the Lao fields, with a Check button. The Question Bank box shows *Lao ready n of N* per test.
+- **New questions:** an import file may include Lao columns (e.g. "Question (Lao)", "Option A (Lao)" …); they are checked and stored with the question. **Translate Missing Lao** translates every question without Lao in batches of 10 in the background — only when an automatic translation service is configured (`ANTHROPIC_API_KEY`, optionally `TRANSLATE_MODEL`, set as Railway variables; the key never reaches the browser). Imports are then translated automatically. Nothing is translated during an exam.
+- **Lao assessment:** choose Language = Lao when creating the link. Each candidate still gets their own random questions; their copy saves the Lao text they were shown, so later edits never change a started test. If fewer Lao-ready questions exist than requested, the link cannot be created and HR is told how many need translation. The Excel / PDF / Word exports show the assessment language; the review page shows English and Lao side by side.
+
 ### How an assessment works
 
 1. On **Assessments → Create Assessment**, optionally give the link a name (e.g. "September Recruitment"), choose the language and how long new candidates may start, then tick the **Tests Included** — IQ, General, Calculation, Essay — with the number of questions, minutes and pass mark for each. Press **Generate ONE Assessment Link**.
@@ -90,7 +99,7 @@ Node.js 24 LTS, Express, SQLite (`better-sqlite3`), plain HTML/JS frontend (no b
 ```
 npm install
 ADMIN_PASSWORD=choose-a-password npm start    # http://localhost:3000
-npm test                                       # 134 tests, uses temporary databases
+npm test                                       # 140 tests, uses temporary databases
 ```
 
 ```

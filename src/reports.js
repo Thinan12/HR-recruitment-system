@@ -87,7 +87,7 @@ function testResults(a) {
   if (!a) return { tests: [], current_stage: null, assessment_result: null, assessment_date: null, ...finalAssessment(null) };
   const stages = A.stagesOf(a);
   return { tests: stages.map((st) => stageView(a, st, stages)), current_stage: A.currentStage(a, stages).label,
-    assessment_result: a.result, assessment_date: a.submitted_at || a.started_at, assessment_link: linkName(a), ...finalAssessment(a, stages) };
+    assessment_result: a.result, assessment_date: a.submitted_at || a.started_at, assessment_link: linkName(a), assessment_language: a.language === 'lo' ? 'Lao' : 'English', ...finalAssessment(a, stages) };
 }
 
 const FONT = path.join(__dirname, 'assets', 'NotoSansLao-Regular.ttf');
@@ -306,6 +306,7 @@ const COLUMNS = [
   ['Company Eligibility', (c) => eligibilityText(c)],
   ['Eligibility Note', (c) => c.eligibility_note],
   ['Assessment Link', (c) => c.assessment_link],
+  ['Assessment Language', (c) => c.assessment_language],
   ['Current Stage', (c) => c.current_stage],
   ['Assessment Result', (c) => c.assessment_result],
   ['Interview', (c) => c.interview],
@@ -333,6 +334,7 @@ function reportSections(c) {
       ['IQ Correct Answers', show(c.iq_correct_text)],
       ...(c.iq_levels || []).map((l) => [l.label, `${l.correct_text} correct, ${l.marks_text} marks`]),
       ...(c.tests || []).map((t) => [t.name, `${testLine(t)} — ${t.text}`]),
+      ['Assessment Language', show(c.assessment_language)],
       ['Current Stage', show(c.current_stage)],
       ['Assessment Result', show(c.assessment_result)],
       ['Character', show(c.character_note)],

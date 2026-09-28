@@ -439,6 +439,69 @@ async function renderCandidate(id) {
 
 let questionSection = '';
 let questionStatus = ''; // '' = all, 'Active', 'Inactive'
+let questionLao = ''; // Lao filter
+
+// Lao translation state of a question.
+const LAO_STATUS = { '': ['English only', 'neutral'], translated: ['Lao ready', 'pass'], reviewed: ['Lao reviewed', 'pass'], needs_review: ['Needs review', 'pending'], failed: ['Failed', 'fail'] };
+function laoBadge(status) {
+  const [text, cls] = LAO_STATUS[status || ''] || [status, 'neutral'];
+  return h('span', { class: 'badge ' + cls }, text);
+}
+
+// Edit Lao: the English is shown read-only next to the Lao fields, so the
+// source cannot be changed here. The server checks the Lao before it is ready.
+function editLao(q, onSaved) {
+  const letters = LETTERS.filter((l) => q['option_' + l] || q['option_' + l + '_image']);
+  const problemsBox = h('div');
+  const status = select('lo_status', [['translated', 'Lao ready (not yet reviewed)'], ['reviewed', 'Lao ready — reviewed by HR'], ['needs_review', 'Needs review (not used in Lao tests)']],
+    q.lo_status === 'reviewed' || q.lo_status === 'needs_review' ? q.lo_status : 'translated');
+  const pair = (label, en, name, value, big) => h('div', { class: 'lao-pair' },
+    h('div', {}, h('div', { class: 'muted small' }, label + ' — English (source)'), h('div', { class: 'pre lao-source' }, en || '-')),
+    h('div', {}, h('label', { class: 'muted small', for: 'lo_' + name }, label + ' — Lao'),
+      big ? h('textarea', { id: 'lo_' + name, name, lang: 'lo', rows: 4 }, value || '') : h('input', { id: 'lo_' + name, name, lang: 'lo', value: value || '' })));
+  const form = h('form', {},
+    q.image_id || letters.some((l) => q['option_' + l + '_image']) ? h('p', { class: 'muted small' }, 'The pictures stay the same in both languages. If a picture contains words needed to answer, set "Needs review".') : null,
+    pair('Question', q.question_text, 'question_text_lo', q.question_text_lo, true),
+    q.section === 'ESSAY' ? null : letters.filter((l) => q['option_' + l]).map((l) => pair('Option ' + l.toUpperCase() + (q.correct_answer === l.toUpperCase() ? ' (correct)' : ''),
+      q['option_' + l], 'option_' + l + '_lo', q['option_' + l + '_lo'], false)),
+    h('div', { class: 'grid section-gap' }, field('Status', status), field('Note (optional)', h('input', { name: 'lo_note', value: q.lo_note || '' }))),
+    h('p', { class: 'muted small' }, 'Numbers, symbols, codes and letter sequences must stay exactly as in English. The correct answer stays the same option. Options that are only pictures need no Lao.'),
+    problemsBox,
+    h('div', { class: 'row section-gap' }, h('button', { type: 'submit' }, 'Save Lao'), h('button', { type: 'button', class: 'secondary', onclick: () => check() }, 'Check')));
+  const close = modal('Lao translation — ' + SECTION_LABEL[q.section] + ' question #' + q.id, form);
+  const check = async () => {
+    const { problems } = await api('POST', '/questions/' + q.id + '/lao/check', formValues(form));
+    problemsBox.replaceChildren(problems.length ? message(problems.join('\n')) : message('No problems found.', 'ok'));
+  };
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try { await api('PUT', '/questions/' + q.id + '/lao', formValues(form)); close(); onSaved(); } catch (ex) { problemsBox.replaceChildren(message(ex.message)); }
+  });
+}
+
+// "Translate Missing Lao": starts the background translation and shows progress.
+function translateBox(data, reload) {
+  const status = h('span', { class: 'muted small' });
+  const button = h('button', { type: 'button', class: 'secondary small' }, 'Translate Missing Lao');
+  const show = (job) => {
+    status.textContent = job && (job.running || job.finished_at)
+      ? (job.running ? 'Translating… ' : 'Last run: ') + 'translated ' + job.translated + ', failed ' + job.failed + ', pending ' + Math.max(0, job.total - job.done) + (job.message ? ' — ' + job.message : '')
+      : data.translator ? '' : 'No automatic translation service is set up; use "Edit Lao" or Lao columns in an import file.';
+  };
+  const poll = async () => {
+    const r = await api('GET', '/questions/translate-status');
+    show(r.job);
+    if (r.job.running) setTimeout(poll, 3000); else reload();
+  };
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    try { const r = await api('POST', '/questions/translate-missing'); show(r.job); setTimeout(poll, 2000); } catch (ex) { status.textContent = ex.message; } finally { button.disabled = false; }
+  });
+  show(data.translate_job);
+  if (data.translate_job && data.translate_job.running) setTimeout(poll, 3000);
+  return h('div', { class: 'row' }, status, button);
+}
+
 const LETTERS = ['a', 'b', 'c', 'd', 'e'];
 // Small picture; click to open it full size.
 const thumb = (id) => (id ? h('a', { href: '/api/admin/images/' + id, target: '_blank', rel: 'noopener' }, h('img', { src: '/api/admin/images/' + id, alt: '', class: 'thumb' })) : null);
@@ -487,31 +550,39 @@ async function renderQuestions() {
   const search = h('input', { placeholder: 'Search questions', class: 'inline-input' });
   const statusFilter = select('status_filter', [['', 'Active and inactive'], ['Active', 'Active only'], ['Inactive', 'Inactive only']], questionStatus);
   statusFilter.classList.add('inline-input');
+  const laoFilter = select('lao_filter', [['', 'Lao: all'], ['ready', 'Lao ready'], ['reviewed', 'Lao reviewed by HR'], ['none', 'English only (no Lao)'],
+    ['needs_review', 'Lao needs review'], ['failed', 'Lao translation failed']], questionLao);
+  laoFilter.classList.add('inline-input');
+  laoFilter.addEventListener('change', () => { questionLao = laoFilter.value; load(); });
   const tabs = h('div', { class: 'tabs' });
   const summary = h('p', { class: 'small' });
   const body = h('div');
-  const card = h('div', { class: 'card' }, h('div', { class: 'row between' }, tabs, h('div', { class: 'row' }, statusFilter, search)), summary, body);
+  const card = h('div', { class: 'card' }, h('div', { class: 'row between' }, tabs, h('div', { class: 'row' }, statusFilter, laoFilter, search)), summary, body);
   const bankCard = h('div', { class: 'card' });
   statusFilter.addEventListener('change', () => { questionStatus = statusFilter.value; load(); });
 
   const load = async () => {
-    const { questions, counts, inactive_counts: inactive, total_counts: totals, iq_levels: iqLevels } = await api('GET', `/questions?section=${questionSection}&status=${questionStatus}&q=${encodeURIComponent(search.value)}`);
-    bankCard.replaceChildren(questionBankCard(totals, counts, inactive, iqLevels, load));
+    const data = await api('GET', `/questions?section=${questionSection}&status=${questionStatus}&lao=${questionLao}&q=${encodeURIComponent(search.value)}`);
+    const { questions, counts, inactive_counts: inactive, total_counts: totals, iq_levels: iqLevels } = data;
+    bankCard.replaceChildren(questionBankCard(totals, counts, inactive, iqLevels, load, data));
     const shown = questionSection ? [questionSection] : Object.keys(SECTION_LABEL);
     summary.replaceChildren(...shown.flatMap((s, i) => [i ? ' · ' : '', h('strong', {}, `Active ${SECTION_LABEL[s]} Questions: ${counts[s]}`), `  Inactive ${SECTION_LABEL[s]} Questions: ${inactive[s]}`]));
     const total = Object.values(counts).reduce((a, b) => a + b, 0);
     tabs.replaceChildren(...[['', `All (${total})`], ...Object.keys(SECTION_LABEL).map((s) => [s, `${SECTION_LABEL[s]} (${counts[s]})`])]
       .map(([s, label]) => h('button', { type: 'button', class: s === questionSection ? 'active' : '', onclick: () => { questionSection = s; load(); } }, label)));
     body.replaceChildren(questions.length ? h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, ['Question', 'Type', 'Area', 'Level', 'Correct Answer', 'Marks', 'Status', ''].map((t) => h('th', {}, t)))),
+      h('thead', {}, h('tr', {}, ['Question (English / Lao)', 'Type', 'Area', 'Level', 'Correct Answer', 'Marks', 'Status', 'Lao', ''].map((t) => h('th', {}, t)))),
       h('tbody', {}, questions.map((q) => h('tr', {},
-        h('td', { class: 'question-cell' }, h('div', { class: 'pre' }, q.question_text), q.image_id ? h('div', { class: 'thumb-row' }, thumb(q.image_id)) : null),
+        h('td', { class: 'question-cell' }, h('div', { class: 'pre' }, q.question_text), q.question_text_lo ? h('div', { class: 'pre lao-text', lang: 'lo' }, q.question_text_lo) : null,
+          q.image_id ? h('div', { class: 'thumb-row' }, thumb(q.image_id)) : null),
         h('td', {}, SECTION_LABEL[q.section]), h('td', {}, fmt(q.category)), h('td', { class: 'nowrap' }, LEVEL_NAMES[q.difficulty] || fmt(q.difficulty)),
         h('td', {}, q.section === 'ESSAY' ? 'HR marks' : /^[A-E]$/.test(q.correct_answer) ? optionContent(q, q.correct_answer) : q.correct_answer),
         h('td', { class: 'nowrap' }, q.marks + (q.marks === 1 ? ' mark' : ' marks')),
         h('td', {}, h('span', { class: 'badge ' + (q.status === 'Active' ? 'pass' : 'neutral') }, q.status)),
+        h('td', { title: q.lo_note || '' }, laoBadge(q.lo_status), q.lo_note ? h('div', { class: 'muted small lao-note' }, q.lo_note) : null),
         h('td', { class: 'nowrap' },
           h('button', { class: 'secondary small', type: 'button', onclick: () => editQuestion(q, load) }, 'Edit'), ' ',
+          h('button', { class: 'secondary small', type: 'button', onclick: () => editLao(q, load) }, 'Edit Lao'), ' ',
           h('button', { class: 'danger small', type: 'button', onclick: async () => {
             if (!confirm('Delete this question? Past results are not affected.')) return;
             try { await api('DELETE', '/questions/' + q.id); load(); } catch (ex) { alert(ex.message); }
@@ -531,7 +602,8 @@ async function renderQuestions() {
 }
 
 // QUESTION BANK: one row per test area with its count, Upload and Delete All Questions.
-function questionBankCard(totals, active, inactive, iqLevels, reload) {
+function questionBankCard(totals, active, inactive, iqLevels, reload, data = {}) {
+  const laoCounts = data.lao_counts || {};
   const rows = Object.keys(SECTION_LABEL).map((sec) => {
     const total = totals[sec] || 0;
     const upload = () => {
@@ -541,13 +613,14 @@ function questionBankCard(totals, active, inactive, iqLevels, reload) {
     };
     return h('div', { class: 'bank-row' },
       h('div', { class: 'bank-name' }, h('strong', {}, TYPE_LABEL[sec]), ' — ', h('span', { class: 'bank-count' }, `${total} question${total === 1 ? '' : 's'}`),
-        h('div', { class: 'muted small' }, `Active ${active[sec] || 0} · Inactive ${inactive[sec] || 0}`,
+        h('div', { class: 'muted small' }, `Active ${active[sec] || 0} · Inactive ${inactive[sec] || 0} · Lao ready ${laoCounts[sec]?.ready || 0} of ${laoCounts[sec]?.total || 0}` +
+          (laoCounts[sec]?.needs_review ? ` · Lao needs review ${laoCounts[sec].needs_review}` : '') + (laoCounts[sec]?.failed ? ` · Lao failed ${laoCounts[sec].failed}` : ''),
           sec === 'IQ' ? ' · ' + IQ_LEVELS.map((n) => `L${n}: ${iqLevels?.[Object.keys(LEVEL_MARK)[n - 1]] ?? 0}`).join(' / ') : '')),
       h('div', { class: 'row' },
         h('button', { type: 'button', class: 'secondary small', onclick: upload }, 'Upload'),
         h('button', { type: 'button', class: 'danger small', disabled: total === 0, onclick: () => confirmDeleteAll(sec, total, reload) }, 'Delete All Questions')));
   });
-  return h('div', {}, h('h2', {}, 'Question Bank'), rows,
+  return h('div', {}, h('div', { class: 'row between' }, h('h2', {}, 'Question Bank'), translateBox(data, reload)), rows,
     h('p', { class: 'muted small' }, 'Delete All Questions clears only that test area (active and inactive). Candidates\' past assessments keep their own copy of every question, so their answers, scores and reports do not change.'));
 }
 
@@ -706,8 +779,8 @@ const PASS_SETTING = { IQ: 'pass_iq', GENERAL: 'pass_general', CALCULATION: 'pas
 const EXPIRY_CHOICES = [[10, '10 minutes'], [30, '30 minutes'], [60, '1 hour'], [120, '2 hours'], [1440, '1 day'], [4320, '3 days'], [10080, '7 days'], ['custom', 'Custom (minutes)']];
 
 async function renderAssessments() {
-  const [settings, questionData, list] = await Promise.all([
-    api('GET', '/settings'), api('GET', '/questions/counts'), api('GET', '/assessments')]);
+  const [settings, questionData, laoData, list] = await Promise.all([
+    api('GET', '/settings'), api('GET', '/questions/counts'), api('GET', '/questions/counts?language=lo'), api('GET', '/assessments')]);
   const counts = questionData;
 
   // One link holds all chosen tests, always in this order: IQ -> General -> Calculation -> Essay.
@@ -725,7 +798,8 @@ async function renderAssessments() {
         h('button', { type: 'button', class: 'secondary small', disabled: n > counts[sec], onclick: () => { count.value = n; } }, String(n)))) : null;
       return h('div', { class: 'test-row' },
         h('label', { class: 'test-name' }, check, ` ${i + 1}. ${TYPE_LABEL[sec]}`),
-        has ? h('span', { class: 'row small' }, count, h('span', {}, 'questions'), minutes, h('span', {}, 'minutes ·'), h('span', {}, 'pass at'), pass, h('span', {}, '%'), quick, h('span', { class: 'muted' }, `(bank has ${counts[sec]})`))
+        has ? h('span', { class: 'row small' }, count, h('span', {}, 'questions'), minutes, h('span', {}, 'minutes ·'), h('span', {}, 'pass at'), pass, h('span', {}, '%'), quick,
+          h('span', { class: 'muted' }, `(bank has ${counts[sec]}; Lao ready ${laoData[sec]})`))
           : h('span', { class: 'muted small' }, 'No active questions in the bank yet'));
     }));
 
@@ -739,7 +813,7 @@ async function renderAssessments() {
   const output = h('div');
   const form = h('form', { class: 'grid' },
     field('Link name (optional, e.g. September Recruitment)', h('input', { name: 'title', maxlength: 200 })),
-    field('Language', select('language', Object.entries(LANG_LABEL), settings.default_language)),
+    field('Language (Lao: questions are shown in Lao; only Lao-ready questions are used)', select('language', Object.entries(LANG_LABEL), settings.default_language)),
     field('Link expires in', expirySelect),
     customField,
     testsBox,
@@ -977,7 +1051,9 @@ async function renderAssessment(id) {
     }
     const correct = q.section === 'ESSAY' ? '-' : options.length ? optionContent(q, q.correct_answer) : q.correct_answer;
     return h('tr', {}, h('td', {}, q.position), h('td', {}, SECTION_LABEL[q.section]),
-      h('td', { class: 'question-cell' }, h('div', { class: 'pre' }, q.question_text), q.image_id ? h('div', { class: 'thumb-row' }, thumb(q.image_id)) : null),
+      h('td', { class: 'question-cell' }, h('div', { class: 'pre' }, q.question_text),
+        q.display_language === 'lo' && q.question_text_lo ? h('div', { class: 'pre lao-text', lang: 'lo' }, q.question_text_lo, h('div', { class: 'muted small' }, 'Shown to the candidate in Lao')) : null,
+        q.image_id ? h('div', { class: 'thumb-row' }, thumb(q.image_id)) : null),
       answerCell, h('td', {}, correct), h('td', {}, status));
   });
   const summary = h('div', { class: 'summary-badges' },

@@ -224,7 +224,11 @@ test('an older one-person link (made before shared links) still works and pre-fi
   assert.equal((await client().get(exam('legacy-one-person-link-000000000000'))).data.state, 'in_progress');
 });
 
-test('selected language is returned to the exam page', async () => {
+test('a Lao link needs Lao-ready questions; its language is returned to the exam page', async () => {
+  const none = await admin.post('/api/admin/assessments', { assessment_type: 'IQ', counts: { IQ: 10 }, link_expiry_minutes: 60, language: 'lo' });
+  assert.equal(none.status, 400);
+  assert.match(none.data.error, /Only 0 IQ questions have a Lao translation ready \(30 more need Lao translation/);
+  db.prepare("UPDATE questions SET question_text_lo = 'ຄຳຖາມ ' || id, option_a_lo = 'opt A', option_b_lo = 'opt B', option_c_lo = 'opt C', option_d_lo = 'opt D', lo_status = 'translated' WHERE section = 'IQ'").run();
   const a = await newLink({ language: 'lo' });
   assert.equal((await candidate.get(exam(a.token))).data.language, 'lo');
 });

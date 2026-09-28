@@ -204,6 +204,18 @@ for (const table of ['questions', 'assessment_questions']) {
 addMissingColumns('assessment_questions', [['difficulty', "TEXT NOT NULL DEFAULT ''"]]);
 addMissingColumns('assessments', [['iq_correct', 'INTEGER'], ['iq_total', 'INTEGER'], ['iq_breakdown', 'TEXT']]);
 
+// Lao translation of each question. The English columns stay the source;
+// the Lao text sits next to it so the question id, options, correct answer,
+// level and marks are shared by both languages. lo_status:
+// '' = no Lao yet, translated (ready, not yet checked by HR), reviewed (ready,
+// checked by HR), needs_review (not used in Lao tests until fixed), failed.
+const LAO_COLUMNS = ['question_text_lo', 'option_a_lo', 'option_b_lo', 'option_c_lo', 'option_d_lo', 'option_e_lo'];
+addMissingColumns('questions', [...LAO_COLUMNS.map((c) => [c, "TEXT NOT NULL DEFAULT ''"]),
+  ['lo_status', "TEXT NOT NULL DEFAULT ''"], ['lo_note', "TEXT NOT NULL DEFAULT ''"], ['lo_translated_at', 'TEXT'], ['lo_reviewed_at', 'TEXT']]);
+// Each candidate's copy keeps the Lao text it was given and the language it
+// was shown in ('' on copies made before Lao questions = English).
+addMissingColumns('assessment_questions', [...LAO_COLUMNS.map((c) => [c, "TEXT NOT NULL DEFAULT ''"]), ['display_language', "TEXT NOT NULL DEFAULT ''"]]);
+
 // Each test keeps the pass mark it was created with, and each link the final
 // eligibility mark, so changing Settings later never changes a finished result.
 addMissingColumns('assessment_stages', [['pass_mark', 'REAL']]);
@@ -260,4 +272,4 @@ function audit(action, actor, details = {}) {
   insertAudit.run(action, actor, JSON.stringify(details), now());
 }
 
-module.exports = { db, getSettings, saveSettings, now, audit, DB_PATH, PASS_KEYS };
+module.exports = { db, getSettings, saveSettings, now, audit, DB_PATH, PASS_KEYS, LAO_COLUMNS };

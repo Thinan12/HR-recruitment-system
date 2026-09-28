@@ -244,3 +244,11 @@ td.failed { font-weight: 700; }
 /* question bank: one row per test area */
 .bank-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .bank-count { font-weight: 600; }
+/* Lao text: system fonts that include Lao (Windows, Android, iOS / macOS) */
+:lang(lo), .lao-text, [lang=lo] { font-family: "Noto Sans Lao", "Leelawadee UI", "Lao Sangam MN", "Phetsarath OT", "Saysettha OT", system-ui, sans-serif; }
+.lao-text { color: #1f4e79; margin-top: 4px; }
+.lao-note { max-width: 220px; white-space: normal; }
+.lao-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.lao-pair textarea, .lao-pair input { width: 100%; }
+.lao-source { background: #f6f8fa; border-radius: 6px; padding: 6px 8px; min-height: 34px; }
+@media (max-width: 640px) { .lao-pair { grid-template-columns: 1fr; } }

@@ -142,12 +142,13 @@ function stateResponse(a) {
         return {
           id: q.id,
           section: q.section,
-          text: q.question_text,
+          // Shown in the language saved with this candidate's copy (Lao or English).
+          text: q.display_language === 'lo' && q.question_text_lo ? q.question_text_lo : q.question_text,
           image: img(q.image_id),
           kind: q.section === 'ESSAY' ? 'essay' : order.length ? 'choice' : 'short',
           // Options in this candidate's shuffled order; the key is the original
           // letter, which tells the browser nothing about which one is correct.
-          options: order.map((L) => ({ key: L, text: q['option_' + L.toLowerCase()], image: img(q[`option_${L.toLowerCase()}_image`]) })),
+          options: order.map((L) => ({ key: L, text: (q.display_language === 'lo' && q[`option_${L.toLowerCase()}_lo`]) || q['option_' + L.toLowerCase()], image: img(q[`option_${L.toLowerCase()}_image`]) })),
           answer: q.answer,
         };
       });

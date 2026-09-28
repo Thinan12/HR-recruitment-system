@@ -73,6 +73,9 @@ const HEADER_ALIASES = {
   correct_answer: ['correctanswer', 'answer', 'correct', 'correctoption', 'rightanswer', 'solution', 'key', 'answerkey', 'ຄຳຕອບ', 'ຄຳຕອບທີ່ຖືກ'],
   options: ['options', 'choices', 'answeroptions'],
   marks: ['marks', 'mark', 'points', 'point', 'score', 'ຄະແນນ'],
+  // Optional Lao translation columns, e.g. "Question (Lao)", "Option A (Lao)".
+  question_text_lo: ['questionlao', 'laoquestion', 'questionlo', 'questioninlao', 'ຄຳຖາມພາສາລາວ'],
+  ...Object.fromEntries(['a', 'b', 'c', 'd', 'e'].map((l) => [`option_${l}_lo`, [`option${l}lao`, `laooption${l}`, `option${l}lo`, `${l}lao`, `choice${l}lao`]])),
 };
 
 function normalizeHeader(h) {
@@ -346,12 +349,21 @@ function validateQuestion(input) {
     // Other tests: difficulty is free text, kept as typed.
   }
   if (!q.question_text) errors.push('Question text is missing.');
+  // A Lao translation given in the file is kept; it is ready only if it passes
+  // the Lao checks, otherwise it waits for HR review (the question still imports).
+  const loFields = ['question_text_lo', ...LETTERS.map((L) => `option_${L.toLowerCase()}_lo`)];
+  if (loFields.some((k) => clean(input[k], 5000))) {
+    for (const k of loFields) q[k] = clean(input[k], 5000);
+    const problems = require('./lao').laoProblems(q, q);
+    q.lo_status = problems.length ? 'needs_review' : 'translated';
+    q.lo_note = problems.join(' ');
+  }
   if (!Number.isFinite(q.marks) || q.marks <= 0 || q.marks > 100) errors.push('Marks must be a number between 0 and 100.');
 
   const filled = LETTERS.filter((L) => q['option_' + L.toLowerCase()] || q['option_' + L.toLowerCase() + '_image']);
   if (q.section === 'ESSAY') {
     // Essays are marked by HR; options are ignored.
-    LETTERS.forEach((L) => { q['option_' + L.toLowerCase()] = ''; q['option_' + L.toLowerCase() + '_image'] = null; });
+    LETTERS.forEach((L) => { q['option_' + L.toLowerCase()] = ''; q['option_' + L.toLowerCase() + '_image'] = null; if (q.lo_status) q[`option_${L.toLowerCase()}_lo`] = ''; });
   } else if (input.answer_error) {
     errors.push(input.answer_error);
   } else if (filled.length >= 2) {

@@ -2,6 +2,7 @@
 // All time rules are enforced here on the server; the browser timer is only a display.
 const crypto = require('crypto');
 const { db, getSettings, now, audit, PASS_KEYS } = require('./db');
+const { LAO_READY_SQL } = require('./lao');
 
 const SECTIONS = ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'];
 const TYPES = {
@@ -19,6 +20,8 @@ const SUBMIT_GRACE_MS = 30 * 1000;
 const LETTERS = ['A', 'B', 'C', 'D', 'E'];
 // Option and picture columns copied from the bank into each candidate's questions.
 const SNAPSHOT_COLS = [...LETTERS.map((L) => 'option_' + L.toLowerCase()), 'image_id', ...LETTERS.map((L) => `option_${L.toLowerCase()}_image`)];
+// Copied too, but not part of "the same question": the Lao text of each copy.
+const LAO_SNAPSHOT_COLS = ['question_text_lo', ...LETTERS.map((L) => `option_${L.toLowerCase()}_lo`)];
 
 // Two questions are "the same" only if wording, options and pictures all match,
 // so several "Which figure comes next?" questions with different pictures can
@@ -100,9 +103,12 @@ function shuffle(list) {
 // five levels. Inactive questions are never selected.
 const USABLE = `status = 'Active' AND (section != 'IQ' OR difficulty IN (${DIFFICULTIES.map((d) => `'${d}'`).join(', ')}))`;
 
-function activeCounts() {
+// Questions a Lao shared link may use: usable AND with a ready Lao translation.
+const usableFor = (language) => (language === 'lo' ? `${USABLE} AND ${LAO_READY_SQL}` : USABLE);
+
+function activeCounts(language = 'en') {
   const counts = Object.fromEntries(SECTIONS.map((s) => [s, 0]));
-  for (const r of db.prepare(`SELECT section, COUNT(*) AS n FROM questions WHERE ${USABLE} GROUP BY section`).all()) counts[r.section] = r.n;
+  for (const r of db.prepare(`SELECT section, COUNT(*) AS n FROM questions WHERE ${usableFor(language)} GROUP BY section`).all()) counts[r.section] = r.n;
   return counts;
 }
 
@@ -127,7 +133,9 @@ function createAssessment(input) {
     tests = TYPES[type];
   }
 
-  const available = activeCounts();
+  const language = LANGUAGES.includes(input.language) ? input.language : settings.default_language;
+  const available = activeCounts(language);
+  const allActive = activeCounts('en');
   const sections = {};
   const minutes = {};
   const passMarks = {};
@@ -145,7 +153,12 @@ function createAssessment(input) {
       if (Array.isArray(input.tests)) throw new InputError(`Please enter at least 1 ${label(sec)} question (the bank has ${available[sec]}).`);
       continue;
     }
-    if (n > available[sec]) throw new InputError(`Only ${available[sec]} active ${label(sec)} questions are in the question bank.`);
+    if (n > available[sec]) {
+      if (language === 'lo' && allActive[sec] > available[sec]) {
+        throw new InputError(`Only ${available[sec]} ${label(sec)} questions have a Lao translation ready (${allActive[sec] - available[sec]} more need Lao translation before they can be used in a Lao assessment).`);
+      }
+      throw new InputError(`Only ${available[sec]} active ${label(sec)} questions are in the question bank.`);
+    }
     const m = Number(input.minutes?.[sec] || input.time_limit_minutes || settings.default_time_minutes);
     if (!Number.isInteger(m) || m < 1 || m > 600) throw new InputError(`Time for the ${label(sec)} test must be between 1 and 600 minutes.`);
     sections[sec] = n;
@@ -158,7 +171,6 @@ function createAssessment(input) {
 
   const expiry = Number(input.link_expiry_minutes || settings.default_link_expiry_minutes);
   if (!Number.isInteger(expiry) || expiry < 1 || expiry > 60 * 24 * 90) throw new InputError('Link expiry must be between 1 minute and 90 days.');
-  const language = LANGUAGES.includes(input.language) ? input.language : settings.default_language;
 
   const title = String(input.title ?? '').trim().slice(0, 200);
   const created = now();
@@ -306,9 +318,10 @@ function cleanCandidateInfo(body) {
 }
 
 const insertQuestion = db.prepare(`INSERT INTO assessment_questions
-  (assessment_id, question_id, position, section, question_text, ${SNAPSHOT_COLS.join(', ')}, correct_answer, option_order, max_marks, difficulty)
+  (assessment_id, question_id, position, section, question_text, ${SNAPSHOT_COLS.join(', ')}, ${LAO_SNAPSHOT_COLS.join(', ')}, display_language,
+    correct_answer, option_order, max_marks, difficulty)
   VALUES (@assessment_id, @question_id, @position, @section, @question_text, ${SNAPSHOT_COLS.map((c) => '@' + c).join(', ')},
-    @correct_answer, @option_order, @max_marks, @difficulty)`);
+    ${LAO_SNAPSHOT_COLS.map((c) => '@' + c).join(', ')}, @display_language, @correct_answer, @option_order, @max_marks, @difficulty)`);
 
 // Opens one test: draws its random questions (never repeating one already used
 // in this assessment), shuffles the answers and starts its timer.
@@ -316,7 +329,11 @@ function openStage(a, stage) {
   const stamp = now();
   const used = new Set(db.prepare('SELECT * FROM assessment_questions WHERE assessment_id = ?').all(a.id).map(questionKey));
   let position = db.prepare('SELECT COALESCE(MAX(position), 0) AS p FROM assessment_questions WHERE assessment_id = ?').get(a.id).p;
-  const bank = db.prepare(`SELECT * FROM questions WHERE section = ? AND ${USABLE}`).all(stage.section);
+  // A Lao shared link only draws questions whose Lao translation is ready, so a
+  // Lao candidate never gets an untranslated or unchecked question. (Links made
+  // before Lao questions keep drawing as before and show Lao where it exists.)
+  const lao = a.language === 'lo';
+  const bank = db.prepare(`SELECT * FROM questions WHERE section = ? AND ${lao && a.link_id ? usableFor('lo') : USABLE}`).all(stage.section);
   // A fresh random draw from the active bank for THIS candidate: questions,
   // their order (IQ: random within each level, Level 1 first) and later the option order.
   const draw = () => {
@@ -350,6 +367,9 @@ function openStage(a, stage) {
     const letters = LETTERS.filter((L) => q['option_' + L.toLowerCase()] || q['option_' + L.toLowerCase() + '_image']);
     insertQuestion.run({
       ...Object.fromEntries(SNAPSHOT_COLS.map((c) => [c, q[c]])),
+      // The Lao text is saved with the copy, so later edits never change a started test.
+      ...Object.fromEntries(LAO_SNAPSHOT_COLS.map((c) => [c, q[c] || ''])),
+      display_language: lao && q.question_text_lo && ['translated', 'reviewed'].includes(q.lo_status) ? 'lo' : 'en',
       assessment_id: a.id, question_id: q.id, position: ++position, section: stage.section, question_text: q.question_text,
       correct_answer: q.correct_answer, option_order: JSON.stringify(shuffle(letters)),
       max_marks: stage.section === 'IQ' ? levelMarks(q) : q.marks, difficulty: q.difficulty,

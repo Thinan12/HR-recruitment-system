@@ -7,6 +7,8 @@ const A = require('../assessments');
 const reports = require('../reports');
 const { parseFile, validateQuestion, ImportError, IMAGE_KEYS } = require('../importer');
 const images = require('../images');
+const lao = require('../lao');
+const { LAO_COLUMNS } = require('../db');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 1 } });
@@ -121,9 +123,12 @@ router.get('/questions', (req, res) => {
   if (A.SECTIONS.includes(req.query.section)) { where.push('section = ?'); args.push(req.query.section); }
   if (req.query.status === 'Active' || req.query.status === 'Inactive') { where.push('status = ?'); args.push(req.query.status); }
   if (req.query.q) {
-    where.push('(question_text LIKE ? OR category LIKE ?)');
-    args.push(`%${req.query.q}%`, `%${req.query.q}%`);
+    where.push('(question_text LIKE ? OR category LIKE ? OR question_text_lo LIKE ?)');
+    args.push(`%${req.query.q}%`, `%${req.query.q}%`, `%${req.query.q}%`);
   }
+  // Lao filter: none (English only) / ready / reviewed / needs_review / failed.
+  const LO_FILTER = { none: "lo_status = ''", ready: lao.LAO_READY_SQL, reviewed: "lo_status = 'reviewed'", needs_review: "lo_status = 'needs_review'", failed: "lo_status = 'failed'" };
+  if (LO_FILTER[req.query.lao]) where.push(LO_FILTER[req.query.lao]);
   const sql = 'SELECT * FROM questions' + (where.length ? ' WHERE ' + where.join(' AND ') : '') + ' ORDER BY id DESC';
   // Every row of each area (active + inactive), and the IQ bank per level.
   const totals = Object.fromEntries(A.SECTIONS.map((s) => [s, 0]));
@@ -133,13 +138,18 @@ router.get('/questions', (req, res) => {
     const level = A.levelOf(r);
     if (level in iqLevels) iqLevels[level] += r.n;
   }
-  res.json({ questions: db.prepare(sql).all(...args), counts: A.activeCounts(), inactive_counts: A.inactiveCounts(), total_counts: totals, iq_levels: iqLevels });
+  res.json({ questions: db.prepare(sql).all(...args), counts: A.activeCounts(), inactive_counts: A.inactiveCounts(), total_counts: totals, iq_levels: iqLevels,
+    lao_counts: lao.laoCounts(), lao_ready_counts: A.activeCounts('lo'), translator: lao.hasProvider(), translate_job: lao.job });
 });
 
 const QUESTION_COLS = ['section', 'category', 'difficulty', 'question_text', 'option_a', 'option_b', 'option_c', 'option_d', 'option_e',
   'correct_answer', 'marks', ...IMAGE_KEYS];
-const insertQuestion = db.prepare(`INSERT INTO questions (${QUESTION_COLS.join(', ')}, status, created_at)
-  VALUES (${QUESTION_COLS.map((c) => '@' + c).join(', ')}, 'Active', @created_at)`);
+// New questions may already carry a Lao translation (Lao columns in an import file).
+const INSERT_COLS = [...QUESTION_COLS, ...LAO_COLUMNS, 'lo_status', 'lo_note', 'lo_translated_at'];
+const insertRow = db.prepare(`INSERT INTO questions (${INSERT_COLS.join(', ')}, status, created_at)
+  VALUES (${INSERT_COLS.map((c) => '@' + c).join(', ')}, 'Active', @created_at)`);
+const insertQuestion = { run: (q) => insertRow.run({ ...Object.fromEntries([...LAO_COLUMNS, 'lo_status', 'lo_note'].map((c) => [c, ''])), ...q,
+  lo_translated_at: q.lo_status ? q.created_at : null }) };
 
 function checkedQuestion(body) {
   const { question, errors } = validateQuestion(body);
@@ -157,10 +167,13 @@ router.post('/questions', (req, res) => {
 
 router.put('/questions/:id', (req, res) => {
   const id = Number(req.params.id);
-  if (!db.prepare('SELECT id FROM questions WHERE id = ?').get(id)) return notFound(res);
+  const before = db.prepare('SELECT * FROM questions WHERE id = ?').get(id);
+  if (!before) return notFound(res);
   const q = checkedQuestion(req.body);
   const status = req.body?.status === 'Inactive' ? 'Inactive' : 'Active';
+  // English only: the Lao translation is edited separately (Edit Lao).
   db.prepare(`UPDATE questions SET ${QUESTION_COLS.map((c) => `${c} = @${c}`).join(', ')}, status = @status WHERE id = @id`).run({ ...q, status, id });
+  lao.markStale(before, { ...q, id });
   // A level given to a question that had none also updates past tests that used it.
   if (q.section === 'IQ') A.syncIqLevels();
   res.json(db.prepare('SELECT * FROM questions WHERE id = ?').get(id));
@@ -207,7 +220,33 @@ router.post('/images', (req, res) => {
 });
 router.get('/images/:id', (req, res) => images.sendImage(res, Number(req.params.id)));
 
-router.get('/questions/counts', (req, res) => res.json(A.activeCounts()));
+router.get('/questions/counts', (req, res) => res.json(A.activeCounts(req.query.language === 'lo' ? 'lo' : 'en')));
+
+// ---- Lao translations -------------------------------------------------------
+
+// Saves only the Lao text (never the English) of one question.
+router.put('/questions/:id/lao', (req, res) => {
+  const r = lao.saveLao(Number(req.params.id), req.body || {}, req.admin.username);
+  if (r.error === 'not_found') return notFound(res);
+  if (r.error) return bad(res, r.error);
+  res.json(r.question);
+});
+
+// Checks a Lao text without saving it (the editor shows the problems).
+router.post('/questions/:id/lao/check', (req, res) => {
+  const q = db.prepare('SELECT * FROM questions WHERE id = ?').get(Number(req.params.id));
+  if (!q) return notFound(res);
+  res.json({ problems: lao.laoProblems(q, req.body || {}) });
+});
+
+// "Translate Missing Lao": every question without Lao (or whose translation
+// failed), in the background, when a translation service is configured.
+router.post('/questions/translate-missing', (req, res) => {
+  const r = lao.translateMissing(null, req.admin.username);
+  if (r.error) return bad(res, r.error);
+  res.json({ job: r.job, lao_counts: lao.laoCounts() });
+});
+router.get('/questions/translate-status', (req, res) => res.json({ job: lao.job, lao_counts: lao.laoCounts(), translator: lao.hasProvider() }));
 
 router.get('/questions/template.xlsx', (req, res) => {
   sendFile(res, reports.questionTemplateXlsx(), 'LALCO_Question_Template.xlsx', XLSX_TYPE);
@@ -253,6 +292,7 @@ router.post('/questions/import', (req, res) => {
   if (rows.length > 2000) return bad(res, 'Please import at most 2000 questions at a time.');
   const created = now();
   let imported = 0;
+  const newIds = [];
   let skipped = 0;
   db.transaction(() => {
     const seen = existingQuestionKeys();
@@ -261,11 +301,13 @@ router.post('/questions/import', (req, res) => {
       const key = A.questionKey(question);
       if (errors.length || seen.has(key)) { skipped++; continue; }
       seen.add(key);
-      insertQuestion.run({ ...question, created_at: created });
+      newIds.push(Number(insertQuestion.run({ ...question, created_at: created }).lastInsertRowid));
       imported++;
     }
   })();
-  res.json({ imported, skipped });
+  // New questions without Lao are translated in the background when a service is set up.
+  if (lao.hasProvider() && newIds.length) lao.translateMissing(newIds, req.admin.username);
+  res.json({ imported, skipped, ...(lao.hasProvider() && newIds.length ? { translating: true } : {}) });
 });
 
 // ---- assessments -------------------------------------------------------
