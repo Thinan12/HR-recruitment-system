@@ -28,6 +28,7 @@ const TEXT = {
     name_required: 'Please enter your name.',
     phone_required: 'Please enter your phone number.',
     no_questions: 'This assessment has no questions yet.\nPlease contact HR.',
+    not_enough_questions: 'This test cannot start: there are not enough questions in the question bank.\nPlease contact HR.',
     sections: { IQ: 'IQ Test', GENERAL: 'General Test', CALCULATION: 'Calculation Test', ESSAY: 'Essay Test' },
     progress_title: 'Assessment Progress',
     tests_intro: 'This assessment has {n} tests, taken one by one. Each test has its own time limit, and you must pass each test to continue to the next one.',
@@ -72,6 +73,7 @@ const TEXT = {
     name_required: 'ກະລຸນາປ້ອນຊື່ຂອງທ່ານ.',
     phone_required: 'ກະລຸນາປ້ອນເບີໂທລະສັບ.',
     no_questions: 'ການທົດສອບນີ້ຍັງບໍ່ມີຄຳຖາມ.\nກະລຸນາຕິດຕໍ່ຝ່າຍບຸກຄະລາກອນ (HR).',
+    not_enough_questions: 'ບໍ່ສາມາດເລີ່ມການທົດສອບນີ້ໄດ້: ຄຳຖາມໃນຄັງຄຳຖາມບໍ່ພຽງພໍ.\nກະລຸນາຕິດຕໍ່ຝ່າຍບຸກຄະລາກອນ (HR).',
     sections: { IQ: 'ແບບທົດສອບ IQ', GENERAL: 'ແບບທົດສອບທົ່ວໄປ', CALCULATION: 'ແບບທົດສອບການຄິດໄລ່', ESSAY: 'ແບບທົດສອບການຂຽນ' },
     progress_title: 'ຄວາມຄືບໜ້າຂອງການປະເມີນ',
     tests_intro: 'ການປະເມີນນີ້ມີ {n} ແບບທົດສອບ, ເຮັດເທື່ອລະອັນ. ແຕ່ລະແບບທົດສອບມີເວລາຂອງຕົນເອງ ແລະ ທ່ານຕ້ອງຜ່ານແຕ່ລະແບບທົດສອບຈຶ່ງຈະໄປແບບທົດສອບຕໍ່ໄປໄດ້.',
@@ -158,7 +160,7 @@ function resultTable(r) {
   const iq = r.section === 'IQ';
   return h('table', { class: 'result-table' }, h('tbody', {},
     row(T.score, `${r.points} / ${r.max}`),
-    row(T.percentage, pct(r.percent)),
+    r.percent != null ? row(T.percentage, pct(r.percent)) : null,
     iq && r.lalco_iq_score != null ? row(T.lalco_iq, `${r.lalco_iq_score} / 150`) : null,
     // IQ: the classification from the LALCO IQ Score (Lao name from the server); other tests: the % level.
     r.level ? row(iq ? T.iq_level : T.level, iq ? (document.documentElement.lang === 'lo' && r.level_lo ? r.level_lo : r.level) : T.levels[r.level] || r.level) : null,

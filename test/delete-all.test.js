@@ -140,6 +140,6 @@ test('after clearing, a new upload works and the one-link flow runs as normal', 
   assert.equal(s.state, 'in_progress');
   assert.equal(s.questions.length, 6);
   s = (await candidate.post(url(a.token, '/submit'), { answers: Object.fromEntries(s.questions.map((q) => [q.id, 'B'])) })).data;
-  assert.equal(s.last_result.percent, 100);
+  assert.equal(s.last_result.points, s.last_result.max, 'full marks');
   assert.equal(s.last_result.result, 'Pass');
 });

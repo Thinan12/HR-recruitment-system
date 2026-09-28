@@ -124,7 +124,7 @@ test('ONE Lao link, candidates A / B / C: own random questions, all in Lao, stab
   assert.equal((await people[0].get(u(l))).data.questions[0].text, people[0].s.questions[0].text);
   // Answer by option key (A is correct for every one of these): full marks, IQ marks by level.
   const done = (await people[0].post(u(l, '/submit'), { answers: Object.fromEntries(people[0].s.questions.map((x) => [x.id, 'A'])) })).data;
-  assert.equal(done.last_result.percent, 100);
+  assert.equal(done.last_result.points, done.last_result.max, 'full marks');
   const aid = db.prepare("SELECT id FROM assessments WHERE link_id = ? AND candidate_id = (SELECT id FROM candidates WHERE name = 'Lao A')").get(l.id).id;
   const copies = db.prepare('SELECT max_marks, difficulty, display_language FROM assessment_questions WHERE assessment_id = ?').all(aid);
   assert.ok(copies.every((c) => c.display_language === 'lo'));
@@ -153,7 +153,7 @@ test('the same questions on an English link are shown in English, with Lao optio
   const lao2 = browser();
   const s2 = (await lao2.post(u(lo, '/start'), { ...CANDIDATE, name: 'Lao Three' })).data;
   const r = (await lao2.post(u(lo, '/submit'), { answers: { [s2.questions[0].id]: 'C' } })).data;
-  assert.equal(r.last_result.percent, 100);
+  assert.equal(r.last_result.points, r.last_result.max, 'full marks');
   assert.equal(q(capital).correct_answer, 'C');
 });
 

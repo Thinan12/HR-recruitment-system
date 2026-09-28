@@ -83,7 +83,8 @@ function lastResult(a, stages) {
   const st = done[done.length - 1];
   if (!st) return null;
   const v = reports.stageView(a, st, stages);
-  return { section: v.section, result: v.result, points: v.points, max: v.max, percent: v.percent, level: v.level,
+  // The IQ percentage is for HR only and is not sent to the candidate.
+  return { section: v.section, result: v.result, points: v.points, max: v.max, ...(v.section === 'IQ' ? {} : { percent: v.percent }), level: v.level,
     lalco_iq_score: v.lalco_iq_score, pass_mark: v.pass_mark,
     // The Lao name of the IQ classification (same bands, same source).
     ...(v.section === 'IQ' && v.lalco_iq_score != null ? { level_lo: reports.getIQClassification(v.lalco_iq_score)?.description_lo } : {}) };

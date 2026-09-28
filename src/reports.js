@@ -43,7 +43,14 @@ function stageView(a, st, stages) {
   const scored = done && st.result !== 'Pending';
   const percent = scored ? st.percent : null;
   const lalco = scored && st.section === 'IQ' ? lalcoIqScore(st.points, st.max) : null;
+  // Consistency of a finished test: the questions saved for this candidate must
+  // be exactly the number HR set, and the maximum their marks. A mismatch is
+  // never hidden; the result is flagged for HR (nothing is changed or deleted).
+  const saved = done ? db.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(max_marks), 0) AS max FROM assessment_questions WHERE assessment_id = ? AND section = ?').get(a.id, st.section) : null;
+  const mismatch = saved && (saved.n !== st.question_count || (scored && Number(st.max) !== Number(saved.max)) || (scored && st.points > st.max));
   return {
+    question_count: st.question_count, questions_assigned: saved ? saved.n : null,
+    review_required: mismatch ? 'Attempt question count mismatch — review required.' : null,
     section: st.section, name: TEST_NAMES[st.section], status: st.status, state, completion: COMPLETION[state],
     result: done ? st.result : null, points: done ? st.points : null, max: done ? st.max : null,
     percent, percent_text: pct1(percent),
@@ -131,20 +138,21 @@ function summarize(candidate, submitted, latestStarted) {
 const LEVELS = [['Easy', 1, 'Level 1 — Easy'], ['Basic', 2, 'Level 2 — Basic'], ['Moderate', 3, 'Level 3 — Moderate'],
   ['Difficult', 4, 'Level 4 — Difficult'], ['Very Difficult', 5, 'Level 5 — Very Difficult'],
   ['Medium', 2, 'Level 2 — Medium (earlier 3-level scale)'], ['Hard', 3, 'Level 3 — Hard (earlier 3-level scale)']];
-// LALCO IQ Score: the weighted IQ marks turned into a 50-150 scale,
-// 50 + (marks / maximum marks x 100), rounded, always against the maximum of
-// that candidate's own test, so every test length gives a comparable score.
+// LALCO IQ Score: the weighted IQ marks turned into a 0-150 scale,
+// marks / maximum marks x 150, rounded, always against the maximum of that
+// candidate's own questions (18 questions 4/3/3/4/4 = 55; 30 = 90), so every
+// test length gives a comparable score (27 / 55 -> 74; 27 / 90 -> 45).
 // It is a recruitment score, not a clinical IQ. Returns null when there is no
 // maximum to compare with (nothing is guessed).
 function lalcoIqScore(points, max) {
   const p = Number(points);
   const m = Number(max);
   if (points == null || max == null || !Number.isFinite(p) || !Number.isFinite(m) || m <= 0) return null;
-  return Math.min(150, Math.max(50, Math.round(50 + (p / m) * 100)));
+  return Math.min(150, Math.max(0, Math.round((p / m) * 150)));
 }
 
 // LALCO IQ SCORE CLASSIFICATION — the ONE place the bands are defined.
-// Every whole score 50-150 falls in exactly one row. The population
+// Every whole score 0-150 falls in exactly one row. The population
 // percentages are reference values from the classification table only:
 // they are never used to calculate, change or rank a candidate's score.
 const IQ_CLASSIFICATION = [
@@ -154,20 +162,20 @@ const IQ_CLASSIFICATION = [
   { min: 90, max: 109, range: '90–109', description: 'Average', description_lo: 'ປານກາງ', populationReference: '50%' },
   { min: 80, max: 89, range: '80–89', description: 'Low average', description_lo: 'ປານກາງຄ່ອນຂ້າງຕ່ຳ', populationReference: '16.1%' },
   { min: 70, max: 79, range: '70–79', description: 'Borderline', description_lo: 'ກ້ຳເກິ່ງ', populationReference: '6.7%' },
-  { min: 50, max: 69, range: '50–69', description: 'Extremely low', description_lo: 'ຕ່ຳຫຼາຍ', populationReference: '2.2%' },
+  { min: 0, max: 69, range: '0–69', description: 'Extremely low', description_lo: 'ຕ່ຳຫຼາຍ', populationReference: '2.2%' },
 ];
-// The classification of a LALCO IQ Score (a whole number 50-150), or null
+// The classification of a LALCO IQ Score (a whole number 0-150), or null
 // for no score / a value outside the scale.
 function getIQClassification(score) {
   if (score == null || score === '') return null;
   const s = Number(score);
-  if (!Number.isInteger(s) || s < 50 || s > 150) return null;
+  if (!Number.isInteger(s) || s < 0 || s > 150) return null;
   const row = IQ_CLASSIFICATION.find((c) => s >= c.min && s <= c.max);
   return { range: row.range, description: row.description, description_lo: row.description_lo, populationReference: row.populationReference };
 }
 // The classification name only (used by every screen and export).
 const iqCategory = (score) => getIQClassification(score)?.description ?? null;
-const LALCO_NOTE = 'Calculated from the LALCO weighted IQ assessment score on a 50–150 scale.';
+const LALCO_NOTE = 'Calculated from the LALCO weighted IQ assessment score on a 0–150 scale (weighted marks ÷ maximum marks × 150).';
 
 function iqResult(a) {
   if (!a || a.iq_max == null) return { iq_score: null, iq_text: null, iq_correct_text: null, iq_levels: [], iq_date: null, lalco_iq_score: null, iq_category: null, iq_classification: null };

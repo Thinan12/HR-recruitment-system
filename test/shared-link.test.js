@@ -181,7 +181,7 @@ test('isolation: A cannot read, answer, submit, time out or move B, and the reve
   assert.equal((await B.get(u(link))).data.state, 'submitted');
   const aNow = (await A.get(u(link))).data;
   assert.equal(aNow.state, 'next_test', 'A is unaffected');
-  assert.equal(aNow.last_result.percent, 100);
+  assert.equal(aNow.last_result.points, aNow.last_result.max, 'full marks');
   assert.equal((await A.post(u(link, '/continue'))).data.section, 'GENERAL');
 
   // A forged or foreign cookie is just a new visitor: it sees nobody's data.

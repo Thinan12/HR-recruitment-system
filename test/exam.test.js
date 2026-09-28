@@ -259,7 +259,11 @@ test('identical wording is never shown twice, even if the bank has copies', asyn
     VALUES ('CALCULATION', ?, '1', '2', 'A', 1, ?)`);
   for (let i = 0; i < 5; i++) insert.run('Same question  text?', new Date().toISOString());
   insert.run('Different question?', new Date().toISOString());
-  const a = await newLink({ assessment_type: 'CALCULATION', counts: { CALCULATION: 6 } });
+  // 6 rows but only 2 different questions: a 6-question link is refused (a candidate never gets fewer than HR set).
+  const six = await admin.post('/api/admin/assessments', { assessment_type: 'CALCULATION', counts: { CALCULATION: 6 }, link_expiry_minutes: 60 });
+  assert.equal(six.status, 400);
+  assert.match(six.data.error, /Only 2 different Calculation questions are in the question bank \(4 are copies/);
+  const a = await newLink({ assessment_type: 'CALCULATION', counts: { CALCULATION: 2 } });
   const r = await startExam(a.token);
   assert.deepEqual(r.data.questions.map((q) => q.text).sort(), ['Different question?', 'Same question  text?']);
 });

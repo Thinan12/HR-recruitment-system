@@ -159,6 +159,11 @@ function createAssessment(input) {
       if (Array.isArray(input.tests)) throw new InputError(`Please enter at least 1 ${label(sec)} question (the bank has ${available[sec]}).`);
       continue;
     }
+    // Copies (same wording and options) are shown once, so only different questions count.
+    const distinct = new Set(db.prepare(`SELECT * FROM questions WHERE section = ? AND ${usableFor(language)}`).all(sec).map(questionKey)).size;
+    if (n <= available[sec] && n > distinct) {
+      throw new InputError(`Only ${distinct} different ${label(sec)} questions are in the question bank (${available[sec] - distinct} are copies of other questions).`);
+    }
     if (n > available[sec]) {
       if (language === 'lo' && allActive[sec] > available[sec]) {
         throw new InputError(`Only ${available[sec]} ${label(sec)} questions have a Lao translation ready (${allActive[sec] - available[sec]} more need Lao translation before they can be used in a Lao assessment).`);
@@ -370,6 +375,14 @@ function openStage(a, stage) {
   let picked = draw();
   for (let tries = 0; tries < 5 && taken.has(picked.map((q) => q.id).join(',')); tries++) picked = draw();
   if (picked.length === 0) throw new InputError('no_questions');
+  // The candidate gets exactly the number of questions HR set, never fewer
+  // (e.g. when questions were deactivated after the link was made); nothing
+  // is saved and the candidate is asked to contact HR.
+  if (picked.length !== stage.question_count) throw new InputError('not_enough_questions');
+  if (stage.section === 'IQ') {
+    const split = DIFFICULTIES.map((d) => picked.filter((q) => levelOf(q) === d).length);
+    if (split.reduce((s, n) => s + n, 0) !== stage.question_count) throw new Error('IQ level counts do not add up to the question count');
+  }
   for (const q of picked) {
     const letters = LETTERS.filter((L) => q['option_' + L.toLowerCase()] || q['option_' + L.toLowerCase() + '_image']);
     insertQuestion.run({

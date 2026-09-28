@@ -328,7 +328,7 @@ function iqResultBlock(r) {
       h('div', { class: 'small' }, h('strong', {}, l.label)),
       h('div', {}, l.correct_text + ' correct'),
       h('div', {}, l.marks_text + ' marks')))),
-    h('div', { class: 'muted small' }, 'LALCO IQ Score: calculated from the LALCO weighted IQ assessment score on a 50–150 scale (a recruitment score, not a clinical IQ).'));
+    h('div', { class: 'muted small' }, 'LALCO IQ Score: calculated from the LALCO weighted IQ assessment score on a 0–150 scale (a recruitment score, not a clinical IQ).'));
 }
 
 // ---------------------------------------------------------------------------
@@ -1224,7 +1224,9 @@ function testsTable(tests) {
     h('thead', {}, h('tr', {}, ['Test', 'Score', '%', 'Level', 'Result', 'Status', 'Pass Mark'].map((t) => h('th', {}, t)))),
     h('tbody', {}, tests.map((t) => h('tr', {},
       h('td', {}, h('strong', {}, t.name)),
-      h('td', {}, t.score_text || '-', t.lalco_iq_score != null ? h('div', { class: 'small' }, 'LALCO IQ Score ', h('strong', {}, t.lalco_iq_score + ' / 150')) : null),
+      h('td', {}, t.score_text || '-', t.lalco_iq_score != null ? h('div', { class: 'small' }, 'LALCO IQ Score ', h('strong', {}, t.lalco_iq_score + ' / 150')) : null,
+        t.questions_assigned != null ? h('div', { class: 'muted small' }, `${t.questions_assigned} question${t.questions_assigned === 1 ? '' : 's'}`) : null,
+        t.review_required ? h('div', {}, h('span', { class: 'badge fail' }, t.review_required)) : null),
       h('td', {}, fmtPct(t.percent)),
       h('td', {}, t.level ? h('span', { class: 'badge neutral' }, (t.section === 'IQ' ? 'IQ Classification: ' : '') + t.level) : '-'),
       h('td', {}, t.result === 'Pass' || t.result === 'Not Pass' ? resultBadge(t.result) : testStateBadge(t.state)),
@@ -1471,7 +1473,7 @@ function iqClassificationTable(classes) {
     h('div', { class: 'table-wrap' }, h('table', { class: 'iq-class-table' },
       h('thead', {}, h('tr', {}, ['IQ Score', 'Description', '% of Population'].map((t) => h('th', {}, t)))),
       h('tbody', {}, classes.map((c) => h('tr', {}, h('td', {}, h('strong', {}, c.range)), h('td', {}, c.description, h('span', { class: 'muted small lao-text', lang: 'lo' }, ' · ' + c.description_lo)), h('td', {}, c.populationReference)))))),
-    h('p', { class: 'muted small' }, 'The LALCO IQ Score is 50 + (IQ weighted marks ÷ maximum marks × 100), from 50 to 150; the classification is looked up from that score. The population percentages are reference values from the classification table only — they are not calculated from LALCO candidates and are not used for scoring or ranking. A recruitment score, not a clinical IQ.'));
+    h('p', { class: 'muted small' }, 'The LALCO IQ Score is IQ weighted marks ÷ maximum marks of each candidate’s own questions × 150, from 0 to 150; the classification is looked up from that score. The population percentages are reference values from the classification table only — they are not calculated from LALCO candidates and are not used for scoring or ranking. A recruitment score, not a clinical IQ.'));
 }
 
 async function renderResults() {
