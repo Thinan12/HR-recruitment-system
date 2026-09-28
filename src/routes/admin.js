@@ -300,7 +300,10 @@ router.get('/links/:id', (req, res) => {
       return { id: a.id, candidate_id: a.candidate_id, candidate_name: a.candidate_name, candidate_phone: a.candidate_phone, final_result: a.final_result,
         status: a.status, state: A.linkState(a), enabled: a.enabled, started_at: a.started_at, submitted_at: a.submitted_at, auto_submitted: a.auto_submitted,
         current_stage: r.current_stage, tests: r.tests, final_percent: r.final_percent, final_percent_text: r.final_percent_text, final_level: r.final_level,
-        eligibility: r.eligibility, eligibility_note: r.eligibility_note, assessment_result: a.result };
+        eligibility: r.eligibility, eligibility_note: r.eligibility_note, assessment_result: a.result,
+        // For checking randomisation: the bank question ids this candidate got, in the order shown.
+        question_ids: Object.fromEntries(A.SECTIONS.map((sec) => [sec, db.prepare('SELECT question_id FROM assessment_questions WHERE assessment_id = ? AND section = ? ORDER BY position')
+          .all(a.id, sec).map((q) => q.question_id)]).filter(([, ids]) => ids.length)) };
     });
   res.json({ link: A.linkView(link), attempts });
 });

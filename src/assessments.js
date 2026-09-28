@@ -316,14 +316,35 @@ function openStage(a, stage) {
   const stamp = now();
   const used = new Set(db.prepare('SELECT * FROM assessment_questions WHERE assessment_id = ?').all(a.id).map(questionKey));
   let position = db.prepare('SELECT COALESCE(MAX(position), 0) AS p FROM assessment_questions WHERE assessment_id = ?').get(a.id).p;
-  const pool = [];
-  for (const q of shuffle(db.prepare(`SELECT * FROM questions WHERE section = ? AND ${USABLE}`).all(stage.section))) {
-    const key = questionKey(q);
-    if (used.has(key)) continue;
-    used.add(key);
-    pool.push(q);
+  const bank = db.prepare(`SELECT * FROM questions WHERE section = ? AND ${USABLE}`).all(stage.section);
+  // A fresh random draw from the active bank for THIS candidate: questions,
+  // their order (IQ: random within each level, Level 1 first) and later the option order.
+  const draw = () => {
+    const seen = new Set(used);
+    const pool = [];
+    for (const q of shuffle(bank)) {
+      const key = questionKey(q);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      pool.push(q);
+    }
+    return stage.section === 'IQ' ? pickProgressive(pool, stage.question_count) : pool.slice(0, stage.question_count);
+  };
+  // On a shared link, if the draw is exactly the same questions in the same
+  // order as another candidate already got, draw again (a few times at most;
+  // a small bank may simply not allow a different set).
+  const taken = new Set();
+  if (a.link_id) {
+    const sets = new Map();
+    for (const r of db.prepare(`SELECT aq.assessment_id, aq.question_id FROM assessment_questions aq JOIN assessments x ON x.id = aq.assessment_id
+      WHERE x.link_id = ? AND x.id != ? AND aq.section = ? ORDER BY aq.assessment_id, aq.position`).all(a.link_id, a.id, stage.section)) {
+      if (!sets.has(r.assessment_id)) sets.set(r.assessment_id, []);
+      sets.get(r.assessment_id).push(r.question_id);
+    }
+    for (const ids of sets.values()) taken.add(ids.join(','));
   }
-  const picked = stage.section === 'IQ' ? pickProgressive(pool, stage.question_count) : pool.slice(0, stage.question_count);
+  let picked = draw();
+  for (let tries = 0; tries < 5 && taken.has(picked.map((q) => q.id).join(',')); tries++) picked = draw();
   if (picked.length === 0) throw new InputError('no_questions');
   for (const q of picked) {
     const letters = LETTERS.filter((L) => q['option_' + L.toLowerCase()] || q['option_' + L.toLowerCase() + '_image']);
