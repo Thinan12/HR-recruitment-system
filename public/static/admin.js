@@ -44,10 +44,109 @@ async function api(method, url, body, isForm) {
   return data;
 }
 
+// Filled from the managed test types (loadTestTypes); these are only the fallbacks until they load.
 const SECTION_LABEL = { IQ: 'IQ', GENERAL: 'General', CALCULATION: 'Calculation', ESSAY: 'Essay' };
 const TYPE_LABEL = { IQ: 'IQ Test', GENERAL: 'General Test', CALCULATION: 'Calculation Test', ESSAY: 'Essay Test', COMBINED: 'Combined Assessment' };
-const TYPE_SECTIONS = { IQ: ['IQ'], GENERAL: ['GENERAL'], CALCULATION: ['CALCULATION'], ESSAY: ['ESSAY'], COMBINED: ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'] };
 const LANG_LABEL = { en: 'English', lo: 'Lao' };
+// ---------------------------------------------------------------------------
+// Test types: IQ, General, Calculation, Essay and any HR adds. Loaded from the
+// server (never hard-coded); the key is stable, the name is HR's.
+// ---------------------------------------------------------------------------
+
+let TEST_TYPES = [];
+const FORMAT_LABEL = { iq: 'IQ (levels 1–5, weighted marks)', mcq: 'Multiple choice', calculation: 'Calculation (multiple choice or short answer)', essay: 'Essay (marked by HR)' };
+const typeOf = (key) => TEST_TYPES.find((t) => t.key === key);
+const activeTypes = () => TEST_TYPES.filter((t) => t.active);
+const isEssayType = (key) => (typeOf(key) || { behavior: key === 'ESSAY' ? 'essay' : '' }).behavior === 'essay';
+const typeFormat = (key) => (typeOf(key) || {}).behavior || '';
+// Options for a "test type" select: active ones (plus `keep`, e.g. an existing question's own type).
+const typeOptions = (keep, suffix = '') => TEST_TYPES.filter((t) => t.active || t.key === keep).map((t) => [t.key, t.name + suffix + (t.active ? '' : ' (inactive)')]);
+
+async function loadTestTypes() {
+  try { TEST_TYPES = await api('GET', '/test-types'); } catch { return; }
+  for (const k of Object.keys(SECTION_LABEL)) delete SECTION_LABEL[k];
+  for (const t of TEST_TYPES) { SECTION_LABEL[t.key] = t.name; TYPE_LABEL[t.key] = t.title; }
+}
+
+async function renderTestTypes() {
+  await loadTestTypes();
+  const table = (rows) => h('div', { class: 'table-wrap' }, h('table', {},
+    h('thead', {}, h('tr', {}, ['Order', 'Name', 'Key', 'Format', 'Lao title', 'Questions', 'Active', 'Inactive', 'In new assessments', 'Status', 'Actions'].map((x) => h('th', {}, x)))),
+    h('tbody', {}, rows.map((t) => h('tr', {},
+      h('td', {}, t.display_order),
+      h('td', {}, h('a', { href: '#/questions/' + t.key.toLowerCase() }, h('strong', {}, t.name)), t.description ? h('div', { class: 'muted small' }, t.description) : null),
+      h('td', {}, h('code', {}, t.key.toLowerCase())),
+      h('td', { class: 'small' }, FORMAT_LABEL[t.behavior] || t.behavior),
+      h('td', { lang: 'lo', class: 'lao-text small' }, t.name_lo || '-'),
+      h('td', {}, t.questions), h('td', {}, t.active_questions), h('td', {}, t.inactive_questions),
+      h('td', {}, t.in_assessments ? 'Yes' : 'No'),
+      h('td', {}, h('span', { class: 'badge ' + (t.active ? 'pass' : 'neutral') }, t.active ? 'Active' : 'Inactive'), t.core ? h('div', { class: 'muted small' }, 'Core') : null),
+      h('td', { class: 'nowrap' },
+        h('button', { type: 'button', class: 'secondary small', onclick: () => editTestType(t) }, 'Edit'), ' ',
+        t.active
+          ? h('button', { type: 'button', class: 'secondary small', onclick: () => deactivateTestType(t) }, 'Deactivate')
+          : h('button', { type: 'button', class: 'secondary small', onclick: async () => { try { await api('POST', `/test-types/${t.key}/reactivate`); route(); } catch (ex) { alert(ex.message); } } }, 'Reactivate'), ' ',
+        t.core ? h('span', { class: 'muted small wrap-note', title: 'The four original tests cannot be deleted.' }, 'Core Test Type — Delete unavailable')
+          : h('button', { type: 'button', class: 'danger small', onclick: () => removeTestType(t) }, 'Remove')))))));
+  const active = TEST_TYPES.filter((t) => t.active);
+  const inactive = TEST_TYPES.filter((t) => !t.active);
+  view().replaceChildren(
+    h('p', {}, h('a', { href: '#/questions' }, '< Questions')),
+    h('div', { class: 'row between' }, h('h1', {}, 'Test Types'), h('button', { type: 'button', onclick: () => editTestType(null) }, '+ Add Test Type')),
+    h('p', { class: 'muted small' }, 'The Question Bank tabs, the question and import forms and Create Assessment use this list. Renaming changes only the name shown; the key stays, so questions, categories, links and past results are unaffected. A test type\'s format (multiple choice, calculation, essay; IQ is only for IQ) decides how its questions are checked and marked and cannot change. Links always run the tests in this order.'),
+    h('div', { class: 'card' }, table(active), inactive.length ? h('div', {}, h('h2', { class: 'section-gap' }, 'Inactive Test Types'), table(inactive)) : null));
+}
+
+function editTestType(t) {
+  const form = h('form', { class: 'grid' },
+    field('Test Type Name', h('input', { name: 'name', value: t ? t.name : '', required: true, maxlength: 60, placeholder: 'e.g. Technical Test' })),
+    field('Lao title (shown to Lao candidates)', h('input', { name: 'name_lo', lang: 'lo', value: t ? t.name_lo : '', maxlength: 80 })),
+    t ? field('Question format (fixed)', h('input', { value: FORMAT_LABEL[t.behavior] || t.behavior, disabled: true }))
+      : field('Question format', select('behavior', [['mcq', FORMAT_LABEL.mcq], ['calculation', FORMAT_LABEL.calculation], ['essay', FORMAT_LABEL.essay]], 'mcq')),
+    field('Display order (tabs and test order in links)', h('input', { name: 'display_order', type: 'number', min: 1, max: 999, value: t ? t.display_order : Math.max(0, ...TEST_TYPES.map((x) => x.display_order)) + 1 })),
+    field('Default pass mark (%)' + (t && t.core ? ' — set in Settings for this test' : ''), h('input', { name: 'pass_mark', type: 'number', min: 0, max: 100, step: 'any', value: t ? t.pass_mark : 60, disabled: !!(t && t.core) })),
+    field('Available for new assessments', select('in_assessments', [['1', 'Yes'], ['0', 'No']], t ? String(t.in_assessments) : '1')),
+    field('Description (optional)', h('input', { name: 'description', value: t ? t.description : '', maxlength: 300 }), 'wide'),
+    t ? h('p', { class: 'muted small wide' }, `Key: ${t.key.toLowerCase()} (never changes). ${t.questions} question(s) keep their test type.`) : null,
+    h('div', { class: 'wide' }, h('button', { type: 'submit' }, 'Save')));
+  const close = modal(t ? `Edit test type — ${t.name}` : 'Add test type', form);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const v = formValues(form);
+    const body = { ...v, in_assessments: v.in_assessments === '1' };
+    if (t && t.core) delete body.pass_mark;
+    try {
+      if (t) await api('PUT', '/test-types/' + t.key, body);
+      else await api('POST', '/test-types', body);
+      close();
+      route();
+    } catch (ex) { flash(form.parentElement, ex.message); }
+  });
+}
+
+function deactivateTestType(t) {
+  const box = h('div', {},
+    h('p', {}, `Deactivate "${t.name}"? It will no longer be offered for new questions or new assessments, and its Question Bank tab is hidden.`),
+    h('p', { class: 'muted small' }, `Nothing is deleted: its ${t.questions} question(s), ${t.categories} categor${t.categories === 1 ? 'y' : 'ies'}, links already created and all past results stay exactly as they are. You can reactivate it at any time.`),
+    h('div', { class: 'row section-gap' }, h('button', { type: 'button', class: 'secondary', onclick: () => close() }, 'Cancel'),
+      h('button', { type: 'button', class: 'danger', onclick: async () => { try { await api('POST', `/test-types/${t.key}/deactivate`); close(); route(); } catch (ex) { flash(box, ex.message); } } }, 'Deactivate')));
+  const close = modal(`Deactivate ${t.name}?`, box);
+}
+
+function removeTestType(t) {
+  const used = t.questions || t.categories || t.assessments || t.links;
+  const box = used
+    ? h('div', {}, h('p', {}, 'This Test Type is in use and cannot be permanently deleted. You can deactivate it instead.'),
+      h('p', { class: 'muted small' }, `In use by: ${t.questions} question(s), ${t.categories} categories, ${t.assessments} assessment(s), ${t.links} link(s).`),
+      h('div', { class: 'row section-gap' }, h('button', { type: 'button', class: 'secondary', onclick: () => close() }, 'Cancel'),
+        t.active ? h('button', { type: 'button', class: 'danger', onclick: async () => { await api('POST', `/test-types/${t.key}/deactivate`); close(); route(); } }, 'Deactivate') : null))
+    : h('div', {}, h('p', {}, `Permanently remove "${t.name}"? Nothing uses it.`),
+      h('div', { class: 'row section-gap' }, h('button', { type: 'button', class: 'secondary', onclick: () => close() }, 'Cancel'),
+        h('button', { type: 'button', class: 'danger', onclick: async () => { try { await api('DELETE', '/test-types/' + t.key); close(); route(); } catch (ex) { flash(box, ex.message); } } }, 'Remove')));
+  const close = modal(`Remove ${t.name}?`, box);
+}
+
+
 const STATE_LABEL = {
   ready: ['Waiting', 'neutral'], in_progress: ['In progress', 'pending'], next_test: ['Between tests', 'pending'], submitted: ['Submitted', 'pass'],
   expired: ['Link expired', 'fail'], disabled: ['Disabled', 'fail'],
@@ -177,7 +276,8 @@ function startApp(me) {
 const ROUTES = {
   dashboard: () => renderDashboard(),
   candidates: (id) => (id ? renderCandidate(id) : renderCandidates()),
-  questions: () => renderQuestions(),
+  questions: (key) => renderQuestions(key),
+  'test-types': () => renderTestTypes(),
   categories: (id) => renderCategories(id),
   assessments: (id) => (id ? renderAssessment(id) : renderAssessments()),
   links: (id) => renderLink(id),
@@ -188,8 +288,9 @@ const ROUTES = {
 async function route() {
   const [, page = 'dashboard', id] = location.hash.split('/');
   const render = ROUTES[page] || ROUTES.dashboard;
-  document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.page === (page === 'links' ? 'assessments' : page === 'categories' ? 'questions' : ROUTES[page] ? page : 'dashboard')));
+  document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.page === (page === 'links' ? 'assessments' : page === 'categories' || page === 'test-types' ? 'questions' : ROUTES[page] ? page : 'dashboard')));
   loading();
+  await loadTestTypes();
   try { await render(id); } catch (e) { view().replaceChildren(message(e.message)); }
 }
 window.addEventListener('hashchange', () => { if (!$('app').classList.contains('hidden')) route(); });
@@ -241,10 +342,7 @@ const DASHBOARD_FILTERS = [
   ['eligible', 'Eligible', (c) => c.eligibility === 'Eligible'],
   ['not_eligible', 'Not Eligible', (c) => c.eligibility === 'Not Eligible'],
   ['pending', 'Eligibility pending', (c) => c.eligibility === 'Pending'],
-  ...['IQ', 'GENERAL', 'CALCULATION'].flatMap((sec) => [
-    [sec + '_pass', `${SECTION_LABEL[sec]} Passed`, (c) => testOf(c, sec)?.result === 'Pass'],
-    [sec + '_fail', `${SECTION_LABEL[sec]} Not Passed`, (c) => testOf(c, sec)?.result === 'Not Pass']]),
-  ['essay_pending', 'Essay Pending HR marking', (c) => testOf(c, 'ESSAY')?.state === 'PENDING HR MARKING'],
+  ['essay_pending', 'Essay Pending HR marking', (c) => (c.tests || []).some((t) => isEssayType(t.section) && t.state === 'PENDING HR MARKING')],
 
   ...LEVELS.map((l) => ['final_' + l, `Final Level: ${l}`, (c) => c.final_level === l]),
 ];
@@ -252,13 +350,16 @@ let dashboardFilter = 'all';
 // The filter list with one entry per IQ classification (known once the dashboard data has arrived).
 const dashboardFilters = () => {
   const i = DASHBOARD_FILTERS.findIndex(([k]) => k.startsWith('final_'));
-  return [...DASHBOARD_FILTERS.slice(0, i), ...IQ_CLASSES.map((c) => ['iq_' + c.description, `IQ Classification: ${c.description} (${c.range})`, (x) => testOf(x, 'IQ')?.level === c.description]), ...DASHBOARD_FILTERS.slice(i)];
+  const passFail = TEST_TYPES.filter((t) => t.behavior !== 'essay').flatMap((t) => [
+    [t.key + '_pass', `${t.name} Passed`, (c) => testOf(c, t.key)?.result === 'Pass'], [t.key + '_fail', `${t.name} Not Passed`, (c) => testOf(c, t.key)?.result === 'Not Pass']]);
+  return [...DASHBOARD_FILTERS.slice(0, 4), ...passFail, ...DASHBOARD_FILTERS.slice(4, i), ...IQ_CLASSES.map((c) => ['iq_' + c.description, `IQ Classification: ${c.description} (${c.range})`, (x) => testOf(x, 'IQ')?.level === c.description]), ...DASHBOARD_FILTERS.slice(i)];
 };
 
 // One row per candidate: every test's score, %, level and result, then the final result.
 function candidateResultsTable(list) {
   if (!list.length) return h('p', { class: 'muted' }, 'No candidates match this filter.');
-  const TESTS = ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'];
+  // One column group per test type that any of these candidates took (in the test type order).
+  const TESTS = TEST_TYPES.map((t) => t.key).filter((k) => list.some((c) => testOf(c, k)));
   const cols = (sec) => (sec === 'IQ' ? ['Score', 'LALCO IQ', '%', 'IQ Classification', 'Result'] : ['Score', '%', 'Level', 'Result']);
   const cells = (c, sec) => {
     const t = testOf(c, sec);
@@ -472,7 +573,7 @@ function editLao(q, onSaved) {
   const form = h('form', {},
     q.image_id || letters.some((l) => q['option_' + l + '_image']) ? h('p', { class: 'muted small' }, 'The pictures stay the same in both languages. If a picture contains words needed to answer, set "Needs review".') : null,
     pair('Question', q.question_text, 'question_text_lo', q.question_text_lo, true),
-    q.section === 'ESSAY' ? null : letters.filter((l) => q['option_' + l]).map((l) => pair('Option ' + l.toUpperCase() + (q.correct_answer === l.toUpperCase() ? ' (correct)' : ''),
+    isEssayType(q.section) ? null : letters.filter((l) => q['option_' + l]).map((l) => pair('Option ' + l.toUpperCase() + (q.correct_answer === l.toUpperCase() ? ' (correct)' : ''),
       q['option_' + l], 'option_' + l + '_lo', q['option_' + l + '_lo'], false)),
     h('div', { class: 'grid section-gap' }, field('Status', status), field('Note (optional)', h('input', { name: 'lo_note', value: q.lo_note || '' }))),
     h('p', { class: 'muted small' }, 'Numbers, symbols, codes and letter sequences must stay exactly as in English. The correct answer stays the same option. Options that are only pictures need no Lao.'),
@@ -556,7 +657,9 @@ function imageInput(name, currentId, onError) {
   return h('div', { class: 'image-field' }, hidden, preview, file, remove);
 }
 
-async function renderQuestions() {
+async function renderQuestions(key) {
+  if (key && typeOf(String(key).toUpperCase())) questionSection = String(key).toUpperCase();
+  if (questionSection && !(typeOf(questionSection) || {}).active) questionSection = '';
   const search = h('input', { placeholder: 'Search questions', class: 'inline-input' });
   const statusFilter = select('status_filter', [['', 'Active and inactive'], ['Active', 'Active only'], ['Inactive', 'Inactive only'], ['needs_answer', 'Needs answer (short answer, no correct answer yet)']], questionStatus);
   statusFilter.classList.add('inline-input');
@@ -587,7 +690,7 @@ async function renderQuestions() {
       ...shownCats.map((c) => [c.id, (questionSection ? '' : SECTION_LABEL[c.section] + ' · ') + c.name + (c.active ? '' : ' (inactive)')])]
       .map(([v, t]) => h('option', { value: v, selected: String(v) === questionCategory }, t)));
     const chosen = cats.find((c) => String(c.id) === questionCategory);
-    const shown = questionSection ? [questionSection] : Object.keys(SECTION_LABEL);
+    const shown = questionSection ? [questionSection] : activeTypes().map((t) => t.key);
     summary.replaceChildren(...(chosen
       ? [h('strong', {}, `Active ${chosen.name} Questions: ${chosen.active_questions}`), `  Inactive ${chosen.name} Questions: ${chosen.inactive_questions}`, chosen.active ? '' : ' · this category is inactive']
       : questionCategory === 'none'
@@ -595,7 +698,10 @@ async function renderQuestions() {
         : shown.flatMap((s, i) => [i ? ' · ' : '', h('strong', {}, `Active ${SECTION_LABEL[s]} Questions: ${counts[s]}`), `  Inactive ${SECTION_LABEL[s]} Questions: ${inactive[s]}`,
           data.no_category?.[s] && s === 'IQ' ? h('span', { class: 'badge pending' }, `${data.no_category[s]} need a category`) : null])));
     const total = Object.values(counts).reduce((a, b) => a + b, 0);
-    tabs.replaceChildren(...[['', `All (${total})`], ...Object.keys(SECTION_LABEL).map((s) => [s, `${SECTION_LABEL[s]} (${counts[s]})`])]
+    // "All" is only a filter; every other tab is an active test type (HR manages them on Test Types).
+    // Counts follow the status filter (active / inactive / both).
+    const tabCount = (k) => (questionStatus === 'Active' ? counts[k] : questionStatus === 'Inactive' ? inactive[k] : totals[k]) ?? 0;
+    tabs.replaceChildren(...[['', `All (${activeTypes().reduce((n, t) => n + tabCount(t.key), 0) + TEST_TYPES.filter((t) => !t.active).reduce((n, t) => n + tabCount(t.key), 0)})`], ...activeTypes().map((t) => [t.key, `${t.name} (${tabCount(t.key)})`])]
       .map(([s, label]) => h('button', { type: 'button', class: s === questionSection ? 'active' : '', onclick: () => { questionSection = s; questionCategory = ''; selected.clear(); load(); } }, label)));
 
     // Bulk: set / clear the category of the ticked questions (nothing else changes).
@@ -632,7 +738,7 @@ async function renderQuestions() {
         h('td', {}, q.category ? q.category : q.section === 'IQ' ? h('span', { class: 'badge pending' }, 'Needs category') : '-',
           q.category_id && cats.some((c) => c.id === q.category_id && !c.active) ? h('div', { class: 'muted small' }, '(inactive category)') : null),
         h('td', { class: 'nowrap' }, (q.section === 'IQ' && LEVEL_NAMES[q.difficulty]) || fmt(q.difficulty)),
-        h('td', {}, q.section === 'ESSAY' ? h('span', { title: q.correct_answer || '' }, q.correct_answer ? 'HR marks (marking guide saved)' : 'HR marks')
+        h('td', {}, isEssayType(q.section) ? h('span', { title: q.correct_answer || '' }, q.correct_answer ? 'HR marks (marking guide saved)' : 'HR marks')
           : /^[A-E]$/.test(q.correct_answer) ? optionContent(q, q.correct_answer) : q.correct_answer || h('span', { class: 'badge pending' }, 'Answer required')),
         h('td', { class: 'nowrap' }, q.marks + (q.marks === 1 ? ' mark' : ' marks')),
         h('td', {}, h('span', { class: 'badge ' + (q.status === 'Active' ? 'pass' : 'neutral') }, q.status)),
@@ -651,7 +757,8 @@ async function renderQuestions() {
 
   view().replaceChildren(
     h('div', { class: 'row between' }, h('h1', {}, 'Questions'),
-      h('div', { class: 'row' }, h('a', { class: 'button secondary', href: '#/categories' }, 'Question Categories'),
+      h('div', { class: 'row' }, h('button', { type: 'button', class: 'secondary', onclick: () => editTestType(null) }, '+ Add Test Type'), h('a', { class: 'button secondary', href: '#/test-types' }, 'Manage Test Types'),
+        h('a', { class: 'button secondary', href: '#/categories' }, 'Question Categories'),
         h('button', { type: 'button', onclick: () => editQuestion(null, load) }, 'Add question'))),
     bankCard,
     uploadCard(load),
@@ -674,7 +781,7 @@ async function renderCategories(id) {
   const card = h('div', { class: 'card' }, h('div', { class: 'row between' }, tabs, search), body);
   const load = async () => {
     const list = await api('GET', `/categories?section=${categorySection}&q=${encodeURIComponent(search.value)}`);
-    tabs.replaceChildren(...[['', 'All'], ...Object.keys(SECTION_LABEL).map((s) => [s, SECTION_LABEL[s]])]
+    tabs.replaceChildren(...[['', 'All'], ...activeTypes().map((t) => [t.key, t.name])]
       .map(([s, label]) => h('button', { type: 'button', class: s === categorySection ? 'active' : '', onclick: () => { categorySection = s; load(); } }, label)));
     const table = (rows) => h('div', { class: 'table-wrap' }, h('table', {},
       h('thead', {}, h('tr', {}, ['Category', 'Lao name', 'Test Type', 'Active Questions', 'Inactive Questions', 'Status', 'Actions'].map((t) => h('th', {}, t)))),
@@ -706,7 +813,7 @@ async function renderCategories(id) {
 
 function editCategory(c, onSaved) {
   const form = h('form', { class: 'grid' },
-    field('Test Type', c ? h('input', { value: SECTION_LABEL[c.section], disabled: true }) : select('section', Object.entries(SECTION_LABEL), categorySection || 'IQ')),
+    field('Test Type', c ? h('input', { value: SECTION_LABEL[c.section], disabled: true }) : select('section', typeOptions(), categorySection || (activeTypes()[0] || {}).key)),
     field('Category Name', h('input', { name: 'name', value: c ? c.name : '', required: true, maxlength: 100 })),
     field('Lao name (optional)', h('input', { name: 'name_lo', lang: 'lo', value: c ? c.name_lo : '', maxlength: 100 })),
     c && c.questions ? h('p', { class: 'muted small wide' }, `Renaming changes the category name of its ${c.questions} question(s). Past candidate results are not affected.`) : null,
@@ -752,7 +859,7 @@ async function renderCategory(id) {
 // QUESTION BANK: one row per test area with its count, Upload and Delete All Questions.
 function questionBankCard(totals, active, inactive, iqLevels, reload, data = {}) {
   const laoCounts = data.lao_counts || {};
-  const rows = Object.keys(SECTION_LABEL).map((sec) => {
+  const rows = activeTypes().map((t) => t.key).map((sec) => {
     const total = totals[sec] || 0;
     const upload = () => {
       const pick = $('upload-section');
@@ -807,7 +914,7 @@ function confirmDeleteAll(sec, total, reload) {
 
 function uploadCard(onImported) {
   const fileInput = h('input', { type: 'file', class: 'inline-input', accept: '.xlsx,.xls,.docx,.doc,.pdf,.csv,.tsv,.txt' });
-  const section = select('section', Object.entries(SECTION_LABEL).map(([k, v]) => [k, v + ' questions']), questionSection || 'IQ');
+  const section = select('section', typeOptions(null, ' questions'), questionSection || (activeTypes()[0] || {}).key);
   section.id = 'upload-section';
   section.classList.add('inline-input');
   const result = h('div');
@@ -840,13 +947,14 @@ function uploadCard(onImported) {
 function showPreview(container, p, onDone) {
   const valid = p.rows.filter((r) => r.errors.length === 0).map((r) => r.question);
   const invalid = p.rows.filter((r) => r.errors.length > 0);
-  const importBtn = h('button', { type: 'button', disabled: valid.length === 0 }, `Import ${valid.length} questions`);
+  const typePending = p.rows.filter((r) => r.question.type_name && r.errors.length === 1).length;
+  const importBtn = h('button', { type: 'button', disabled: valid.length + typePending === 0 }, `Import ${valid.length + typePending} questions`);
   // Document analysis: one line per section that holds questions (tick = import, and as which test);
   // interview notes, scoring guides and other text are shown but never imported.
   const questionSections = (p.sections || []).filter((x) => x.kind === 'questions' && x.valid > 0);
   const picks = Object.fromEntries(questionSections.map((x) => [x.key, {
     on: h('input', { type: 'checkbox', checked: true, onchange: () => updateCount() }),
-    as: select('import_as_' + x.key, Object.entries(SECTION_LABEL), x.section) }]));
+    as: select('import_as_' + x.key, typeOptions(), x.section) }]));
   const chosen = () => p.rows.filter((r) => r.errors.length === 0 && (!picks[r.section_key] || picks[r.section_key].on.checked))
     .map((r) => ({ ...r.question, section: picks[r.section_key] ? picks[r.section_key].as.value : r.question.section }));
   const updateCount = () => { const n = chosen().length; importBtn.textContent = `Import ${n} questions`; importBtn.disabled = n === 0; };
@@ -856,7 +964,7 @@ function showPreview(container, p, onDone) {
     p.type_mismatch ? message(p.type_mismatch) : null,
     h('div', { class: 'table-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Import', 'Section', 'Detected', 'Questions', 'Answer required', 'Import as'].map((t) => h('th', {}, t)))),
       h('tbody', {}, questionSections.map((x) => h('tr', {}, h('td', {}, picks[x.key].on), h('td', {}, x.title || '-', x.level ? h('div', { class: 'muted small' }, x.level) : null),
-        h('td', {}, SECTION_LABEL[x.section] + (x.section === 'CALCULATION' && x.answer_required ? ' (short answer)' : ''), x.section !== p.test_type ? h('div', {}, h('span', { class: 'badge pending' }, 'differs from the selected type')) : null),
+        h('td', {}, SECTION_LABEL[x.section] + (typeFormat(x.section) === 'calculation' && x.answer_required ? ' (short answer)' : ''), x.section !== p.test_type ? h('div', {}, h('span', { class: 'badge pending' }, 'differs from the selected type')) : null),
         h('td', {}, x.valid), h('td', {}, x.answer_required || '-'), h('td', {}, picks[x.key].as)))))),
     notImported.length ? h('p', { class: 'muted small' }, 'Not imported: ' + [sum('interview') ? `interview material (${sum('interview')} lines)` : null, sum('scoring') ? `scoring guides (${sum('scoring')} lines)` : null,
       sum('other') ? `other text — memo, instructions, policy, tables (${sum('other')} lines)` : null].filter(Boolean).join(' · ') + '.') : null) : null;
@@ -865,6 +973,12 @@ function showPreview(container, p, onDone) {
   const decisionSelects = (p.category_decisions || []).map((d) => ({ d, el: h('select', { class: 'inline-input' },
     h('option', { value: '' }, 'Choose…'), d.inactive ? null : h('option', { value: 'create' }, `Create category "${d.name}"`),
     (p.categories || []).filter((c) => c.section === d.section).map((c) => h('option', { value: 'use:' + c.id }, `Use existing: ${c.name}`))) }));
+  // One choice per test type name in the file that does not exist: create it (with a format) or use an existing one.
+  const typeSelects = (p.type_decisions || []).map((d) => ({ d, el: h('select', { class: 'inline-input' }, h('option', { value: '' }, 'Choose…'),
+    ['mcq', 'calculation', 'essay'].map((b) => h('option', { value: 'create:' + b }, `Create test type "${d.name}" — ${FORMAT_LABEL[b]}`)),
+    activeTypes().map((t) => h('option', { value: 'use:' + t.key }, `Use existing: ${t.name}`))) }));
+  const typeBox = typeSelects.length ? h('div', { class: 'message error' }, h('strong', {}, 'Test types to decide before importing'), h('br'),
+    typeSelects.map(({ d, el }) => h('div', { class: 'row small section-gap-sm' }, `Test Type "${d.name}" does not exist (${d.count} question${d.count === 1 ? '' : 's'}):`, el))) : null;
   const decisionBox = decisionSelects.length ? h('div', { class: 'message error' }, h('strong', {}, 'Categories to decide before importing'), h('br'),
     decisionSelects.map(({ d, el }) => h('div', { class: 'row small section-gap-sm' }, `Category "${d.name}" ${d.inactive ? 'is inactive' : 'does not exist'} for ${SECTION_LABEL[d.section]} (${d.count} question${d.count === 1 ? '' : 's'}):`, el))) : null;
   importBtn.addEventListener('click', async () => {
@@ -875,7 +989,14 @@ function showPreview(container, p, onDone) {
         if (!el.value) { importBtn.disabled = false; return flash(container, `Please choose what to do with the category "${d.name}" (or press Cancel).`); }
         category_decisions[d.key] = el.value === 'create' ? { create: true } : { category_id: Number(el.value.slice(4)) };
       }
-      const r = await api('POST', '/questions/import', { questions: chosen(), category_decisions });
+      const type_decisions = {};
+      for (const { d, el } of typeSelects) {
+        if (!el.value) { importBtn.disabled = false; return flash(container, `Please choose what to do with the test type "${d.name}" (or press Cancel).`); }
+        type_decisions[d.key] = el.value.startsWith('create:') ? { create: true, behavior: el.value.slice(7) } : { key: el.value.slice(4) };
+      }
+      // Rows whose only problem is an unknown test type go too, with HR's decision.
+      const pendingType = typeSelects.length ? p.rows.filter((r) => r.question.type_name && r.errors.length === 1).map((r) => ({ ...r.question, type_name: r.question.type_name })) : [];
+      const r = await api('POST', '/questions/import', { questions: [...chosen(), ...pendingType], category_decisions, type_decisions });
       container.replaceChildren(message(`Imported ${r.imported} questions.` + (r.skipped ? ` Skipped ${r.skipped}.` : '')
         + (r.answer_required ? ` ${r.answer_required} short-answer question(s) are Inactive until you enter the correct answer (Questions → status "Needs answer" → Edit).` : ''), 'ok'));
       onDone();
@@ -890,6 +1011,7 @@ function showPreview(container, p, onDone) {
       ...[['Found', p.found], ['Valid', p.valid], ['Invalid', p.invalid], ['Duplicates', p.duplicates ?? 0], ['Answer Conflicts', p.conflicts ?? 0]].map(([l, v]) => h('div', { class: 'stat' }, h('div', { class: 'label' }, l), h('div', { class: 'value' }, v))),
       ...Object.entries(p.by_section).filter(([, n]) => n > 0).map(([s, n]) => h('div', { class: 'stat' }, h('div', { class: 'label' }, SECTION_LABEL[s] + ' questions'), h('div', { class: 'value' }, n)))),
     sectionsBox,
+    typeBox,
     decisionBox,
     p.answer_required ? h('p', { class: 'message pending-note' }, `${p.answer_required} short-answer question(s) have no correct answer in the file. They will be imported as "Answer required" (Inactive) and cannot be used in a test until HR enters the answer. Answers are never guessed.`) : null,
     p.missing_category ? h('p', { class: 'muted small' }, `${p.missing_category} question(s) have no category (IQ ones are listed under "Needs category" after importing; set it with Set category).`) : null,
@@ -908,12 +1030,12 @@ function showPreview(container, p, onDone) {
         h('td', { class: 'nowrap' }, (q.section === 'IQ' && LEVEL_NAMES[q.difficulty]) || fmt(q.difficulty)),
         h('td', { class: 'small' }, h('div', { class: 'thumb-row' }, LETTERS.filter((l) => q['option_' + l] || q['option_' + l + '_image'])
           .map((l) => optionContent(q, l.toUpperCase())))),
-        h('td', { class: 'small' }, q.section === 'ESSAY' ? (q.correct_answer ? h('div', {}, h('div', { class: 'muted' }, 'Marking guide (HR only):'), h('div', { class: 'pre' }, q.correct_answer)) : 'HR marks') : q.correct_answer || (r.answer_required ? 'Missing — Review Required' : '-')), h('td', {}, q.marks))))))) : null,
+        h('td', { class: 'small' }, isEssayType(q.section) ? (q.correct_answer ? h('div', {}, h('div', { class: 'muted' }, 'Marking guide (HR only):'), h('div', { class: 'pre' }, q.correct_answer)) : 'HR marks') : q.correct_answer || (r.answer_required ? 'Missing — Review Required' : '-')), h('td', {}, q.marks))))))) : null,
     h('div', { class: 'row section-gap' }, importBtn, h('button', { class: 'secondary', type: 'button', onclick: () => container.replaceChildren() }, 'Cancel'))));
 }
 
 function editQuestion(q, onSaved) {
-  q = q || { section: questionSection || 'IQ', marks: 1, status: 'Active', difficulty: 'Medium' };
+  q = q || { section: questionSection || (activeTypes()[0] || {}).key || 'IQ', marks: 1, status: 'Active', difficulty: 'Medium' };
   let showError = () => {};
   const known = ['Easy', 'Basic', 'Moderate', 'Difficult', 'Very Difficult'];
   const levelSelect = select('difficulty', [['', '-'], ...known.map((k) => [k, LEVEL_NAMES[k]]), ...(q.difficulty && !known.includes(q.difficulty) ? [[q.difficulty, q.difficulty]] : [])], q.difficulty || '');
@@ -934,7 +1056,7 @@ function editQuestion(q, onSaved) {
     if (isIq) { if (!LEVEL_MARK[levelSelect.value]) levelSelect.value = 'Moderate'; marksInput.value = LEVEL_MARK[levelSelect.value]; }
   };
   const form = h('form', { class: 'grid' },
-    field('Type', select('section', Object.entries(SECTION_LABEL), q.section)),
+    field('Test Type', select('section', typeOptions(q.id ? q.section : null), q.section && (typeOf(q.section) || {}).active ? q.section : q.id ? q.section : (activeTypes()[0] || {}).key)),
     field('Category', categorySelect),
     field('Level', levelSelect),
     field('Marks', marksInput),
@@ -982,17 +1104,19 @@ async function renderAssessments() {
     api('GET', '/settings'), api('GET', '/questions/counts'), api('GET', '/questions/counts?language=lo'), api('GET', '/assessments')]);
   const counts = questionData;
 
-  // One link holds all chosen tests, always in this order: IQ -> General -> Calculation -> Essay.
-  const TESTS = ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'];
+  // One link holds all chosen tests, always in the test type order (IQ -> General -> Calculation -> Essay -> …).
+  const TESTS = TEST_TYPES.filter((t) => t.active && t.in_assessments).map((t) => t.key);
   const DEFAULT_COUNT = { IQ: IQ_DEFAULT, GENERAL: 10, CALCULATION: 10, ESSAY: 1 };
+  const defaultCount = (sec) => DEFAULT_COUNT[sec] ?? (isEssayType(sec) ? 1 : 10);
+  const defaultPass = (sec) => (PASS_SETTING[sec] ? settings[PASS_SETTING[sec]] : (typeOf(sec) || {}).pass_mark ?? 60);
   const testsBox = h('div', { class: 'wide tests-box' },
     h('label', {}, 'Tests Included (taken one by one in this order; the candidate must pass each test to continue)'),
     TESTS.map((sec, i) => {
       const has = counts[sec] > 0;
       const check = h('input', { type: 'checkbox', name: 'test_' + sec, checked: has, disabled: !has });
-      const count = h('input', { name: 'count_' + sec, type: 'number', min: 1, max: counts[sec], value: Math.min(counts[sec], DEFAULT_COUNT[sec]) || '', class: 'inline-input small-num', disabled: !has });
+      const count = h('input', { name: 'count_' + sec, type: 'number', min: 1, max: counts[sec], value: Math.min(counts[sec] || 0, defaultCount(sec)) || '', class: 'inline-input small-num', disabled: !has });
       const minutes = h('input', { name: 'minutes_' + sec, type: 'number', min: 1, max: 600, value: settings.default_time_minutes, class: 'inline-input small-num', disabled: !has });
-      const pass = h('input', { name: 'pass_' + sec, type: 'number', min: 0, max: 100, step: 'any', value: settings[PASS_SETTING[sec]], class: 'inline-input small-num', disabled: !has });
+      const pass = h('input', { name: 'pass_' + sec, type: 'number', min: 0, max: 100, step: 'any', value: defaultPass(sec), class: 'inline-input small-num', disabled: !has });
       const quick = sec === 'IQ' && has ? h('span', { class: 'small' }, ' Quick: ', [10, 15, 18, 20, 30].map((n) =>
         h('button', { type: 'button', class: 'secondary small', disabled: n > counts[sec], onclick: () => { count.value = n; } }, String(n)))) : null;
       return h('div', { class: 'test-row' },
@@ -1194,7 +1318,7 @@ async function renderLink(id) {
   } }, l.enabled ? 'Disable link (no new candidates)' : 'Enable link');
   const rows = attempts.map((a) => h('tr', {},
     h('td', {}, a.candidate_id ? h('a', { href: '#/candidates/' + a.candidate_id }, h('strong', {}, a.candidate_name)) : '-', h('div', { class: 'muted small' }, fmt(a.candidate_phone))),
-    ...['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'].filter((sec) => l.stages.some((st) => st.section === sec)).map((sec) => {
+    ...l.stages.map((st) => st.section).map((sec) => {
       const t = (a.tests || []).find((x) => x.section === sec);
       return h('td', {}, testCell(a, sec), t && t.section === 'IQ' && t.lalco_iq_score != null ? h('div', { class: 'muted small' }, `LALCO ${t.lalco_iq_score} / 150 · ${t.level}`) : null);
     }),
@@ -1229,7 +1353,7 @@ async function renderAssessment(id) {
     const answered = q.answer != null && String(q.answer).trim() !== '';
     let answerCell;
     let status;
-    if (q.section === 'ESSAY') {
+    if (isEssayType(q.section)) {
       const input = h('input', { type: 'number', min: 0, max: q.max_marks, step: 'any', value: q.marks_awarded ?? '', class: 'inline-input', 'data-id': q.id });
       essayInputs.push(input);
       answerCell = h('td', {}, answered ? h('div', { class: 'pre' }, q.answer) : h('span', { class: 'muted' }, 'No answer'),
@@ -1248,7 +1372,7 @@ async function renderAssessment(id) {
       else if (q.marks_awarded > 0) { count.correct++; status = h('span', { class: 'badge pass' }, 'Correct'); }
       else { count.wrong++; status = h('span', { class: 'badge fail' }, 'Wrong'); }
     }
-    const correct = q.section === 'ESSAY' ? '-' : options.length ? optionContent(q, q.correct_answer) : q.correct_answer;
+    const correct = isEssayType(q.section) ? '-' : options.length ? optionContent(q, q.correct_answer) : q.correct_answer;
     return h('tr', {}, h('td', {}, q.position), h('td', {}, SECTION_LABEL[q.section]),
       h('td', { class: 'question-cell' }, h('div', { class: 'pre' }, q.question_text),
         q.display_language === 'lo' && q.question_text_lo ? h('div', { class: 'pre lao-text', lang: 'lo' }, q.question_text_lo, h('div', { class: 'muted small' }, 'Shown to the candidate in Lao')) : null,
@@ -1329,6 +1453,8 @@ function iqClassificationTable(classes) {
 
 async function renderResults() {
   const [list, iq, classes] = await Promise.all([api('GET', '/candidates'), api('GET', '/results/iq'), api('GET', '/iq-classification')]);
+  // Columns: the four original tests plus any other test type a candidate took.
+  const resultTypes = TEST_TYPES.map((t) => t.key).filter((k) => ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'].includes(k) || list.some((c) => testOf(c, k)));
   const iqCard = h('div', { class: 'card' }, h('h2', {}, 'IQ Test Results'),
     iq.length ? h('div', { class: 'table-wrap' }, h('table', {},
       h('thead', {}, h('tr', {}, ['Candidate', 'IQ Weighted Score', 'IQ %', 'LALCO IQ Score', 'IQ Classification', 'Correct Answers', ...IQ_LEVELS.map((n) => 'Level ' + n), 'Assessment Date', ''].map((t) => h('th', {}, t)))),
@@ -1347,11 +1473,10 @@ async function renderResults() {
     iqClassificationTable(classes),
     iqCard,
     h('div', { class: 'card' }, h('h2', {}, 'All candidates'), list.length ? h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, ['Candidate', 'IQ', 'General', 'Calculation', 'Essay', 'Current Stage', 'Final %', 'Final Level', 'Company Eligibility', 'HR Final Result', 'Date', 'Export'].map((t) => h('th', {}, t)))),
+      h('thead', {}, h('tr', {}, ['Candidate', ...resultTypes.map((k) => SECTION_LABEL[k]), 'Current Stage', 'Final %', 'Final Level', 'Company Eligibility', 'HR Final Result', 'Date', 'Export'].map((t) => h('th', {}, t)))),
       h('tbody', {}, list.map((c) => h('tr', {},
         h('td', {}, h('a', { href: '#/candidates/' + c.id }, c.name)),
-        h('td', {}, testCell(c, 'IQ'), c.iq_text ? h('div', { class: 'muted small' }, `${c.iq_text} · LALCO ${c.lalco_iq_score ?? '-'} / 150 · ${c.iq_category || '-'}`) : null),
-        h('td', {}, testCell(c, 'GENERAL')), h('td', {}, testCell(c, 'CALCULATION')), h('td', {}, testCell(c, 'ESSAY')),
+        ...resultTypes.map((k) => h('td', {}, testCell(c, k), k === 'IQ' && c.iq_text ? h('div', { class: 'muted small' }, `${c.iq_text} · LALCO ${c.lalco_iq_score ?? '-'} / 150 · ${c.iq_category || '-'}`) : null)),
         h('td', { class: 'small' }, fmt(c.current_stage)),
         h('td', {}, c.final_percent_text || '-'), h('td', {}, fmt(c.final_level)), h('td', { title: c.eligibility_note || '' }, eligibilityBadge(c.eligibility)),
         h('td', {}, resultBadge(c.final_result || 'Pending')), h('td', {}, fmtDate(c.assessment_date || c.created_at)),

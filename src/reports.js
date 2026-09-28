@@ -3,10 +3,12 @@ const path = require('path');
 const PDFDocument = require('pdfkit');
 const XLSX = require('xlsx');
 const docx = require('docx');
-const { db, getSettings, PASS_KEYS } = require('./db');
+const { db, getSettings } = require('./db');
+const T = require('./testTypes');
 const A = require('./assessments');
 
-const TEST_NAMES = { IQ: 'IQ Test', GENERAL: 'General Test', CALCULATION: 'Calculation Test', ESSAY: 'Essay Test' };
+// "General Test" etc.: the current name of each managed test type.
+const TEST_NAMES = new Proxy({}, { get: (_, key) => (typeof key === 'string' ? T.title(key) : undefined) });
 const RESULT_TEXT = { Pass: 'PASS', 'Not Pass': 'NOT PASS', Pending: 'Pending' };
 const round1 = (n) => Math.round(n * 10) / 10;
 const pct1 = (v) => (v == null ? null : Number(v).toFixed(1) + '%');
@@ -47,7 +49,7 @@ function stageView(a, st, stages) {
     percent, percent_text: pct1(percent),
     level: !scored ? null : st.section === 'IQ' ? iqCategory(lalco) : percentLevel(percent),
     lalco_iq_score: lalco,
-    pass_mark: st.pass_mark ?? getSettings()[PASS_KEYS[st.section]],
+    pass_mark: st.pass_mark ?? T.defaultPassMark(st.section, getSettings()),
     score_text: scored ? `${st.points} / ${st.max}` : null,
     text: scored ? `${pct1(percent)} ${RESULT_TEXT[st.result]}` : STATUS_TEXT[state],
   };
@@ -282,7 +284,7 @@ const localDate = (iso) => (iso ? new Date(iso).toLocaleDateString('en-CA', { ti
 const localDateTime = (iso) => new Date(iso).toLocaleString('en-GB', { timeZone: TIME_ZONE, dateStyle: 'medium', timeStyle: 'short' });
 const showDate = (iso) => localDate(iso) || '-';
 
-const COLUMNS = [
+const columns = () => [
   ['Candidate Name', (c) => c.name],
   ['Phone Number', (c) => c.phone],
   ['Graduate From', (c) => c.graduate_from],
@@ -309,15 +311,15 @@ const COLUMNS = [
   ['General Test', (c) => c.general_score],
   ['Calculation Test', (c) => c.calc_score],
   ['Essay Test', (c) => (c.essay_pending ? 'Pending' : c.essay_score)],
-  ...['GENERAL', 'CALCULATION', 'ESSAY'].flatMap((sec) => {
+  ...T.keys().filter((k) => k !== 'IQ').flatMap((sec) => {
     const t = (c) => (c.tests || []).find((x) => x.section === sec);
-    const name = TEST_NAMES[sec].replace(' Test', '');
+    const name = T.name(sec);
     return [[`${name} Score`, (c) => t(c)?.score_text], [`${name} Result`, (c) => t(c)?.text]];
   }),
   ['IQ Result', (c) => (c.tests || []).find((x) => x.section === 'IQ')?.text],
   ['IQ Level', (c) => testOf(c, 'IQ')?.level ?? c.iq_category],
-  ...['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'].flatMap((sec) => {
-    const name = TEST_NAMES[sec].replace(' Test', '');
+  ...T.keys().flatMap((sec) => {
+    const name = T.name(sec);
     return [
       ...(sec === 'IQ' ? [] : [[`${name} %`, (c) => testOf(c, sec)?.percent], [`${name} Level`, (c) => testOf(c, sec)?.level]]),
       [`${name} PASS / NOT PASS`, (c) => RESULT_TEXT[testOf(c, sec)?.result]],
@@ -448,6 +450,7 @@ async function candidateDocx(c) {
 }
 
 function candidatesXlsx(candidates) {
+  const COLUMNS = columns();
   const header = COLUMNS.map(([h]) => h);
   const rows = candidates.map((c) => COLUMNS.map(([, get]) => {
     const v = get(c);

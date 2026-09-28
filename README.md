@@ -52,6 +52,14 @@ Options may also be on one line (`A. Red  B. Blue  C. Green  D. Chair`).
 - **Essay** questions need no options. HR enters the marks on the assessment review page.
 - **Calculation** questions can have options, or just one exact answer (e.g. `Answer: 1250`). Spaces and commas are ignored when marking.
 
+### Test types
+
+- The Question Bank tabs (All + one per test type), the question and import forms, Create Assessment, the dashboard, Results and the exports all use the managed **test types**. **Questions → Manage Test Types** (or **+ Add Test Type**) lists them with their key, question format, Lao title, question counts, order and status.
+- **Add** a test type: name, Lao title (shown to Lao candidates), question format — *Multiple choice*, *Calculation* (multiple choice or short answer) or *Essay* (marked by HR); the IQ format belongs to IQ only — display order, default pass mark, and whether it is available for new assessments. It appears at once as a Question Bank tab, in Add question, in the import "Import as" list and in Create Assessment.
+- **Edit** changes the name, Lao title, description, order, pass mark and availability; the **key** (e.g. `iq`, `general`) and the format never change, so questions, categories, links, past results and exports stay attached. Links run their tests in the test type order (IQ → General → Calculation → Essay → …); reordering affects new links only.
+- **Deactivate** hides a test type from new questions, categories and assessments and hides its tab; nothing is deleted and links already created keep working. **Reactivate** brings it back. **Remove** is possible only for an added test type that nothing uses; the four core types (IQ, General, Calculation, Essay) can never be deleted ("Core Test Type — Delete unavailable"). "All" is only a filter.
+- Imports match a Type column by key, name, title or the usual words ("IQ test", "general knowledge", "math", Lao names), ignoring case and spaces. A test type that does not exist is never put into another one: the preview asks to **create it** (with a format) or **use an existing** test type. `#/questions/iq` opens a tab directly; the API filter `?section=iq` works in any case.
+
 ### Question categories
 
 - A **category** is a topic inside one test type (e.g. IQ → Number Pattern, General → Geography). It is separate from the IQ **level** (1–5): a question can be Level 1 or Level 5 in the same category. Categories are for HR only — they are never shown to candidates and do not change marks, scoring, the random draw or any result.
@@ -109,7 +117,7 @@ Node.js 24 LTS, Express, SQLite (`better-sqlite3`), plain HTML/JS frontend (no b
 ```
 npm install
 ADMIN_PASSWORD=choose-a-password npm start    # http://localhost:3000
-npm test                                       # 159 tests, uses temporary databases (set LALCO_SAMPLE_DOCX to also test a real document)
+npm test                                       # 168 tests, uses temporary databases (set LALCO_SAMPLE_DOCX to also test a real document)
 ```
 
 ```
@@ -128,7 +136,7 @@ public/
 test/              node:test suites and Word-generated fixtures
 ```
 
-**Database tables:** `admins`, `settings`, `candidates` (incl. interview and final decision), `questions` (with `category_id`), `question_categories` (test type, name, Lao name, active), `assessment_links` (a shared link: token, tests, counts, timers, pass marks, expiry, enabled), `assessments` (one candidate's attempt and scores; `link_id` + `session_hash` tie it to the shared link and the SHA-256 of that browser's session cookie; older one-person links have no `link_id` and use their own token), `assessment_stages` (the tests inside one attempt: order, timer, score, result), `assessment_questions` (each candidate's questions, copied from the bank so later edits never change a past result), `images` (question and option pictures), `audit_log` (Delete All Questions and candidate session steps, without personal data).
+**Database tables:** `admins`, `settings`, `candidates` (incl. interview and final decision), `test_types` (key, name, Lao title, format, active, in assessments, order, pass mark, core), `questions` (with `category_id`), `question_categories` (test type, name, Lao name, active), `assessment_links` (a shared link: token, tests, counts, timers, pass marks, expiry, enabled), `assessments` (one candidate's attempt and scores; `link_id` + `session_hash` tie it to the shared link and the SHA-256 of that browser's session cookie; older one-person links have no `link_id` and use their own token), `assessment_stages` (the tests inside one attempt: order, timer, score, result), `assessment_questions` (each candidate's questions, copied from the bank so later edits never change a past result), `images` (question and option pictures), `audit_log` (Delete All Questions and candidate session steps, without personal data).
 
 **Candidate sessions:** opening a shared link gives the browser a random 256-bit secret in an HttpOnly, SameSite=Lax cookie (Secure in production) scoped to that link's API path; no record is created until the candidate presses Start. Every candidate request is resolved from link + cookie on the server — ids sent by the browser never decide whose attempt is used — and starting is one transaction with a unique (link, session) index, so a double-click or second tab never creates a second attempt.
 

@@ -9,6 +9,7 @@ const { parseFile, validateQuestion, ImportError, IMAGE_KEYS } = require('../imp
 const images = require('../images');
 const lao = require('../lao');
 const categories = require('../categories');
+const T = require('../testTypes');
 const { LAO_COLUMNS } = require('../db');
 
 const router = express.Router();
@@ -126,7 +127,8 @@ const NEEDS_ANSWER_SQL = "section = 'CALCULATION' AND TRIM(correct_answer) = '' 
 router.get('/questions', (req, res) => {
   const where = [];
   const args = [];
-  if (A.SECTIONS.includes(req.query.section)) { where.push('section = ?'); args.push(req.query.section); }
+  // ?section=iq / IQ: the stable key, any case.
+  if (T.get(req.query.section)) { where.push('section = ?'); args.push(String(req.query.section).toUpperCase()); }
   if (req.query.status === 'Active' || req.query.status === 'Inactive') { where.push('status = ?'); args.push(req.query.status); }
   // Short-answer questions still waiting for their correct answer.
   if (req.query.status === 'needs_answer') where.push(NEEDS_ANSWER_SQL);
@@ -142,7 +144,7 @@ router.get('/questions', (req, res) => {
   else if (/^\d+$/.test(String(req.query.category || ''))) { where.push('category_id = ?'); args.push(Number(req.query.category)); }
   const sql = 'SELECT * FROM questions' + (where.length ? ' WHERE ' + where.join(' AND ') : '') + ' ORDER BY id DESC';
   // Every row of each area (active + inactive), and the IQ bank per level.
-  const totals = Object.fromEntries(A.SECTIONS.map((s) => [s, 0]));
+  const totals = Object.fromEntries(T.keys().map((s) => [s, 0]));
   for (const r of db.prepare('SELECT section, COUNT(*) AS n FROM questions GROUP BY section').all()) totals[r.section] = r.n;
   const iqLevels = Object.fromEntries(A.DIFFICULTIES.map((d) => [d, 0]));
   for (const r of db.prepare("SELECT difficulty, COUNT(*) AS n FROM questions WHERE section = 'IQ' GROUP BY difficulty").all()) {
@@ -152,7 +154,7 @@ router.get('/questions', (req, res) => {
   res.json({ questions: db.prepare(sql).all(...args), counts: A.activeCounts(), inactive_counts: A.inactiveCounts(), total_counts: totals, iq_levels: iqLevels,
     lao_counts: lao.laoCounts(), lao_ready_counts: A.activeCounts('lo'), translator: lao.hasProvider(), translate_job: lao.job,
     needs_answer: db.prepare(`SELECT COUNT(*) AS n FROM questions WHERE ${NEEDS_ANSWER_SQL}`).get().n,
-    categories: categories.list(), no_category: Object.fromEntries(A.SECTIONS.map((sec) => [sec, db.prepare('SELECT COUNT(*) AS n FROM questions WHERE section = ? AND category_id IS NULL').get(sec).n])) });
+    test_types: T.list(), categories: categories.list(), no_category: Object.fromEntries(T.keys().map((sec) => [sec, db.prepare('SELECT COUNT(*) AS n FROM questions WHERE section = ? AND category_id IS NULL').get(sec).n])) });
 });
 
 const QUESTION_COLS = ['section', 'category', 'category_id', 'difficulty', 'question_text', 'option_a', 'option_b', 'option_c', 'option_d', 'option_e',
@@ -179,6 +181,7 @@ function checkedQuestion(body, current) {
 
 router.post('/questions', (req, res) => {
   const q = checkedQuestion(req.body);
+  if (!T.get(q.section).active) return bad(res, `The ${T.name(q.section)} test type is inactive; reactivate it to add questions.`);
   const id = insertQuestion.run({ ...q, created_at: now() }).lastInsertRowid;
   if (q.section === 'IQ') A.syncIqLevels();
   res.status(201).json(db.prepare('SELECT * FROM questions WHERE id = ?').get(id));
@@ -210,7 +213,7 @@ router.delete('/questions/:id', (req, res) => {
 // (text, options, answer, marks, pictures), so no past result changes.
 router.post('/questions/delete-all', (req, res) => {
   const section = String(req.body?.section || '').toUpperCase();
-  if (!A.SECTIONS.includes(section)) return res.status(400).json({ success: false, message: 'Please choose a test area.' });
+  if (!T.get(section)) return res.status(400).json({ success: false, message: 'Please choose a test area.' });
   try {
     const deletedCount = db.transaction(() => {
       const n = db.prepare('SELECT COUNT(*) AS n FROM questions WHERE section = ?').get(section).n;
@@ -240,6 +243,27 @@ router.post('/images', (req, res) => {
 router.get('/images/:id', (req, res) => images.sendImage(res, Number(req.params.id)));
 
 router.get('/questions/counts', (req, res) => res.json(A.activeCounts(req.query.language === 'lo' ? 'lo' : 'en')));
+
+// ---- test types -----------------------------------------------------------------
+// IQ, General, Calculation, Essay and any HR adds. The key never changes; the
+// four core types can be renamed / reordered / deactivated but not deleted.
+
+const typeError = (res, e) => (e instanceof T.TypeError ? bad(res, e.message) : null);
+router.get('/test-types', (req, res) => res.json(T.list()));
+router.post('/test-types', (req, res) => {
+  try { res.status(201).json(T.create(req.body || {}, req.admin.username)); } catch (e) { if (!typeError(res, e)) throw e; }
+});
+const updateType = (req, res) => {
+  try { const t = T.update(req.params.key, req.body || {}, req.admin.username); if (!t) return notFound(res); res.json(t); } catch (e) { if (!typeError(res, e)) throw e; }
+};
+router.put('/test-types/:key', updateType);
+router.patch('/test-types/:key', updateType);
+router.post('/test-types/:key/:action(activate|reactivate|deactivate)', (req, res) => {
+  try { const t = T.setActive(req.params.key, req.params.action !== 'deactivate', req.admin.username); if (!t) return notFound(res); res.json(t); } catch (e) { if (!typeError(res, e)) throw e; }
+});
+router.delete('/test-types/:key', (req, res) => {
+  try { const r = T.remove(req.params.key, req.admin.username); if (!r) return notFound(res); res.json(r); } catch (e) { if (!typeError(res, e)) throw e; }
+});
 
 // ---- question categories -----------------------------------------------------
 
@@ -325,7 +349,8 @@ router.post('/questions/import/preview', (req, res, next) => {
     if (err) return bad(res, err.code === 'LIMIT_FILE_SIZE' ? 'The file is larger than 10 MB.' : 'Unable to read the uploaded file.');
     if (!req.file) return bad(res, 'Please choose a file.');
     try {
-      const defaultSection = A.SECTIONS.includes(req.body.section) ? req.body.section : 'GENERAL';
+      const chosen = T.get(req.body.section);
+      const defaultSection = chosen && chosen.active ? chosen.key : (T.get('GENERAL') && T.get('GENERAL').active ? 'GENERAL' : T.activeKeys()[0]);
       const rows = await parseFile(req.file.buffer, req.file.originalname, defaultSection);
       const seen = existingQuestionKeys();
       for (const r of rows) {
@@ -349,20 +374,27 @@ router.post('/questions/import/preview', (req, res, next) => {
         d.count++;
         decisions.set(key, d);
       }
-      const bySection = Object.fromEntries(A.SECTIONS.map((s) => [s, valid.filter((r) => r.question.section === s).length]));
+      const bySection = Object.fromEntries(T.keys().map((s) => [s, valid.filter((r) => r.question.section === s).length]));
+      // Test types named in the file that do not exist: HR creates them or picks an existing one.
+      const typeDecisions = new Map();
+      for (const r of rows) if (r.question.type_name && r.errors.length === 1) {
+        const k = r.question.type_name.trim().toLowerCase().replace(/\s+/g, ' ');
+        const d = typeDecisions.get(k) || { key: k, name: r.question.type_name.trim(), count: 0 };
+        d.count++; typeDecisions.set(k, d);
+      }
       // What the document contains, per section, and whether it matches the chosen type.
       const sections = (rows.sections || []).map((sec) => ({ ...sec, valid: rows.filter((r) => r.section_key === sec.key && !r.errors.length).length,
         answer_required: rows.filter((r) => r.section_key === sec.key && r.answer_required && !r.errors.length).length }));
       const detected = [...new Set(valid.map((r) => r.question.section))];
       const mismatch = detected.length && !detected.includes(defaultSection)
-        ? `This document appears to contain ${detected.map((d) => ({ IQ: 'IQ', GENERAL: 'General', CALCULATION: 'Calculation', ESSAY: 'Essay' })[d]).join(' and ')} questions, but ${({ IQ: 'IQ', GENERAL: 'General', CALCULATION: 'Calculation', ESSAY: 'Essay' })[defaultSection]} questions is selected. Nothing is put into the ${({ IQ: 'IQ', GENERAL: 'General', CALCULATION: 'Calculation', ESSAY: 'Essay' })[defaultSection]} bank unless you choose it below.`
+        ? `This document appears to contain ${detected.map((d) => T.name(d)).join(' and ')} questions, but ${T.name(defaultSection)} questions is selected. Nothing is put into the ${T.name(defaultSection)} bank unless you choose it below.`
         : null;
       const duplicates = rows.filter((r) => r.errors.some((e) => /already in the question bank/.test(e))).length;
       const conflicts = rows.filter((r) => r.errors.some((e) => /conflict/i.test(e))).length;
       res.json({ found: rows.length, valid: valid.length, invalid: rows.length - valid.length, duplicates, conflicts,
         format: rows.format, answer_key: rows.keyCount, test_type: defaultSection, file: req.file.originalname, by_section: bySection,
         category_decisions: [...decisions.values()], missing_category: valid.filter((r) => r.category_state === 'missing').length,
-        sections, type_mismatch: mismatch, answer_required: valid.filter((r) => r.answer_required).length,
+        type_decisions: [...typeDecisions.values()], test_types: T.list().filter((t) => t.active), sections, type_mismatch: mismatch, answer_required: valid.filter((r) => r.answer_required).length,
         categories: categories.list({ status: 'active' }), rows });
     } catch (e) {
       if (e instanceof ImportError) return bad(res, e.message);
@@ -383,6 +415,24 @@ router.post('/questions/import', (req, res) => {
   // Category names not in the list (or inactive) need a decision per name:
   // { "IQ|verbal reasoning": { "create": true } } or { ...: { "category_id": 5 } }.
   // create_missing_categories: true = create every unknown name.
+  // Test types named in the file that do not exist: { "technical": { "create": true, "behavior": "mcq" } } or { ...: { "key": "GENERAL" } }.
+  const typeDecided = req.body?.type_decisions && typeof req.body.type_decisions === 'object' ? req.body.type_decisions : {};
+  const typeKeys = new Map();
+  for (const row of rows) {
+    const tn = String(row.type_name || '').trim();
+    if (!tn || T.get(row.section)) continue;
+    const k = tn.toLowerCase().replace(/\s+/g, ' ');
+    const d = typeDecided[k];
+    if (!d) return bad(res, `Test Type "${tn}" does not exist. Create it, or choose an existing test type.`);
+    if (!typeKeys.has(k)) {
+      if (d.key && T.get(d.key)) typeKeys.set(k, T.get(d.key).key);
+      else if (d.create) { try { typeKeys.set(k, T.resolve(tn) || T.create({ name: tn, behavior: d.behavior || 'mcq' }, req.admin.username).key); } catch (e) { if (e instanceof T.TypeError) return bad(res, e.message); throw e; } }
+      else return bad(res, `Please choose what to do with the test type "${tn}".`);
+    }
+    row.section = typeKeys.get(k);
+  }
+  const inactiveType = rows.map((r) => T.get(r.section)).find((t) => t && !t.active);
+  if (inactiveType) return bad(res, `The ${inactiveType.name} test type is inactive; reactivate it to import questions into it.`);
   const decided = req.body?.category_decisions && typeof req.body.category_decisions === 'object' ? req.body.category_decisions : {};
   const undecided = new Map();
   for (const row of rows) {
@@ -453,7 +503,7 @@ router.get('/links/:id', (req, res) => {
         current_stage: r.current_stage, tests: r.tests, final_percent: r.final_percent, final_percent_text: r.final_percent_text, final_level: r.final_level,
         eligibility: r.eligibility, eligibility_note: r.eligibility_note, assessment_result: a.result,
         // For checking randomisation: the bank question ids this candidate got, in the order shown.
-        question_ids: Object.fromEntries(A.SECTIONS.map((sec) => [sec, db.prepare('SELECT question_id FROM assessment_questions WHERE assessment_id = ? AND section = ? ORDER BY position')
+        question_ids: Object.fromEntries(T.keys().map((sec) => [sec, db.prepare('SELECT question_id FROM assessment_questions WHERE assessment_id = ? AND section = ? ORDER BY position')
           .all(a.id, sec).map((q) => q.question_id)]).filter(([, ids]) => ids.length)) };
     });
   res.json({ link: A.linkView(link), attempts });

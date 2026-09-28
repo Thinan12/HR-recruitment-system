@@ -1,9 +1,12 @@
 // Assessment links: create, start, answer, submit, score.
 // All time rules are enforced here on the server; the browser timer is only a display.
 const crypto = require('crypto');
-const { db, getSettings, now, audit, PASS_KEYS } = require('./db');
+const { db, getSettings, now, audit } = require('./db');
+const T = require('./testTypes');
 const { LAO_READY_SQL } = require('./lao');
 
+// The four original test types (older links and old API calls). All test types,
+// their names and order come from the managed test types (testTypes.js).
 const SECTIONS = ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'];
 const TYPES = {
   IQ: ['IQ'],
@@ -107,13 +110,13 @@ const USABLE = `status = 'Active' AND (section != 'IQ' OR difficulty IN (${DIFFI
 const usableFor = (language) => (language === 'lo' ? `${USABLE} AND ${LAO_READY_SQL}` : USABLE);
 
 function activeCounts(language = 'en') {
-  const counts = Object.fromEntries(SECTIONS.map((s) => [s, 0]));
+  const counts = Object.fromEntries(T.keys().map((s) => [s, 0]));
   for (const r of db.prepare(`SELECT section, COUNT(*) AS n FROM questions WHERE ${usableFor(language)} GROUP BY section`).all()) counts[r.section] = r.n;
   return counts;
 }
 
 function inactiveCounts() {
-  const counts = Object.fromEntries(SECTIONS.map((s) => [s, 0]));
+  const counts = Object.fromEntries(T.keys().map((s) => [s, 0]));
   for (const r of db.prepare("SELECT section, COUNT(*) AS n FROM questions WHERE status != 'Active' GROUP BY section").all()) counts[r.section] = r.n;
   return counts;
 }
@@ -126,7 +129,10 @@ function createAssessment(input) {
   const settings = getSettings();
   let tests;
   if (Array.isArray(input.tests)) {
-    tests = SECTIONS.filter((sec) => input.tests.map((t) => String(t).toUpperCase()).includes(sec));
+    const asked = input.tests.map((t) => String(t).toUpperCase());
+    const unknown = asked.find((t) => !T.assessmentKeys().includes(t));
+    if (unknown) throw new InputError(T.get(unknown) ? `The ${T.name(unknown)} test is not available for new assessments.` : 'Please choose tests from the list.');
+    tests = T.assessmentKeys().filter((sec) => asked.includes(sec));
   } else {
     const type = String(input.assessment_type || '').toUpperCase();
     if (!TYPES[type]) throw new InputError('Please choose at least one test.');
@@ -163,7 +169,7 @@ function createAssessment(input) {
     if (!Number.isInteger(m) || m < 1 || m > 600) throw new InputError(`Time for the ${label(sec)} test must be between 1 and 600 minutes.`);
     sections[sec] = n;
     minutes[sec] = m;
-    passMarks[sec] = percentIn(input.pass_marks?.[sec], settings[PASS_KEYS[sec]], `The ${label(sec)} pass mark`);
+    passMarks[sec] = percentIn(input.pass_marks?.[sec], T.defaultPassMark(sec, settings), `The ${label(sec)} pass mark`);
   }
   const eligibility = percentIn(input.eligibility_mark, settings.final_eligibility, 'The final eligibility mark');
   const included = Object.keys(sections);
@@ -273,8 +279,9 @@ function getAssessment(id) {
   return db.prepare('SELECT * FROM assessments WHERE id = ?').get(id);
 }
 
+// The test type's current name (HR can rename it; the key never changes).
 function label(section) {
-  return { IQ: 'IQ', GENERAL: 'General', CALCULATION: 'Calculation', ESSAY: 'Essay' }[section];
+  return T.name(section);
 }
 
 // What the candidate link can do right now.
@@ -444,7 +451,7 @@ function normalizeShort(v) {
 }
 
 function gradeQuestion(q) {
-  if (q.section === 'ESSAY') return q.marks_awarded; // HR marks essays; null = not marked yet
+  if (T.isEssay(q.section)) return q.marks_awarded; // HR marks essays; null = not marked yet
   if (q.answer == null || q.answer === '') return 0;
   const hasOptions = JSON.parse(q.option_order).length > 0;
   if (hasOptions) return q.answer === q.correct_answer ? q.max_marks : 0;
@@ -459,18 +466,18 @@ const round1 = (n) => Math.round(n * 10) / 10;
 // Recalculates and stores all scores of a submitted assessment.
 function scoreAssessment(assessmentId) {
   const questions = db.prepare('SELECT * FROM assessment_questions WHERE assessment_id = ?').all(assessmentId);
-  const totals = Object.fromEntries(SECTIONS.map((s) => [s, { points: 0, max: 0 }]));
+  const totals = Object.fromEntries([...new Set([...SECTIONS, ...questions.map((q) => q.section)])].map((s) => [s, { points: 0, max: 0 }]));
   let essayPending = 0;
   const setMarks = db.prepare('UPDATE assessment_questions SET marks_awarded = ? WHERE id = ?');
   for (const q of questions) {
     const marks = gradeQuestion(q);
-    if (q.section !== 'ESSAY') setMarks.run(marks, q.id);
+    if (!T.isEssay(q.section)) setMarks.run(marks, q.id);
     if (marks == null) essayPending++;
     totals[q.section].points += marks || 0;
     totals[q.section].max += q.max_marks;
   }
-  const totalPoints = SECTIONS.reduce((s, k) => s + totals[k].points, 0);
-  const totalMax = SECTIONS.reduce((s, k) => s + totals[k].max, 0);
+  const totalPoints = Object.values(totals).reduce((s, t) => s + t.points, 0);
+  const totalMax = Object.values(totals).reduce((s, t) => s + t.max, 0);
   const testScore = totalMax > 0 ? round1((totalPoints / totalMax) * 100) : 0;
   const settings = getSettings();
   // Each finished test: score, percentage and PASS / NOT PASS against that
@@ -486,7 +493,7 @@ function scoreAssessment(assessmentId) {
     const points = marks.reduce((sum, m) => sum + (m || 0), 0);
     const max = qs.reduce((sum, q) => sum + q.max_marks, 0);
     const percent = max > 0 ? round1((points / max) * 100) : 0;
-    const passMark = st.pass_mark ?? settings[PASS_KEYS[st.section]];
+    const passMark = st.pass_mark ?? T.defaultPassMark(st.section, settings);
     st.result = marks.some((m) => m == null) ? 'Pending' : percent >= passMark ? 'Pass' : 'Not Pass';
     setStage.run(points, max, percent, st.result, st.id);
   }
@@ -578,7 +585,8 @@ function syncIqLevels() {
 function setEssayMarks(assessmentId, marks) {
   const a = getAssessment(assessmentId);
   if (!a || a.status !== 'SUBMITTED') throw new InputError('Essay marks can be entered after the assessment is submitted.');
-  const update = db.prepare("UPDATE assessment_questions SET marks_awarded = ? WHERE id = ? AND assessment_id = ? AND section = 'ESSAY'");
+  const essays = T.essayKeys();
+  const update = db.prepare(`UPDATE assessment_questions SET marks_awarded = ? WHERE id = ? AND assessment_id = ? AND section IN (${essays.map(() => '?').join(', ') || "''"})`);
   const max = db.prepare('SELECT max_marks FROM assessment_questions WHERE id = ? AND assessment_id = ?');
   db.transaction(() => {
     for (const [aqId, value] of Object.entries(marks || {})) {
@@ -586,7 +594,7 @@ function setEssayMarks(assessmentId, marks) {
       if (!row) continue;
       const n = value === '' || value == null ? null : Number(value);
       if (n != null && (!Number.isFinite(n) || n < 0 || n > row.max_marks)) throw new InputError(`Essay marks must be between 0 and ${row.max_marks}.`);
-      update.run(n, Number(aqId), a.id);
+      update.run(n, Number(aqId), a.id, ...essays);
     }
     scoreAssessment(a.id);
   })();
@@ -610,7 +618,7 @@ function regenerateLink(id) {
 
 module.exports = {
   getLink, linkByToken, linkShareState, linkView, attemptFor, startFromLink, newSessionSecret,
-  stagesOf, continueAssessment, currentStage,
+  stagesOf, continueAssessment, currentStage, T,
   SECTIONS, TYPES, LANGUAGES, LETTERS, DIFFICULTIES, LEVEL_MARKS, LEGACY_LEVELS, levelOf, levelNumber, InputError, label, questionKey, difficultyLevel, levelSplit, pickProgressive, syncIqLevels,
   activeCounts, inactiveCounts, createAssessment, getAssessment, linkState, startAssessment, saveAnswer,
   isPastDeadline, submitAssessment, finalize, finalizeExpired, scoreAssessment, setEssayMarks, rescoreAll, regenerateLink,

@@ -254,3 +254,4 @@ td.failed { font-weight: 700; }
 @media (max-width: 640px) { .lao-pair { grid-template-columns: 1fr; } }
 .bulk-bar { background: #eef4fa; border-radius: 6px; padding: 8px 10px; margin: 8px 0; }
 .iq-class-table { max-width: 560px; } .iq-class-table td, .iq-class-table th { padding: 7px 14px; }
+.wrap-note { display: block; white-space: normal; margin-top: 4px; }

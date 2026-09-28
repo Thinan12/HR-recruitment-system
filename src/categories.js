@@ -7,7 +7,7 @@
 // and the managed category in questions.category_id; both always match.
 const { db, now, audit } = require('./db');
 
-const SECTIONS = ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'];
+const T = require('./testTypes');
 // Same name within one test type = same category: spaces trimmed / collapsed, case ignored.
 const normalize = (s) => String(s ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
 const cleanName = (s) => String(s ?? '').trim().replace(/\s+/g, ' ').slice(0, 100);
@@ -42,7 +42,7 @@ function migrate() {
 function list({ section, status, q } = {}) {
   const where = [];
   const args = [];
-  if (SECTIONS.includes(section)) { where.push('c.section = ?'); args.push(section); }
+  if (T.get(section)) { where.push('c.section = ?'); args.push(String(section).toUpperCase()); }
   if (status === 'active') where.push('c.active = 1');
   if (status === 'inactive') where.push('c.active = 0');
   if (q) { where.push('(c.name LIKE ? OR c.name_lo LIKE ?)'); args.push(`%${q}%`, `%${q}%`); }
@@ -54,7 +54,8 @@ const withCounts = (id) => list().find((c) => c.id === Number(id));
 
 function create({ section, name, name_lo }, actor) {
   const sec = String(section || '').toUpperCase();
-  if (!SECTIONS.includes(sec)) throw new CategoryError('Please choose the test type (IQ, General, Calculation or Essay).');
+  if (!T.get(sec)) throw new CategoryError('Please choose the test type.');
+  if (!T.get(sec).active) throw new CategoryError(`The ${T.name(sec)} test type is inactive; reactivate it to add categories.`);
   const clean = cleanName(name);
   if (!clean) throw new CategoryError('Please enter a category name.');
   const existing = byName(sec, clean);
@@ -154,6 +155,6 @@ function bulkAssign(ids, categoryId, actor) {
   return { updated, skipped };
 }
 
-const label = (s) => ({ IQ: 'IQ', GENERAL: 'General', CALCULATION: 'Calculation', ESSAY: 'Essay' })[s] || s;
+const label = (s) => T.name(s);
 
 module.exports = { normalize, migrate, list, byId, byName, create, update, remove, setActive, resolveForQuestion, bulkAssign, CategoryError };

@@ -64,6 +64,9 @@ function progress(stages, state) {
   const stopped = stages.some((st) => st.status === 'SUBMITTED' && st.result === 'Not Pass');
   return stages.map((st) => ({
     section: st.section,
+    // The test's current name (HR can rename it) in English and Lao.
+    title: A.T.title(st.section),
+    title_lo: (A.T.get(st.section) || {}).name_lo || '',
     question_count: st.question_count,
     minutes: st.time_limit_minutes,
     status: st.status === 'IN_PROGRESS' ? 'current'
@@ -147,7 +150,7 @@ function stateResponse(a) {
           // Shown in the language saved with this candidate's copy (Lao or English).
           text: q.display_language === 'lo' && q.question_text_lo ? q.question_text_lo : q.question_text,
           image: img(q.image_id),
-          kind: q.section === 'ESSAY' ? 'essay' : order.length ? 'choice' : 'short',
+          kind: A.T.isEssay(q.section) ? 'essay' : order.length ? 'choice' : 'short',
           // Options in this candidate's shuffled order; the key is the original
           // letter, which tells the browser nothing about which one is correct.
           options: order.map((L) => ({ key: L, text: (q.display_language === 'lo' && q[`option_${L.toLowerCase()}_lo`]) || q['option_' + L.toLowerCase()], image: img(q[`option_${L.toLowerCase()}_image`]) })),

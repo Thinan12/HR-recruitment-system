@@ -146,7 +146,7 @@ function bigMessage(text, tests) {
 function progressBox(tests) {
   const mark = { done: '✓', current: '→', next: '→', upcoming: '○', failed: '✕', locked: '🔒', pending: '…' };
   return h('div', { class: 'card progress-box' }, h('div', { class: 'progress' }, T.progress_title),
-    tests.map((t) => h('div', { class: 'progress-item ' + t.status }, h('span', { class: 'mark' }, mark[t.status] || '○'), T.sections[t.section])));
+    tests.map((t) => h('div', { class: 'progress-item ' + t.status }, h('span', { class: 'mark' }, mark[t.status] || '○'), testName(t.section))));
 }
 
 // The result of the test just finished: score, percentage, level and PASS / NOT PASS.
@@ -170,7 +170,7 @@ function resultTable(r) {
 function renderFinished(data) {
   stopTimer();
   const r = data.last_result;
-  const name = r ? T.sections[r.section] : '';
+  const name = r ? testName(r.section) : '';
   const stopped = data.outcome === 'stopped';
   const essayPending = r && r.result === 'Pending';
   root.replaceChildren(
@@ -200,17 +200,26 @@ function renderNext(data) {
   root.replaceChildren(
     h('div', { class: 'card center' },
       data.auto_submitted ? h('p', { class: 'message error' }, T.time_up_test) : null,
-      h('h1', { class: 'passed' }, '✓ ' + fill(T.passed, { name: T.sections[data.passed_section] })),
+      h('h1', { class: 'passed' }, '✓ ' + fill(T.passed, { name: testName(data.passed_section) })),
       resultTable(data.last_result),
-      h('p', {}, h('span', { class: 'muted' }, T.next_test + ': '), h('strong', {}, T.sections[data.next_section])),
+      h('p', {}, h('span', { class: 'muted' }, T.next_test + ': '), h('strong', {}, testName(data.next_section))),
       h('p', { class: 'message ok' }, fillCount(T.next_rules, { m: data.time_limit_minutes, n: data.question_count })),
       button),
     progressBox(data.tests));
 }
 
+// The current names of this link's tests (HR can rename or add tests), per language.
+const testTitles = {};
+function testName(key) {
+  const t = testTitles[key];
+  if (t) return (T === TEXT.lo && t.lo) || (T !== TEXT.lo && t.en) || T.sections[key] || key;
+  return T.sections[key] || key;
+}
+
 // Handles any server reply that carries a state.
 function show(data) {
   if (data.language) setLanguage(data.language);
+  for (const t of data.tests || []) testTitles[t.section] = { en: t.title, lo: t.title_lo };
   switch (data.state) {
     case 'ready': return renderStart(data);
     case 'in_progress': return renderExam(data);
@@ -247,7 +256,7 @@ function renderStart(data) {
       h('div', { class: 'field' }, h('label', { for: 'graduate_from' }, T.graduate_from), grad),
       input('high_school'), input('college'), input('university'), input('school_name'), input('subject'), input('gpa')),
     (data.tests || []).length > 1 ? h('div', { class: 'message ok section-gap' }, fill(T.tests_intro, { n: data.tests.length }),
-      h('ol', {}, data.tests.map((t) => h('li', {}, fillCount(T.test_line, { name: T.sections[t.section], q: t.question_count, m: t.minutes }))))) : null,
+      h('ol', {}, data.tests.map((t) => h('li', {}, fillCount(T.test_line, { name: testName(t.section), q: t.question_count, m: t.minutes }))))) : null,
     h('p', { class: 'message ok section-gap' }, fillCount(T.rules, { m: data.time_limit_minutes, n: data.question_count })),
     button);
   form.addEventListener('submit', async (e) => {
@@ -347,7 +356,7 @@ function drawQuestion() {
   const last = exam.current === qs.length - 1;
   root.replaceChildren(
     h('div', { class: 'exam-head' },
-      h('div', {}, h('div', { class: 'exam-title' }, exam.isIq ? T.iq_title : T.sections[exam.section]), h('strong', {}, exam.candidateName)),
+      h('div', {}, h('div', { class: 'exam-title' }, exam.isIq ? T.iq_title : testName(exam.section)), h('strong', {}, exam.candidateName)),
       h('div', { id: 'timer', class: 'timer' })),
     offline,
     h('div', { class: 'card' },

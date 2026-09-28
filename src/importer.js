@@ -15,7 +15,8 @@ const { readScannedPdf } = require('./pdfOcr');
 const { difficultyLevel, LEVEL_MARKS } = require('./assessments');
 
 const MAX_ROWS = 2000;
-const SECTIONS = ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'];
+const SECTIONS = ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY']; // the core test types (see testTypes.js for all)
+const T = require('./testTypes');
 const LETTERS = ['A', 'B', 'C', 'D', 'E'];
 
 const ALLOWED = {
@@ -49,9 +50,12 @@ A question needs its text, options A, B, C ... (not for Essay or short-answer Ca
 
 // ---- helpers ---------------------------------------------------------------
 
+// The managed test type a file value means (key, name or title first, then the usual words).
 function sectionFrom(value) {
   const v = String(value || '').trim().toLowerCase();
   if (!v) return null;
+  const managed = T.resolve(v);
+  if (managed) return managed;
   if (/^iq|intelligence|ໄອຄິວ/.test(v)) return 'IQ';
   if (/^calc|math|arithmetic|numer|ຄິດໄລ່|ຄະນິດ/.test(v)) return 'CALCULATION';
   if (/^essay|writing|ຂຽນ/.test(v)) return 'ESSAY';
@@ -103,7 +107,8 @@ function rowsFromTable(table, defaultSection) {
       if (!cells || cells.every((c) => String(c ?? '').trim() === '')) continue;
       const raw = {};
       for (const [field, i] of Object.entries(map)) raw[field] = cells[i] == null ? '' : String(cells[i]).trim();
-      raw.section = sectionFrom(raw.section) || defaultSection;
+      if (raw.section && !sectionFrom(raw.section)) raw.type_name = String(raw.section).trim(); // unknown test type: HR decides
+      raw.section = sectionFrom(raw.section) || (raw.type_name ? null : defaultSection);
       if (raw.options && !['a', 'b', 'c', 'd', 'e'].some((l) => raw['option_' + l])) {
         const marked = splitOptionLine(raw.options, 'A');
         const parts = marked && marked.options.length > 1 ? marked.options.map(([, t]) => t) : raw.options.split(/\s*[;|\n]\s*/).filter(Boolean);
@@ -340,7 +345,7 @@ function questionsIn(section, defaultSection) {
     if ((m = line.match(RE_META)) && cur) {
       const k = m[1].toLowerCase();
       const value = m[2].trim();
-      if (k === 'type' || k === 'section') cur.section = sectionFrom(value) || cur.section;
+      if (k === 'type' || k === 'section') { if (sectionFrom(value)) cur.section = sectionFrom(value); else { cur.type_name = value; cur.section = null; } }
       else if (k === 'category') cur.category = value;
       else if (k === 'difficulty' || k === 'level') cur.difficulty = value;
       else cur.marks = value;
@@ -405,7 +410,7 @@ function rowsFromText(text, defaultSection) {
 
   // Without headings: option-less questions that clearly ask for a calculation,
   // when IQ or General is selected, are shown as Calculation (never put into IQ).
-  if (sections.length === 1 && ['IQ', 'GENERAL'].includes(defaultSection)) {
+  if (sections.length === 1 && ['iq', 'mcq'].includes(T.behavior(defaultSection)) && T.get('CALCULATION')) {
     for (const r of rows) {
       const hasOptions = LETTER_LIST.some((L) => r['option_' + L.toLowerCase()]);
       if (!hasOptions && looksCalculation(r.question_text)) { r.section = 'CALCULATION'; r.section_key = 'detected-calculation'; }
@@ -465,7 +470,7 @@ function validateQuestion(input, { allowMissingAnswer = false } = {}) {
   const errors = [];
   const clean = (v, max) => String(v ?? '').trim().slice(0, max);
   const q = {
-    section: SECTIONS.includes(input.section) ? input.section : sectionFrom(input.section),
+    section: T.get(input.section) ? String(input.section).toUpperCase() : sectionFrom(input.section),
     category: clean(input.category, 200),
     difficulty: clean(input.difficulty, 50),
     question_text: clean(input.question_text, 5000),
@@ -475,7 +480,7 @@ function validateQuestion(input, { allowMissingAnswer = false } = {}) {
     option_d: clean(input.option_d, 1000),
     option_e: clean(input.option_e, 1000),
     // Essays may carry a marking guide here (HR only, never shown to candidates).
-    correct_answer: clean(input.correct_answer, sectionFrom(input.section) === 'ESSAY' || input.section === 'ESSAY' ? 5000 : 1000),
+    correct_answer: clean(input.correct_answer, T.isEssay(sectionFrom(input.section) || input.section) ? 5000 : 1000),
     marks: input.marks === '' || input.marks == null ? 1 : Number(input.marks),
   };
   // Pictures are referenced by id (uploaded separately); the route checks they exist.
@@ -483,7 +488,9 @@ function validateQuestion(input, { allowMissingAnswer = false } = {}) {
     const id = Number(input[key]);
     q[key] = Number.isInteger(id) && id > 0 ? id : null;
   }
-  if (!q.section) errors.push('Type must be IQ, General, Calculation or Essay.');
+  const typeName = String(input.type_name || (typeof input.section === 'string' ? input.section : '') || '').trim();
+  if (!q.section && typeName) { q.type_name = typeName; errors.push(`Test Type "${typeName}" does not exist.`); }
+  else if (!q.section) errors.push(`Type must be one of: ${T.all().filter((t) => t.active).map((t) => t.name).join(', ')}.`);
   if (q.section === 'IQ') {
     // IQ: the level decides the marks (1-5). No level given -> Level 3 (Moderate).
     if (q.difficulty && !difficultyLevel(q.difficulty)) errors.push('Level must be 1-5 (Easy, Basic, Moderate, Difficult or Very Difficult).');
@@ -511,7 +518,8 @@ function validateQuestion(input, { allowMissingAnswer = false } = {}) {
   if (!Number.isFinite(q.marks) || q.marks <= 0 || q.marks > 100) errors.push('Marks must be a number between 0 and 100.');
 
   const filled = LETTERS.filter((L) => q['option_' + L.toLowerCase()] || q['option_' + L.toLowerCase() + '_image']);
-  if (q.section === 'ESSAY') {
+  const format = T.behavior(q.section);
+  if (format === 'essay') {
     // Essays are marked by HR; options are ignored.
     LETTERS.forEach((L) => { q['option_' + L.toLowerCase()] = ''; q['option_' + L.toLowerCase() + '_image'] = null; if (q.lo_status) q[`option_${L.toLowerCase()}_lo`] = ''; });
   } else if (input.answer_error) {
@@ -524,7 +532,7 @@ function validateQuestion(input, { allowMissingAnswer = false } = {}) {
     else q.correct_answer = letter;
   } else if (filled.length === 1) {
     errors.push('A multiple-choice question needs at least 2 options.');
-  } else if (q.section === 'CALCULATION' && input.answer_error == null) {
+  } else if (format === 'calculation' && input.answer_error == null) {
     if (!q.correct_answer && allowMissingAnswer) { q.answer_required = true; q.status = 'Inactive'; }
     else if (!q.correct_answer) errors.push('Correct answer is missing.');
   } else {
