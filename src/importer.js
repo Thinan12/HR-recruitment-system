@@ -460,6 +460,9 @@ function bulletRows({ rows: found, document }, defaultSection) {
     category: r.category, difficulty: '', marks: '', number: r.number, section_key: 'bullets', confidence: r.confidence, review: r.review,
   }));
   document.detected_type = document.behavioural ? (interview ? T.name(interview) : INTERVIEW_TYPE_NAME) : null;
+  const other = document.behavioural && !interview ? T.interviewNamedOther() : [];
+  if (other.length) document.note = `${other.map((t) => `"${t.name}"`).join(', ')} ${other.length === 1 ? 'is a' : 'are'} ${other.map((t) => t.behavior === 'calculation' ? 'calculation' : t.behavior === 'iq' ? 'IQ' : 'multiple-choice').join(' / ')} test type${other.length === 1 ? '' : 's'}: `
+    + 'its questions need options A, B, C … and a correct answer, so it cannot hold these interview questions. Create a test type with the Behavioural / Interview format below (or choose an Essay-format type).';
   rows.format = document.structure.toLowerCase() + (document.behavioural ? ' (behavioural interview)' : '');
   rows.sections = [{ key: 'bullets', title: document.structure, kind: 'questions', section, questions: rows.length, lines: rows.length }];
   rows.document = document;

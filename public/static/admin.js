@@ -974,7 +974,7 @@ function showPreview(container, p, onDone) {
       sum('other') ? `other text — memo, instructions, policy, tables (${sum('other')} lines)` : null].filter(Boolean).join(' · ') + '.') : null) : null;
   Object.values(picks).forEach((x) => x.as.addEventListener('change', updateCount));
   const doc = p.document;
-  const docBox = doc ? h('div', { class: 'card inner' }, h('h2', {}, 'Document analysis'),
+  const docBox = doc ? h('div', { class: 'card inner' }, h('h2', {}, 'Document analysis'), doc.note ? message(doc.note) : null,
     h('div', { class: 'stats' }, ...[['Document type', doc.type], ['Question structure', doc.structure], ['Detected test type', doc.detected_type || SECTION_LABEL[p.test_type] || '-'],
       ['Questions found', p.found], ['Categories found', doc.categories.filter((c) => c.name).length], ['Valid', p.valid + (p.pending_type || 0)], ['Needs review', p.needs_review || 0],
       ['Invalid', p.invalid - (p.pending_type || 0) - (p.duplicates || 0)], ['Duplicates', p.duplicates || 0]]
@@ -994,7 +994,7 @@ function showPreview(container, p, onDone) {
   const typeSelects = (p.type_decisions || []).map((d) => ({ d, el: h('select', { class: 'inline-input' }, h('option', { value: '' }, 'Choose…'),
     (d.behavior ? [d.behavior, ...['mcq', 'calculation', 'essay', 'interview'].filter((b) => b !== d.behavior)] : ['mcq', 'calculation', 'essay', 'interview'])
       .map((b) => h('option', { value: 'create:' + b, selected: b === d.behavior }, `Create test type "${d.name}" — ${FORMAT_LABEL[b]}` + (b === d.behavior ? ' (detected)' : ''))),
-    activeTypes().map((t) => h('option', { value: 'use:' + t.key }, `Use existing: ${t.name}`))) }));
+    activeTypes().filter((t) => !HR_MARKED.includes(d.behavior) || HR_MARKED.includes(t.behavior)).map((t) => h('option', { value: 'use:' + t.key }, `Use existing: ${t.name}`))) }));
   const typeBox = typeSelects.length ? h('div', { class: 'message error' }, h('strong', {}, 'Test types to decide before importing'), h('br'),
     typeSelects.map(({ d, el }) => h('div', { class: 'row small section-gap-sm' }, `Test Type "${d.name}" does not exist (${d.count} question${d.count === 1 ? '' : 's'}):`, el))) : null;
   const createAll = decisionSelects.some(({ d }) => !d.inactive) ? h('button', { type: 'button', class: 'secondary small', onclick: () => decisionSelects.forEach(({ d, el }) => { if (!d.inactive) el.value = 'create'; }) }, 'Create all new categories') : null;

@@ -50,10 +50,15 @@ const HR_MARKED = ['essay', 'interview'];
 const isEssay = (key) => HR_MARKED.includes(behavior(key));
 const essayKeys = () => all().filter((t) => HR_MARKED.includes(t.behavior)).map((t) => t.key);
 // The active type for behavioural / interview questions: the interview format first, then by name.
+// Only a type that can hold option-less questions (HR-marked) is used; a multiple-choice
+// type named "Behavioral ..." is not (its questions need options and an answer).
+const INTERVIEW_NAME = /behaviou?r|interview|ສໍາພາດ|ສຳພາດ/i;
 const interviewType = () => {
   const active = all().filter((t) => t.active);
-  return (active.find((t) => t.behavior === 'interview') || active.find((t) => /behaviou?r|interview|ສໍາພາດ|ສຳພາດ/i.test(t.name)) || {}).key || null;
+  return (active.find((t) => t.behavior === 'interview') || active.find((t) => t.behavior === 'essay' && INTERVIEW_NAME.test(t.name)) || {}).key || null;
 };
+// Active types named like an interview type that cannot take these questions (for the preview note).
+const interviewNamedOther = () => all().filter((t) => t.active && INTERVIEW_NAME.test(t.name) && !HR_MARKED.includes(t.behavior));
 // "General" (short name) and "General Test" (title) for screens and exports.
 const name = (key) => (get(key) || {}).name || String(key || '');
 const title = (key) => { const n = name(key); return /\btest$/i.test(n) ? n : `${n} Test`; };
@@ -183,4 +188,4 @@ function remove(key, actor) {
   return { deleted: true };
 }
 
-module.exports = { CORE, BEHAVIORS, all, get, keys, activeKeys, assessmentKeys, behavior, isEssay, essayKeys, interviewType, HR_MARKED, name, title, defaultPassMark, resolve, usage, list, create, update, setActive, remove, TypeError: TypeError_ };
+module.exports = { CORE, BEHAVIORS, all, get, keys, activeKeys, assessmentKeys, behavior, isEssay, essayKeys, interviewType, interviewNamedOther, HR_MARKED, name, title, defaultPassMark, resolve, usage, list, create, update, setActive, remove, TypeError: TypeError_ };

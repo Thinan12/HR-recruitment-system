@@ -60,6 +60,21 @@ function competencyPdf() {
   });
 }
 
+test('a multiple-choice type renamed "Behavioral Assessment" is not used for option-less interview questions', async () => {
+  const general = (await admin.get('/api/admin/test-types')).data.find((t) => t.key === 'GENERAL');
+  assert.equal((await admin.put('/api/admin/test-types/GENERAL', { ...general, name: 'Behavioral Assessment' })).status, 200);
+  try {
+    const txt = ['Leadership', '• Tell me about a time when you led a team.', '• Describe a time when you motivated others.', '• Give me an example of a hard decision you made.'].join('\n');
+    const r = await preview(Buffer.from(txt), 'i.txt', 'GENERAL');
+    assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+    assert.deepEqual(r.data.type_decisions.map((d) => [d.name, d.behavior, d.count]), [['Behavioural Interview', 'interview', 3]]);
+    assert.match(r.data.document.note, /"Behavioral Assessment" is a multiple-choice test type/);
+    assert.ok(r.data.rows.every((x) => !x.question.section));
+  } finally {
+    await admin.put('/api/admin/test-types/GENERAL', { ...general });
+  }
+});
+
 test('two-column competency PDF: bullet questions under their competency; titles, headers, footers, page numbers not imported', async () => {
   const iqBefore = count("SELECT COUNT(*) AS n FROM questions WHERE section = 'IQ'");
   const r = await preview(await competencyPdf(), 'competencies.pdf', 'IQ');
