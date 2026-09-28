@@ -97,6 +97,8 @@ const TEXT = {
 
 const token = decodeURIComponent(location.pathname.split('/').pop());
 const root = document.getElementById('exam');
+// Puts the page content in place; optional parts that are null are skipped (replaceChildren would print "null").
+const render = (...nodes) => root.replaceChildren(...nodes.filter((n) => n != null));
 let T = TEXT.en;
 let exam = null; // { questions, answers, deadline, current, candidateName }
 let timerHandle = null;
@@ -141,7 +143,7 @@ function setLanguage(lang) {
 
 function bigMessage(text, tests) {
   stopTimer();
-  root.replaceChildren(h('div', { class: 'card big-message' }, text), tests && tests.length > 1 ? progressBox(tests) : null);
+  render(h('div', { class: 'card big-message' }, text), tests && tests.length > 1 ? progressBox(tests) : null);
 }
 
 // ✓ passed · → now / next · ○ not started yet · ✕ not passed · 🔒 locked · … waiting for HR
@@ -175,7 +177,7 @@ function renderFinished(data) {
   const name = r ? testName(r.section) : '';
   const stopped = data.outcome === 'stopped';
   const essayPending = r && r.result === 'Pending';
-  root.replaceChildren(
+  render(
     h('div', { class: 'card center' },
       data.auto_submitted && exam ? h('p', { class: 'message error' }, T.time_up_test) : null,
       stopped ? h('h1', { class: 'failed' }, '✕ ' + fill(T.test_not_passed, { name }))
@@ -199,7 +201,7 @@ function renderNext(data) {
       show(r.data);
     } catch { button.disabled = false; bigMessage(T.error); }
   });
-  root.replaceChildren(
+  render(
     h('div', { class: 'card center' },
       data.auto_submitted ? h('p', { class: 'message error' }, T.time_up_test) : null,
       h('h1', { class: 'passed' }, '✓ ' + fill(T.passed, { name: testName(data.passed_section) })),
@@ -274,7 +276,7 @@ function renderStart(data) {
     } catch { button.disabled = false; showErr(T.error); }
   });
   function showErr(text) { err.textContent = text; err.classList.remove('hidden'); }
-  root.replaceChildren(h('div', { class: 'card' }, form));
+  render(h('div', { class: 'card' }, form));
 }
 
 // ---- exam -----------------------------------------------------------------
@@ -356,7 +358,7 @@ function drawQuestion() {
 
   const go = (i) => { exam.current = i; drawQuestion(); window.scrollTo(0, 0); };
   const last = exam.current === qs.length - 1;
-  root.replaceChildren(
+  render(
     h('div', { class: 'exam-head' },
       h('div', {}, h('div', { class: 'exam-title' }, exam.isIq ? T.iq_title : testName(exam.section)), h('strong', {}, exam.candidateName)),
       h('div', { id: 'timer', class: 'timer' })),
