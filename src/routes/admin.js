@@ -368,7 +368,10 @@ router.post('/questions/import/preview', (req, res, next) => {
     try {
       const chosen = T.get(req.body.section);
       const defaultSection = chosen && chosen.active ? chosen.key : (T.get('GENERAL') && T.get('GENERAL').active ? 'GENERAL' : T.activeKeys()[0]);
-      const rows = await parseFile(req.file.buffer, req.file.originalname, defaultSection);
+      // HR's column mapping for a table the importer could not recognise: {"header_row":0,"columns":{"0":"question_text",...}}.
+      let mapping = null;
+      if (req.body.mapping) { try { mapping = JSON.parse(req.body.mapping); } catch { return bad(res, 'The column mapping could not be read.'); } }
+      const rows = await parseFile(req.file.buffer, req.file.originalname, defaultSection, { mapping });
       const seen = existingQuestionKeys();
       const typePending = (r) => !!r.question.type_name && r.errors.length === 1 && r.errors[0].startsWith('Test Type "');
       for (const r of rows) {
@@ -414,7 +417,8 @@ router.post('/questions/import/preview', (req, res, next) => {
         format: rows.format, answer_key: rows.keyCount, test_type: defaultSection, file: req.file.originalname, by_section: bySection,
         category_decisions: [...decisions.values()], missing_category: valid.filter((r) => r.category_state === 'missing').length,
         type_decisions: [...typeDecisions.values()], test_types: T.list().filter((t) => t.active), sections, type_mismatch: mismatch, answer_required: valid.filter((r) => r.answer_required).length,
-        categories: categories.list({ status: 'active' }), document: rows.document || null,
+        categories: categories.list({ status: 'active' }), document: rows.document || null, unmapped: rows.unmapped || null, mapped: rows.mapped || false,
+        non_question: (rows.sections || []).filter((s) => s.kind !== 'questions').reduce((n, s) => n + (s.lines || 0), 0) + ((rows.document && rows.document.not_imported) ? Object.values(rows.document.not_imported).reduce((a, b) => a + b, 0) : 0),
         pending_type: rows.filter(typePending).length, needs_review: rows.filter((r) => r.review && (!r.errors.length || typePending(r))).length, rows });
     } catch (e) {
       if (e instanceof ImportError) return bad(res, e.message);

@@ -139,10 +139,11 @@ test('invalid files are handled safely', async () => {
   const noQuestions = await preview(Buffer.from('hello\nworld'), 'notes.txt');
   assert.equal(noQuestions.status, 400);
 
+  // Columns the importer does not recognise: the table is shown for HR to map, not rejected.
   const wrongColumns = await preview(workbook([['Name', 'Phone'], ['A', 'B']], 'xlsx'), 'people.xlsx');
-  assert.equal(wrongColumns.status, 400);
-  assert.match(wrongColumns.data.error, /Could not detect a valid question structure/);
-  assert.match(wrongColumns.data.error, /Questions found: 0/);
+  assert.equal(wrongColumns.status, 200);
+  assert.deepEqual([wrongColumns.data.found, wrongColumns.data.valid], [0, 0]);
+  assert.deepEqual(wrongColumns.data.unmapped, [['Name', 'Phone'], ['A', 'B']]);
   assert.match(noQuestions.data.error, /Could not detect a valid question structure[\s\S]*Questions found:/);
 
   const tooBig = await preview(Buffer.alloc(11 * 1024 * 1024, 65), 'big.txt');

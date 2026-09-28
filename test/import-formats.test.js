@@ -167,10 +167,14 @@ test('duplicates are reported, within the file and against the bank', async () =
   assert.equal(again.data.duplicates, 2);
 });
 
-test('a file with no usable questions explains what was found', async () => {
+test('a file whose questions are all invalid is previewed with the reason for each (never rejected as a whole)', async () => {
   const r = await preview(Buffer.from('Welcome to the quiz\nPlease read carefully.\n1. A question with no options or answer\n'), 'bad.txt', 'GENERAL');
-  assert.equal(r.status, 400);
-  for (const want of ['Could not detect a valid question structure', 'Detected format:', 'Questions found: 1', 'Options found: 0', 'Answers found: 0', 'Valid questions: 0', 'Invalid questions: 1', 'Answer conflicts: 0']) {
-    assert.ok(r.data.error.includes(want), want);
-  }
+  assert.equal(r.status, 200);
+  assert.deepEqual([r.data.found, r.data.valid, r.data.invalid], [1, 0, 1]);
+  assert.equal(r.data.rows[0].question.question_text, 'A question with no options or answer', 'the title and instructions are not questions');
+  assert.match(r.data.rows[0].errors.join(' '), /Options are missing/);
+  // Nothing that looks like a question at all: explained, not a crash.
+  const none = await preview(Buffer.from('Welcome to the quiz\nPlease read carefully.\n'), 'none.txt', 'GENERAL');
+  assert.equal(none.status, 400);
+  assert.match(none.data.error, /Could not detect a valid question structure[\s\S]*Questions found: 0/);
 });

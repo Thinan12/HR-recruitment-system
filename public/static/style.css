@@ -261,3 +261,7 @@ td.failed { font-weight: 700; }
 .dup-phone { background: #fff2cc; }
 .pass-text { color: #1e7b34; }
 .fail-text { color: #c00000; }
+
+/* Import preview: long HR-only guidance stays short until hovered */
+.clamp { max-height: 6.5em; overflow: hidden; }
+.clamp:hover { max-height: none; }

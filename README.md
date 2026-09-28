@@ -21,7 +21,17 @@ A simple recruitment and assessment system for LALCO HR.
 Accepted files: Excel (`.xlsx`, `.xls`), Word (`.docx`, `.doc`), PDF, CSV and TXT (max 10 MB).
 A PDF whose pages are pictures (scanned, or exported as images) is read automatically with OCR: question number, question text, answer cards and the answer key at the end are recognised, and the diagrams are kept as pictures. This takes about 15–60 seconds for a 50-question booklet.
 
-Every upload shows a preview first (questions found, valid, invalid, and the reason for each skipped row). Nothing is saved until you press **Import**.
+Every upload shows a preview first. Nothing is saved until you press **Import**.
+
+**How a file is read.** Each format keeps its structure until the questions are found: Excel sheets, rows and columns; CSV / TSV / TXT tables (comma, semicolon, tab or pipe, quoted values); Word paragraphs, list items and table cells; PDF text lines with their position on the page (so a two-column competency table keeps "left = category, right = questions"). Every way of reading the file is then tried — a table with a header row, numbered / labelled questions in sections with an answer key, bullet or loosely numbered questions under headings — and the one that finds the most usable questions is kept. No AI or outside service is used; OCR runs only for PDFs that have no text layer (scanned pages).
+
+**What is recognised.** Questions numbered `1.` `1)` `(1)` `Q1` `Q01` `Question 1:` (the text on the same line or the next), bullets (`•` `-` `*` `▪` …), lists numbered without punctuation (`2 Describe …`), and unnumbered questions in a plain list or under a heading; a question may wrap over several lines and across pages, and numbering may restart in each section. Question marks and numbers are optional. Options `A.` `A)` `(A)` `a)` or `A Sydney`, one per line or several on one line. Answers inline (`Answer: B`, `Ans: B`, `Answer = B`, `Correct Answer: B`, `Expected Answer: 250`) or in an **Answer Key** at the end (`1. B`, `1 B`, `1-B`, `Q1 - B`, `Question 1: B`, or `1 B 2 C 3 A` on one line). Headings become the **category** of the questions below them when they name a topic — `CATEGORY 1: ADAPTABILITY (QUESTIONS 1 – 5)`, `1. ADAPTABILITY` before `Question 1:`, an all-caps sub-heading such as `ORDER OF OPERATIONS`, or the left column of a competency table; a table cell holding several bullet questions gives one question each. **Sample / suggested answers, model answers, expected responses and scoring guides** are kept as HR-only guidance of that question (never shown to candidates, never part of the question). Titles, instructions, page headers and footers, table headers, tips and notes are not imported.
+
+**Test type.** A Type column, a section heading (IQ, General, Calculation, Essay, Interview) or the question itself decides it; otherwise the type chosen on the upload form is used. Open questions (no options) never go into IQ or General: ones that ask for a calculation are shown as Calculation, and a document of behavioural / interview prompts goes to the test type with the **Behavioural / Interview** format — if there is none, the preview offers to create "Behavioural Interview".
+
+**Validation depends on the test type.** Multiple choice: question, at least two options and the correct answer. Calculation: options with an answer, or a single exact answer; with no answer it is imported **Inactive — Answer required** (never guessed). Essay and Behavioural / Interview: only the question text. IQ: options, answer and a level 1–5; a question without a level is marked **Needs review** (Level 3 is shown until HR chooses).
+
+**The preview** shows Found / Valid / Needs review / Invalid / Duplicates / Not questions, and every item with its status and reason. Tick items in or out and change any item's **Test Type, Category and Level** before importing; one bad item never blocks the others. Duplicates (same text and options as a question in the bank or earlier in the file) are listed and not imported; nothing already in the bank is changed. A table whose column headings are not recognised is shown so HR can choose which column is the Question, options, answer, type, category and level, and the file is read again with that mapping. Each import writes one line to the server log (`[IMPORT] file {format, found, valid, review, invalid, …}` — counts only, no question text or personal data).
 Questions already in the bank are skipped, so uploading the same file twice is safe.
 
 **Table layout** (Excel, CSV, or a table in Word). Use **Download Excel template** on the Questions page to get a ready-made file:
@@ -121,7 +131,7 @@ Node.js 24 LTS, Express, SQLite (`better-sqlite3`), plain HTML/JS frontend (no b
 ```
 npm install
 ADMIN_PASSWORD=choose-a-password npm start    # http://localhost:3000
-npm test                                       # 186 tests, uses temporary databases (set LALCO_SAMPLE_DOCX / LALCO_BEHAVIOURAL_PDF to also test real documents)
+npm test                                       # 200 tests, uses temporary databases (set LALCO_SAMPLE_DOCX / LALCO_BEHAVIOURAL_PDF / LALCO_REAL_IMPORT_FILES to also test real documents)
 ```
 
 ```

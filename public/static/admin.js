@@ -928,7 +928,7 @@ function uploadCard(onImported) {
   const card = h('div', { class: 'card', id: 'upload-card' },
     h('h2', {}, 'Upload questions'),
     h('p', { class: 'muted small' },
-      'Excel, Word, PDF, CSV, TSV or TXT. Either a table with columns such as Question, Option A-D, Correct Answer (optional: Type, Category, Level, Marks), or numbered questions (1. / Q1) with options A-D and the answer as an "Answer: B" line or in an Answer Key section at the end. Essay questions need no options. ',
+      'Excel, Word, PDF, CSV, TSV or TXT — a question bank table, a numbered test with options and an answer key, essay or calculation questions, or interview questions (numbered, "Question 1:", or bullets under competency headings, with or without sample answers). Numbers, question marks and options are optional where the test type does not need them. You will see a preview of everything found and can correct the test type, category and level before importing. ',
       h('a', { href: '/api/admin/questions/template.xlsx' }, 'Download Excel template')),
     h('div', { class: 'row' }, fileInput, h('span', { class: 'muted small' }, 'If the file has no Type column, questions are added as:'), section, button),
     result);
@@ -942,7 +942,17 @@ function uploadCard(onImported) {
     result.replaceChildren(h('p', { class: 'muted' }, 'Reading file... A PDF made of pictures (scanned pages) is read with OCR and can take 1-2 minutes.'));
     try {
       const preview = await api('POST', '/questions/import/preview', data, true);
-      showPreview(result, preview, () => { fileInput.value = ''; onImported(); });
+      // A table whose columns were not recognised can be read again with HR's column mapping.
+      const reread = async (mapping) => {
+        const again = new FormData();
+        again.append('section', section.value);
+        again.append('mapping', JSON.stringify(mapping));
+        again.append('file', fileInput.files[0]);
+        result.replaceChildren(h('p', { class: 'muted' }, 'Reading file again...'));
+        try { showPreview(result, await api('POST', '/questions/import/preview', again, true), done, reread); } catch (ex) { result.replaceChildren(message(ex.message)); }
+      };
+      const done = () => { fileInput.value = ''; onImported(); };
+      showPreview(result, preview, done, reread);
     } catch (ex) {
       result.replaceChildren(message(ex.message));
     } finally { button.disabled = false; }
@@ -950,61 +960,110 @@ function uploadCard(onImported) {
   return card;
 }
 
-function showPreview(container, p, onDone) {
-  const valid = p.rows.filter((r) => r.errors.length === 0).map((r) => r.question);
-  const invalid = p.rows.filter((r) => r.errors.length > 0);
+// Import Preview: every item the file gave, with its status and reason. HR can
+// tick items in or out and change the Test Type, Category and Level of any
+// item before importing; only the ticked items are sent (and checked again).
+const MAP_FIELDS = [['', '(ignore)'], ['question_text', 'Question'], ['option_a', 'Option A'], ['option_b', 'Option B'], ['option_c', 'Option C'], ['option_d', 'Option D'],
+  ['option_e', 'Option E'], ['correct_answer', 'Correct Answer'], ['section', 'Test Type'], ['category', 'Category'], ['difficulty', 'Level'], ['marks', 'Marks'], ['guide', 'Sample answer / guide (HR only)']];
+const normName = (s) => String(s ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+function showPreview(container, p, onDone, reread) {
   const isPending = (r) => !!r.question.type_name && r.errors.length === 1 && r.errors[0].startsWith('Test Type "');
-  const reviewBox = h('input', { type: 'checkbox', onchange: () => updateCount() });
-  const wanted = (r) => !r.review || reviewBox.checked; // "Needs review" questions only when HR ticks them in
-  const typePending = p.rows.filter((r) => isPending(r) && wanted(r)).length;
-  const importBtn = h('button', { type: 'button', disabled: valid.length + typePending === 0 }, `Import ${p.rows.filter((r) => (r.errors.length === 0 || isPending(r)) && wanted(r)).length} questions`);
-  // Document analysis: one line per section that holds questions (tick = import, and as which test);
-  // interview notes, scoring guides and other text are shown but never imported.
-  const questionSections = (p.sections || []).filter((x) => x.kind === 'questions' && x.valid > 0);
-  const picks = Object.fromEntries(questionSections.map((x) => [x.key, {
-    on: h('input', { type: 'checkbox', checked: true, onchange: () => updateCount() }),
-    as: select('import_as_' + x.key, typeOptions(), x.section) }]));
-  const chosen = () => p.rows.filter((r) => r.errors.length === 0 && wanted(r) && (!picks[r.section_key] || picks[r.section_key].on.checked))
-    .map((r) => ({ ...r.question, section: picks[r.section_key] ? picks[r.section_key].as.value : r.question.section }));
-  const updateCount = () => { const n = chosen().length + p.rows.filter((r) => isPending(r) && wanted(r)).length; importBtn.textContent = `Import ${n} questions`; importBtn.disabled = n === 0; };
-  const notImported = (p.sections || []).filter((x) => x.kind !== 'questions');
-  const sum = (kind) => notImported.filter((x) => x.kind === kind).reduce((a, x) => a + x.lines, 0);
-  const sectionsBox = !p.document && questionSections.length && ((p.sections || []).length > 1 || p.type_mismatch) ? h('div', { class: 'card inner' }, h('h2', {}, 'Document analysis'),
+  const isDup = (r) => r.errors.some((e) => /^Duplicate/.test(e));
+  const NEW = '__new__';
+  // One editable item per row.
+  const items = p.rows.map((r) => {
+    const q = r.question;
+    const pending = isPending(r);
+    const ok = r.errors.length === 0 || pending;
+    const it = { r, q, pending, ok, dup: isDup(r) };
+    it.status = it.dup ? 'DUPLICATE' : !ok ? 'INVALID' : r.review ? 'NEEDS REVIEW' : r.answer_required ? 'ANSWER REQUIRED' : 'VALID';
+    it.reason = it.dup ? 'Matches a question already in the bank (or earlier in this file) — not imported.'
+      : !ok ? r.errors.join(' ') : r.review ? r.review
+        : r.answer_required ? 'Calculation question with no answer in the file: imported Inactive until HR enters the answer (never guessed).'
+          : pending ? `Test type "${q.type_name}" is created when you import (choose above).` : 'Ready to import.';
+    it.include = h('input', { type: 'checkbox', checked: ok && !r.review, disabled: it.dup, onchange: () => updateCount() });
+    it.type = h('select', { class: 'inline-input small' },
+      pending || !q.section ? h('option', { value: NEW, selected: true }, q.type_name ? `${q.type_name} (new)` : 'Choose…') : null,
+      activeTypes().map((t) => h('option', { value: t.key, selected: t.key === q.section }, t.name)));
+    it.type.disabled = it.dup;
+    it.type.addEventListener('change', () => { if (!it.ok && it.type.value !== NEW) { it.include.disabled = false; it.include.checked = true; } syncLevel(); updateCount(); });
+    it.category = h('input', { class: 'inline-input small', value: q.category || '', placeholder: 'Category', disabled: it.dup });
+    it.level = select('lvl', [['Easy', LEVEL_NAMES.Easy], ['Basic', LEVEL_NAMES.Basic], ['Moderate', LEVEL_NAMES.Moderate], ['Difficult', LEVEL_NAMES.Difficult], ['Very Difficult', LEVEL_NAMES['Very Difficult']]], q.difficulty && LEVEL_NAMES[q.difficulty] ? q.difficulty : 'Moderate');
+    it.level.classList.add('inline-input', 'small');
+    const syncLevel = () => { it.level.classList.toggle('hidden', it.type.value !== 'IQ'); };
+    syncLevel();
+    return it;
+  });
+  const chosen = () => items.filter((it) => it.include.checked && !it.dup);
+  const importBtn = h('button', { type: 'button' });
+  const updateCount = () => { const n = chosen().length; importBtn.textContent = `Import ${n} question${n === 1 ? '' : 's'}`; importBtn.disabled = n === 0; };
+  const count = (s) => items.filter((it) => it.status === s).length;
+
+  // Document analysis: sections of a mixed document; "Import as" sets the test type of that section's items.
+  const questionSections = (p.sections || []).filter((x) => x.kind === 'questions' && x.questions > 0);
+  const sectionsBox = questionSections.length && ((p.sections || []).length > 1 || p.type_mismatch) ? h('div', { class: 'card inner' }, h('h2', {}, 'Document sections'),
     p.type_mismatch ? message(p.type_mismatch) : null,
     h('div', { class: 'table-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Import', 'Section', 'Detected', 'Questions', 'Answer required', 'Import as'].map((t) => h('th', {}, t)))),
-      h('tbody', {}, questionSections.map((x) => h('tr', {}, h('td', {}, picks[x.key].on), h('td', {}, x.title || '-', x.level ? h('div', { class: 'muted small' }, x.level) : null),
-        h('td', {}, SECTION_LABEL[x.section] + (typeFormat(x.section) === 'calculation' && x.answer_required ? ' (short answer)' : ''), x.section !== p.test_type ? h('div', {}, h('span', { class: 'badge pending' }, 'differs from the selected type')) : null),
-        h('td', {}, x.valid), h('td', {}, x.answer_required || '-'), h('td', {}, picks[x.key].as)))))),
-    notImported.length ? h('p', { class: 'muted small' }, 'Not imported: ' + [sum('interview') ? `interview material (${sum('interview')} lines)` : null, sum('scoring') ? `scoring guides (${sum('scoring')} lines)` : null,
-      sum('other') ? `other text — memo, instructions, policy, tables (${sum('other')} lines)` : null].filter(Boolean).join(' · ') + '.') : null) : null;
-  Object.values(picks).forEach((x) => x.as.addEventListener('change', updateCount));
+      h('tbody', {}, questionSections.map((x) => {
+        const mine = items.filter((it) => it.r.section_key === x.key);
+        const on = h('input', { type: 'checkbox', checked: true, onchange: () => { for (const it of mine) if (!it.dup && (it.ok || it.type.value !== NEW)) it.include.checked = on.checked; updateCount(); } });
+        const as = h('select', { class: 'inline-input' }, x.section ? null : h('option', { value: NEW }, (mine[0] && mine[0].q.type_name) ? `${mine[0].q.type_name} (new)` : 'Choose…'),
+          activeTypes().map((t) => h('option', { value: t.key, selected: t.key === x.section }, t.name)));
+        as.addEventListener('change', () => { for (const it of mine) { it.type.value = as.value; it.type.dispatchEvent(new Event('change')); } });
+        return h('tr', {}, h('td', {}, on), h('td', {}, x.title || '-', x.level ? h('div', { class: 'muted small' }, x.level) : null),
+          h('td', {}, x.section ? SECTION_LABEL[x.section] + (typeFormat(x.section) === 'calculation' && x.answer_required ? ' (short answer)' : '') : (mine[0] && mine[0].q.type_name) || '-',
+            x.section && x.section !== p.test_type ? h('div', {}, h('span', { class: 'badge pending' }, 'differs from the selected type')) : null),
+          h('td', {}, x.questions), h('td', {}, x.answer_required || '-'), h('td', {}, as));
+      }))))) : null;
+  const notImported = (p.sections || []).filter((x) => x.kind !== 'questions');
+  const sum = (kind) => notImported.filter((x) => x.kind === kind).reduce((a, x) => a + x.lines, 0);
+
   const doc = p.document;
   const docBox = doc ? h('div', { class: 'card inner' }, h('h2', {}, 'Document analysis'), doc.note ? message(doc.note) : null,
     h('div', { class: 'stats' }, ...[['Document type', doc.type], ['Question structure', doc.structure], ['Detected test type', doc.detected_type || SECTION_LABEL[p.test_type] || '-'],
-      ['Questions found', p.found], ['Categories found', doc.categories.filter((c) => c.name).length], ['Valid', p.valid + (p.pending_type || 0)], ['Needs review', p.needs_review || 0],
-      ['Invalid', p.invalid - (p.pending_type || 0) - (p.duplicates || 0)], ['Duplicates', p.duplicates || 0]]
+      ['Categories found', doc.categories.filter((c) => c.name).length]]
       .map(([l, v]) => h('div', { class: 'stat' }, h('div', { class: 'label' }, l), h('div', { class: 'value' + (String(v).length > 6 ? ' small' : '') }, v)))),
-    h('p', { class: 'muted small' }, 'No options or correct answers are needed: each question is the prompt the candidate answers, and HR marks the answer. Not imported: '
-      + [`${doc.not_imported.headings} headings (categories, group and table headers)`, `${doc.not_imported.page_text} page headers, footers and page numbers`,
-        doc.not_imported.other ? `${doc.not_imported.other} other lines` : null, doc.not_imported.low_confidence ? `${doc.not_imported.low_confidence} low-confidence lines` : null].filter(Boolean).join(' · ') + '.'),
+    h('p', { class: 'muted small' }, (doc.behavioural ? 'No options or correct answers are needed: each question is the prompt the candidate answers, and HR marks the answer. Sample answers in the file are kept as HR-only guidance. ' : '')
+      + 'Not imported: ' + [`${doc.not_imported.headings} headings`, doc.not_imported.page_text ? `${doc.not_imported.page_text} page headers, footers and page numbers` : null,
+        doc.not_imported.other ? `${doc.not_imported.other} lines of other text (instructions, notes)` : null, doc.not_imported.low_confidence ? `${doc.not_imported.low_confidence} lines that are not questions` : null].filter(Boolean).join(' · ') + '.'),
     doc.categories.length ? h('details', { open: doc.categories.length <= 12 }, h('summary', {}, `Categories (${doc.categories.length})`),
       h('div', { class: 'table-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, h('th', {}, 'Category'), h('th', {}, 'Questions'))),
-        h('tbody', {}, doc.categories.map((c) => h('tr', {}, h('td', {}, c.name || h('span', { class: 'badge pending' }, 'Needs Category Review')), h('td', {}, c.questions))))))) : null,
-    p.needs_review ? h('p', { class: 'small section-gap-sm' }, h('label', {}, reviewBox, ` Also import the ${p.needs_review} question(s) marked "Needs review" (check them in the list below first)`)) : null) : null;
-  // One choice per category name that is not in the list: create it, or use an existing one.
-  const decisionSelects = (p.category_decisions || []).map((d) => ({ d, el: h('select', { class: 'inline-input' },
-    h('option', { value: '' }, 'Choose…'), d.inactive ? null : h('option', { value: 'create' }, `Create category "${d.name}"`),
-    (p.categories || []).filter((c) => c.section === d.section).map((c) => h('option', { value: 'use:' + c.id }, `Use existing: ${c.name}`))) }));
-  // One choice per test type name in the file that does not exist: create it (with a format) or use an existing one.
+        h('tbody', {}, doc.categories.map((c) => h('tr', {}, h('td', {}, c.name || h('span', { class: 'badge pending' }, 'Needs Category Review')), h('td', {}, c.questions))))))) : null) : null;
+
+  // Test types named in the file that do not exist: create (with a format) or use an existing one.
   const typeSelects = (p.type_decisions || []).map((d) => ({ d, el: h('select', { class: 'inline-input' }, h('option', { value: '' }, 'Choose…'),
     (d.behavior ? [d.behavior, ...['mcq', 'calculation', 'essay', 'interview'].filter((b) => b !== d.behavior)] : ['mcq', 'calculation', 'essay', 'interview'])
       .map((b) => h('option', { value: 'create:' + b, selected: b === d.behavior }, `Create test type "${d.name}" — ${FORMAT_LABEL[b]}` + (b === d.behavior ? ' (detected)' : ''))),
     activeTypes().filter((t) => !HR_MARKED.includes(d.behavior) || HR_MARKED.includes(t.behavior)).map((t) => h('option', { value: 'use:' + t.key }, `Use existing: ${t.name}`))) }));
   const typeBox = typeSelects.length ? h('div', { class: 'message error' }, h('strong', {}, 'Test types to decide before importing'), h('br'),
     typeSelects.map(({ d, el }) => h('div', { class: 'row small section-gap-sm' }, `Test Type "${d.name}" does not exist (${d.count} question${d.count === 1 ? '' : 's'}):`, el))) : null;
+  // Category names from the file that are not in the list: create them, or use an existing one.
+  const decisionSelects = (p.category_decisions || []).map((d) => ({ d, el: h('select', { class: 'inline-input' },
+    h('option', { value: '' }, 'Choose…'), d.inactive ? null : h('option', { value: 'create' }, `Create category "${d.name}"`),
+    (p.categories || []).filter((c) => c.section === d.section).map((c) => h('option', { value: 'use:' + c.id }, `Use existing: ${c.name}`))) }));
   const createAll = decisionSelects.some(({ d }) => !d.inactive) ? h('button', { type: 'button', class: 'secondary small', onclick: () => decisionSelects.forEach(({ d, el }) => { if (!d.inactive) el.value = 'create'; }) }, 'Create all new categories') : null;
   const decisionBox = decisionSelects.length ? h('div', { class: 'message error' }, h('strong', {}, 'Categories to decide before importing'), ' ', createAll, h('br'),
     decisionSelects.map(({ d, el }) => h('div', { class: 'row small section-gap-sm' }, `Category "${d.name}" ${d.inactive ? 'is inactive' : 'does not exist'} for ${SECTION_LABEL[d.section]} (${d.count} question${d.count === 1 ? '' : 's'}):`, el))) : null;
+
+  // A table the importer could not recognise: HR says which column is what, and the file is read again.
+  const mapBox = p.unmapped && p.unmapped.length && reread ? (() => {
+    const width = Math.max(...p.unmapped.map((row) => row.length));
+    const guess = (i) => { const h0 = normName(p.unmapped[0][i]); return /question|prompt|item/.test(h0) ? 'question_text' : /answer|correct|key/.test(h0) ? 'correct_answer' : /categ|competen|topic/.test(h0) ? 'category' : ''; };
+    const sels = Array.from({ length: width }, (_, i) => { const s = select('map_' + i, MAP_FIELDS, guess(i)); s.classList.add('inline-input', 'small'); return s; });
+    const header = h('input', { type: 'checkbox', checked: true });
+    const go = h('button', { type: 'button', onclick: () => {
+      const columns = Object.fromEntries(sels.map((s, i) => [i, s.value]).filter(([, v]) => v));
+      if (!Object.values(columns).includes('question_text')) return flash(container, 'Please choose which column holds the Question.');
+      reread({ header_row: header.checked ? 0 : null, columns });
+    } }, 'Read the file again with these columns');
+    return h('div', { class: 'card inner' }, h('h2', {}, 'Tell the importer which column is which'),
+      h('p', { class: 'muted small' }, 'Some content could not be classified automatically: the file has a table, but its column headings were not recognised. Choose what each column holds (at least the Question), then read the file again.'),
+      h('div', { class: 'table-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, sels.map((s) => h('th', {}, s)))),
+        h('tbody', {}, p.unmapped.slice(0, 8).map((row) => h('tr', {}, Array.from({ length: width }, (_, i) => h('td', { class: 'small' }, fmt(row[i]).slice(0, 80)))))))),
+      h('div', { class: 'row section-gap-sm' }, h('label', { class: 'small' }, header, ' The first row is a heading row'), go));
+  })() : null;
+
   importBtn.addEventListener('click', async () => {
     importBtn.disabled = true;
     try {
@@ -1018,47 +1077,65 @@ function showPreview(container, p, onDone) {
         if (!el.value) { importBtn.disabled = false; return flash(container, `Please choose what to do with the test type "${d.name}" (or press Cancel).`); }
         type_decisions[d.key] = el.value.startsWith('create:') ? { create: true, behavior: el.value.slice(7) } : { key: el.value.slice(4) };
       }
-      // Rows whose only problem is an unknown test type go too, with HR's decision.
-      const pendingType = typeSelects.length ? p.rows.filter((r) => isPending(r) && wanted(r)).map((r) => ({ ...r.question, type_name: r.question.type_name })) : [];
-      const r = await api('POST', '/questions/import', { questions: [...chosen(), ...pendingType], category_decisions, type_decisions });
-      container.replaceChildren(message(`Imported ${r.imported} questions.` + (r.skipped ? ` Skipped ${r.skipped}.` : '')
-        + (r.answer_required ? ` ${r.answer_required} short-answer question(s) are Inactive until you enter the correct answer (Questions → status "Needs answer" → Edit).` : ''), 'ok'));
-      onDone();
+      const questions = [];
+      for (const it of chosen()) {
+        const q = { ...it.q, category: it.category.value.trim() };
+        if (it.type.value === NEW) {
+          if (!q.type_name) { importBtn.disabled = false; return flash(container, 'Please choose a test type for every ticked question.'); }
+          q.section = null;
+        } else { q.section = it.type.value; delete q.type_name; }
+        if (q.section === 'IQ') q.difficulty = it.level.value;
+        // A category HR typed or moved to another test: created if it does not exist yet.
+        const key = q.section ? q.section + '|' + normName(q.category) : null;
+        if (key && q.category && !category_decisions[key] && !(p.categories || []).some((c) => c.section === q.section && normName(c.name) === normName(q.category))) category_decisions[key] = { create: true };
+        questions.push(q);
+      }
+      const r = await api('POST', '/questions/import', { questions, category_decisions, type_decisions });
+      const text = `Imported ${r.imported} questions.` + (r.skipped ? ` Skipped ${r.skipped} (invalid or duplicate).` : '')
+        + (r.answer_required ? ` ${r.answer_required} short-answer question(s) are Inactive until you enter the correct answer (Questions → status "Needs answer" → Edit).` : '');
+      container.replaceChildren(message(text, 'ok'));
+      if (Object.values(type_decisions).some((d) => d.create)) {
+        // A new test type: reload the page so its tab appears, and keep the confirmation.
+        await loadTestTypes();
+        await route();
+        const card = document.querySelector('#upload-card');
+        if (card) card.append(message(text, 'ok'));
+      } else onDone();
     } catch (ex) { flash(container, ex.message); importBtn.disabled = false; }
   });
-  const validRows = p.rows.filter((r) => r.errors.length === 0 || isPending(r));
-  const showConfidence = validRows.some((r) => r.confidence);
+
+  const pick = (fn) => { for (const it of items) if (!it.dup) it.include.checked = fn(it); updateCount(); };
+  const STATUS_BADGE = { VALID: 'pass', 'ANSWER REQUIRED': 'pending', 'NEEDS REVIEW': 'pending', DUPLICATE: 'neutral', INVALID: 'fail' };
+  const nothingValid = !items.some((it) => it.ok && !it.dup);
+  updateCount();
   container.replaceChildren(h('div', {}, // h() skips the null sections; replaceChildren would print "null"
     h('h2', {}, 'Import Preview'),
-    h('p', { class: 'small' }, h('strong', {}, 'Test Type: '), SECTION_LABEL[p.test_type] || '-', ' · ', h('strong', {}, 'File: '), p.file || '-',
-      p.format ? [' · ', h('strong', {}, 'Detected format: '), p.format] : null, p.answer_key ? [' · ', h('strong', {}, 'Answer key entries: '), p.answer_key] : null),
-    h('div', { class: 'stats' },
-      ...[['Found', p.found], ['Valid', p.valid + (p.pending_type || 0)], ['Invalid', p.invalid - (p.pending_type || 0)], ['Duplicates', p.duplicates ?? 0], ['Answer Conflicts', p.conflicts ?? 0]].map(([l, v]) => h('div', { class: 'stat' }, h('div', { class: 'label' }, l), h('div', { class: 'value' }, v))),
-      ...Object.entries(p.by_section).filter(([, n]) => n > 0).map(([s, n]) => h('div', { class: 'stat' }, h('div', { class: 'label' }, SECTION_LABEL[s] + ' questions'), h('div', { class: 'value' }, n)))),
-    sectionsBox,
-    typeBox,
-    decisionBox,
+    h('p', { class: 'small' }, h('strong', {}, 'File: '), p.file || '-', ' · ', h('strong', {}, 'Read as: '), p.format || '-', p.answer_key ? [' · ', h('strong', {}, 'Answer key entries: '), p.answer_key] : null,
+      ' · ', h('strong', {}, 'Default test type: '), SECTION_LABEL[p.test_type] || '-'),
+    h('div', { class: 'stats' }, ...[['Found', items.length], ['Valid', count('VALID') + count('ANSWER REQUIRED')], ['Needs review', count('NEEDS REVIEW')], ['Invalid', count('INVALID')],
+      ['Duplicates', count('DUPLICATE')], ['Not questions', p.non_question || 0]].map(([l, v]) => h('div', { class: 'stat' }, h('div', { class: 'label' }, l), h('div', { class: 'value' }, v)))),
+    nothingValid && items.length ? message('Some content could not be classified automatically. Check the items below: change the test type where it is wrong (for example Essay for open questions), then tick them.') : null,
+    mapBox, docBox, sectionsBox, typeBox, decisionBox,
     p.answer_required ? h('p', { class: 'message pending-note' }, `${p.answer_required} short-answer question(s) have no correct answer in the file. They will be imported as "Answer required" (Inactive) and cannot be used in a test until HR enters the answer. Answers are never guessed.`) : null,
-    p.missing_category ? h('p', { class: 'muted small' }, `${p.missing_category} question(s) have no category (IQ ones are listed under "Needs category" after importing; set it with Set category).`) : null,
-    docBox,
-    invalid.filter((r) => !isPending(r)).length ? h('div', {}, h('h2', {}, 'Rows that will be skipped'), h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, h('th', {}, 'Question'), h('th', {}, 'Text'), h('th', {}, 'Problem'))),
-      h('tbody', {}, invalid.filter((r) => !isPending(r)).slice(0, 100).map((r) => h('tr', {}, h('td', {}, r.number != null ? r.number : 'Row ' + r.row), h('td', { class: 'question-cell' }, fmt(r.question.question_text).slice(0, 160)), h('td', {}, r.errors.join(' ')))))))) : null,
-    validRows.length ? h('div', {}, h('h2', { class: 'section-gap' }, validRows.length > 100 ? 'First 100 questions to import' : 'Questions to import'), h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, ['#', 'Status', ...(showConfidence ? ['Confidence'] : []), 'Question', 'Type', 'Category', 'Level', 'Options', 'Correct Answer', 'Marks'].map((t) => h('th', {}, t)))),
-      h('tbody', {}, validRows.slice(0, 100).map((r) => [r, r.question]).map(([r, q]) => h('tr', {},
-        h('td', {}, r.number != null ? r.number : r.row),
-        h('td', {}, r.review ? h('div', {}, h('span', { class: 'badge pending' }, 'NEEDS REVIEW'), h('div', { class: 'muted small' }, r.review))
-          : r.answer_required ? h('span', { class: 'badge pending' }, 'VALID — ANSWER REQUIRED') : h('span', { class: 'badge pass' }, 'VALID')),
-        showConfidence ? h('td', {}, r.confidence || '-') : null,
-        h('td', { class: 'question-cell' }, h('div', { class: 'pre' }, q.question_text), q.image_id ? h('div', { class: 'thumb-row' }, thumb(q.image_id)) : null),
-        h('td', {}, q.section ? SECTION_LABEL[q.section] : h('span', {}, q.type_name, h('div', { class: 'muted small' }, 'test type to choose above'))),
-        h('td', {}, q.category || null, !q.section && !q.category ? h('span', { class: 'badge pending' }, 'Needs Category Review') : null, r.category_state === 'missing' ? h('span', { class: 'badge pending' }, q.section === 'IQ' ? 'Missing — Review Required' : 'None')
-          : r.category_state === 'unknown' ? h('div', {}, h('span', { class: 'badge pending' }, 'Not in the list')) : r.category_state === 'inactive' ? h('div', {}, h('span', { class: 'badge pending' }, 'Inactive')) : null),
-        h('td', { class: 'nowrap' }, (q.section === 'IQ' && LEVEL_NAMES[q.difficulty]) || fmt(q.difficulty)),
-        h('td', { class: 'small' }, h('div', { class: 'thumb-row' }, LETTERS.filter((l) => q['option_' + l] || q['option_' + l + '_image'])
-          .map((l) => optionContent(q, l.toUpperCase())))),
-        h('td', { class: 'small' }, isEssayType(q.section) ? (q.correct_answer ? h('div', {}, h('div', { class: 'muted' }, 'Marking guide (HR only):'), h('div', { class: 'pre' }, q.correct_answer)) : 'HR marks') : q.correct_answer || (r.answer_required ? 'Missing — Review Required' : '-')), h('td', {}, q.marks))))))) : null,
+    notImported.length ? h('p', { class: 'muted small' }, 'Not imported: ' + [sum('interview') ? `interview notes (${sum('interview')} lines)` : null, sum('scoring') ? `scoring guides (${sum('scoring')} lines)` : null,
+      sum('other') ? `other text — memo, instructions, policy, tables (${sum('other')} lines)` : null].filter(Boolean).join(' · ') + '.') : null,
+    items.length ? h('div', {},
+      h('div', { class: 'row between section-gap' }, h('h2', {}, 'Items found'),
+        h('div', { class: 'row small' }, 'Tick:', h('button', { type: 'button', class: 'secondary small', onclick: () => pick((it) => it.ok && !it.r.review) }, 'Valid'),
+          h('button', { type: 'button', class: 'secondary small', onclick: () => pick((it) => it.ok) }, 'Valid + needs review'),
+          h('button', { type: 'button', class: 'secondary small', onclick: () => pick(() => false) }, 'None'))),
+      h('div', { class: 'table-wrap' }, h('table', {},
+        h('thead', {}, h('tr', {}, ['Import', '#', 'Status', 'Question', 'Test Type', 'Category', 'Level', 'Options', 'Correct Answer / guide'].map((t) => h('th', {}, t)))),
+        h('tbody', {}, items.map((it) => { const q = it.q; return h('tr', { class: it.dup ? 'muted' : null },
+          h('td', {}, it.include),
+          h('td', {}, it.r.number != null ? it.r.number : it.r.row, it.r.sheet ? h('div', { class: 'muted small' }, it.r.sheet) : null),
+          h('td', {}, h('span', { class: 'badge ' + STATUS_BADGE[it.status] }, it.status), it.r.confidence ? h('div', { class: 'muted small' }, 'Confidence: ' + it.r.confidence) : null, h('div', { class: 'muted small' }, it.reason)),
+          h('td', { class: 'question-cell' }, h('div', { class: 'pre' }, q.question_text), q.image_id ? h('div', { class: 'thumb-row' }, thumb(q.image_id)) : null),
+          h('td', {}, it.type), h('td', {}, it.category), h('td', {}, it.level),
+          h('td', { class: 'small' }, h('div', { class: 'thumb-row' }, LETTERS.filter((l) => q['option_' + l] || q['option_' + l + '_image']).map((l) => optionContent(q, l.toUpperCase())))),
+          h('td', { class: 'small' }, (isEssayType(q.section) || q.type_behavior === 'interview') ? (q.correct_answer ? h('div', {}, h('div', { class: 'muted' }, 'HR-only guidance:'), h('div', { class: 'pre clamp' }, q.correct_answer)) : 'HR marks')
+            : q.correct_answer || (it.r.answer_required ? 'Missing — Review Required' : '-')));
+        }))))) : null,
     h('div', { class: 'row section-gap' }, importBtn, h('button', { class: 'secondary', type: 'button', onclick: () => container.replaceChildren() }, 'Cancel'))));
 }
 

@@ -83,14 +83,49 @@ function confidence(q) {
   if (t.length >= 20 && t.length <= 800) score += 1;
   else { score -= 2; notes.push(t.length < 20 ? 'Very short — check that the question is complete.' : 'Very long — check that two questions were not joined.'); }
   if (/^[\p{Ll}]/u.test(t)) { score -= 1; notes.push('Starts in lower case — the beginning of the question may be missing in the file.'); }
+  // A list item that asks nothing (a table of contents, a list of topics) is not a question.
+  if (!opens(t) && !/[?？]/.test(t) && !RE_ASKS.test(t) && !RE_LAO_QUESTION.test(t) && !/[.!]$/.test(t)) score -= 3;
+  // A tip for the interviewer ("Give them time: Often good answers …", "Follow up: …") is not a question.
+  if (/^[^:?]{3,40}:\s+\S/.test(t) && !/[?？]/.test(t)) score -= 5;
   if (!q.bullet) notes.push('Not a bullet point in the file.');
   const level = score >= 5 ? 'High' : score >= 3 ? 'Medium' : 'Low';
   return { level, score, note: level === 'High' ? '' : notes.join(' ') || 'Check the wording.' };
 }
 
+// A list numbered without "." or ")" ("2 Describe a situation …", or "1" alone on
+// its line with the question below): only runs 1, 2, 3 … with at least two
+// numbers followed by text count, so page numbers and amounts never do.
+const RE_LOOSE = /^(\d{1,2})(?:\s+(\S.*)|([A-Z].*))?$/;
+function markLooseNumbers(lines) {
+  const runs = [];
+  let run = [];
+  // A page number next to a running footer ("2 <tab> Brought to you by …") is not a list number.
+  const repeated = repeatedLines(lines);
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (l.role && l.role !== 'text') continue;
+    const m = l.text.match(RE_LOOSE);
+    const rest = m ? (m[2] || m[3] || '') : '';
+    if (!m || (rest.split(/\s+/).length >= 2 && repeated.has(l.text.toLowerCase().replace(/\d+/g, '#'))) || RE_COPYRIGHT.test(rest)) continue;
+    const n = Number(m[1]);
+    if (n === 1) { if (run.length) runs.push(run); run = [[i, m]]; } else if (run.length && n === Number(run[run.length - 1][1][1]) + 1) run.push([i, m]);
+  }
+  if (run.length) runs.push(run);
+  for (const r of runs) {
+    if (r.length < 3 || r.filter(([, m]) => m[2] || m[3]).length < 2) continue;
+    for (const [i, m] of r) Object.assign(lines[i], { role: 'bullet', loose: true, text: '• ' + (m[2] || m[3] || '') });
+  }
+}
+
+// One question that reads like a behavioural / interview prompt.
+const isBehavioural = (t) => (opens(t) && RE_BEHAVIOURAL.test(t)) || /^(?:please\s+)?(?:tell|describe|give|recount)\b/i.test(t)
+  || /\b(?:tell\s+(?:me|us)\s+about|a\s+time\s+when|give\s+(?:me\s+|us\s+)?an\s+example)\b/i.test(t)
+  || (RE_LAO_OPENER.test(t) && /ຄັ້ງໜຶ່ງ|ສະຖານະການ|ຕົວຢ່າງ|ປະສົບການ|ເຫດການ/.test(t));
+
 // Returns { rows, document } when the lines hold bullet questions, else null.
 function bulletQuestions(input) {
   const lines = input.map((l) => ({ ...l, text: clean(l.text) })).filter((l) => l.text);
+  markLooseNumbers(lines);
   const bullets = lines.filter((l) => l.role === 'bullet' || (!l.role && RE_BULLET.test(l.text)));
   const bulletText = (l) => l.text.replace(RE_BULLET, '').trim();
   const questionLike = bullets.filter((l) => asksSomething(bulletText(l)) || RE_BEHAVIOURAL.test(bulletText(l)));
@@ -109,12 +144,16 @@ function bulletQuestions(input) {
   const skipped = { headings: 0, boilerplate: 0, other: 0 };
   const categories = new Map();
 
+  // Headings since the last question: a heading followed by prose ("How to screen for …")
+  // is an introduction, so the category stays the heading above it ("Culture fit").
+  let recent = [];
   const closeHeading = () => {
     if (!heading) return;
     const name = clean(heading.parts.join(' ').replace(/\s*\/\s*/g, ' / ').replace(/[:：]\s*$/, ''));
     heading = null;
     if (!name || RE_TABLE_HEADER.test(name)) { skipped.boilerplate++; return; }
     category = name;
+    recent.push(name);
     cur = null;
     skipped.headings++;
   };
@@ -122,15 +161,19 @@ function bulletQuestions(input) {
     closeHeading();
     cur = { text, bullet, category, group, guide: '' };
     guide = false;
+    recent = [];
     questions.push(cur);
   };
+  // "MOST POPULAR" next to a list number is a badge, not part of the question.
+  const badge = (t) => /^[A-Z][A-Z\s&-]*$/.test(t) && t.split(/\s+/).length <= 3;
 
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     const text = l.text;
     let role = l.role;
     const key = text.toLowerCase().replace(/\d+/g, '#');
-    if (role === 'boiler' || RE_PAGE_NUMBER.test(text) || RE_COPYRIGHT.test(text) || (repeated.has(key) && !role)) { skipped.boilerplate++; continue; }
+    if (role !== 'bullet' && (role === 'boiler' || RE_PAGE_NUMBER.test(text) || RE_COPYRIGHT.test(text) || (repeated.has(key) && !role))) { skipped.boilerplate++; continue; }
+    if (cur && !cur.text && role !== 'bullet' && badge(text)) { skipped.other++; continue; }
     if (!role) {
       if (RE_BULLET.test(text)) role = 'bullet';
       else if (RE_GROUP.test(text)) role = 'group';
@@ -151,7 +194,8 @@ function bulletQuestions(input) {
     if (role === 'subheading') { closeHeading(); cur = null; skipped.headings++; continue; }
     if (role === 'bullet') {
       const t = text.replace(RE_BULLET, '').trim();
-      if (t) push(t, true); else closeHeading();
+      // A number alone on its line (the question follows) or with only a badge.
+      if (t && !(l.loose && badge(t))) push(t, true); else if (l.loose) push('', true); else closeHeading();
       continue;
     }
     // Text: an HR-only guide, the rest of the current question, or a question without a bullet.
@@ -159,8 +203,9 @@ function bulletQuestions(input) {
     const g = text.match(RE_GUIDE);
     if (cur && g) { guide = true; cur.guide = text; continue; }
     if (cur && guide) { cur.guide += '\n' + text; continue; }
-    if (cur) { cur.text += ' ' + text; continue; }
+    if (cur) { cur.text += (cur.text ? ' ' : '') + text; continue; }
     if (opens(text) && text.length >= 20) { push(text, false); continue; }
+    if (recent.length > 1) { recent.pop(); category = recent[recent.length - 1]; }
     skipped.other++;
   }
   closeHeading();
@@ -176,8 +221,8 @@ function bulletQuestions(input) {
     rows.push({ question_text: q.text, category: q.category, group: q.group, correct_answer: q.guide, number: n, confidence: c.level, review: c.level === 'Medium' ? c.note : '' });
   }
   if (rows.length < 3) return null;
-  const behavioural = rows.filter((r) => opens(r.question_text) && RE_BEHAVIOURAL.test(r.question_text) || /^(?:please\s+)?(?:tell|describe|give|recount)\b/i.test(r.question_text)
-    || (RE_LAO_OPENER.test(r.question_text) && /ຄັ້ງໜຶ່ງ|ສະຖານະການ|ຕົວຢ່າງ|ປະສົບການ|ເຫດການ/.test(r.question_text))).length >= rows.length * 0.5;
+  // Open questions (no options) that mostly read like interview prompts: a behavioural / interview bank.
+  const behavioural = rows.filter((r) => isBehavioural(r.question_text)).length >= rows.length * 0.4;
   const hasCategories = [...categories.keys()].some(Boolean);
   return {
     rows,
@@ -280,4 +325,8 @@ function docxLines(html) {
   return out;
 }
 
-module.exports = { bulletQuestions, pdfLines, docxLines, RE_BULLET };
+// A single line that reads like a question or task (used for plain unnumbered lists).
+const looksLikeQuestion = (t) => asksSomething(t) || /[?？:]\s*$/.test(t)
+  || /^(?:define|calculate|compute|find|solve|list|name|compare|identify|write|state|what|which)\b/i.test(t);
+
+module.exports = { bulletQuestions, pdfLines, docxLines, RE_BULLET, isBehavioural, looksLikeQuestion };
