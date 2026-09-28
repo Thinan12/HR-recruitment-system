@@ -8,7 +8,7 @@ async function pdfText(buffer) {
   const parser = new PDFParse({ data: new Uint8Array(buffer) });
   try { return (await parser.getText()).text; } finally { await parser.destroy(); }
 }
-const { start, stop, client, seedQuestions, db, CANDIDATE } = require('./helpers');
+const { start, stop, client, seedQuestions, db, CANDIDATE, attemptOf } = require('./helpers');
 
 let admin;
 const candidate = client();
@@ -66,12 +66,12 @@ test('essay makes the result Pending until HR enters marks', async () => {
   const a = await sit('Essay Writer', 'COMBINED', { CALCULATION: 5, ESSAY: 1 }, 1);
   assert.equal(a.result, 'Pending');
   assert.equal(a.essay_pending, 1);
-  const essay = db.prepare("SELECT id FROM assessment_questions WHERE assessment_id = ? AND section = 'ESSAY'").get(a.id);
+  const essay = db.prepare("SELECT id FROM assessment_questions WHERE assessment_id = ? AND section = 'ESSAY'").get(attemptOf(a));
 
-  const tooHigh = await admin.put(`/api/admin/assessments/${a.id}/essay-marks`, { marks: { [essay.id]: 50 } });
+  const tooHigh = await admin.put(`/api/admin/assessments/${attemptOf(a)}/essay-marks`, { marks: { [essay.id]: 50 } });
   assert.equal(tooHigh.status, 400);
 
-  const r = await admin.put(`/api/admin/assessments/${a.id}/essay-marks`, { marks: { [essay.id]: 5 } });
+  const r = await admin.put(`/api/admin/assessments/${attemptOf(a)}/essay-marks`, { marks: { [essay.id]: 5 } });
   assert.equal(r.status, 200);
   assert.equal(r.data.essay_points, 5);
   assert.equal(r.data.essay_pending, 0);
@@ -81,9 +81,9 @@ test('essay makes the result Pending until HR enters marks', async () => {
   assert.equal(r.data.test_score, Math.round((expectedPoints / expectedMax) * 1000) / 10);
   // The essay is its own test: 5 / 10 = 50% is below the 60% pass mark.
   assert.equal(r.data.result, 'Not Pass');
-  const again = await admin.put(`/api/admin/assessments/${a.id}/essay-marks`, { marks: { [essay.id]: 8 } });
+  const again = await admin.put(`/api/admin/assessments/${attemptOf(a)}/essay-marks`, { marks: { [essay.id]: 8 } });
   assert.equal(again.data.result, 'Pass', 'calculation passed and essay 8 / 10 = 80%');
-  await admin.put(`/api/admin/assessments/${a.id}/essay-marks`, { marks: { [essay.id]: 5 } });
+  await admin.put(`/api/admin/assessments/${attemptOf(a)}/essay-marks`, { marks: { [essay.id]: 5 } });
 });
 
 test('short-answer calculation is compared ignoring spaces and commas', () => {

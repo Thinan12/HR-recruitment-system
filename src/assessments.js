@@ -1,7 +1,7 @@
 // Assessment links: create, start, answer, submit, score.
 // All time rules are enforced here on the server; the browser timer is only a display.
 const crypto = require('crypto');
-const { db, getSettings, now, PASS_KEYS } = require('./db');
+const { db, getSettings, now, audit, PASS_KEYS } = require('./db');
 
 const SECTIONS = ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'];
 const TYPES = {
@@ -160,25 +160,77 @@ function createAssessment(input) {
   if (!Number.isInteger(expiry) || expiry < 1 || expiry > 60 * 24 * 90) throw new InputError('Link expiry must be between 1 minute and 90 days.');
   const language = LANGUAGES.includes(input.language) ? input.language : settings.default_language;
 
-  let candidateId = null;
-  if (input.candidate_id) {
-    candidateId = Number(input.candidate_id);
-    if (!db.prepare('SELECT id FROM candidates WHERE id = ?').get(candidateId)) throw new InputError('Candidate not found.');
-  }
-
+  const title = String(input.title ?? '').trim().slice(0, 200);
   const created = now();
   const type = included.length === 1 ? included[0] : 'COMBINED';
   const total = included.reduce((sum, sec) => sum + minutes[sec], 0);
-  const id = db.transaction(() => {
-    const aid = db.prepare(`INSERT INTO assessments
-      (token, candidate_id, assessment_type, sections, time_limit_minutes, link_expiry_minutes, link_expires_at, language, eligibility_mark, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(newToken(), candidateId, type, JSON.stringify(sections), total, expiry, addMinutes(created, expiry), language, eligibility, created).lastInsertRowid;
-    const addStage = db.prepare('INSERT INTO assessment_stages (assessment_id, position, section, question_count, time_limit_minutes, pass_mark) VALUES (?, ?, ?, ?, ?, ?)');
-    included.forEach((sec, i) => addStage.run(aid, i + 1, sec, sections[sec], minutes[sec], passMarks[sec]));
-    return aid;
-  })();
-  return getAssessment(id);
+  const stages = included.map((sec) => ({ section: sec, question_count: sections[sec], time_limit_minutes: minutes[sec], pass_mark: passMarks[sec] }));
+  const id = db.prepare(`INSERT INTO assessment_links
+    (token, title, assessment_type, sections, stages, time_limit_minutes, link_expiry_minutes, link_expires_at, language, eligibility_mark, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(newToken(), title, type, JSON.stringify(sections), JSON.stringify(stages), total, expiry, addMinutes(created, expiry), language, eligibility, created).lastInsertRowid;
+  return getLink(id);
+}
+
+// ---- shared links --------------------------------------------------------
+// One link, many candidates. The link holds the tests, counts, timers and pass
+// marks; every candidate who starts gets their own attempt (an assessments
+// row) with their own questions, timers, answers and results.
+
+const getLink = (id) => db.prepare('SELECT * FROM assessment_links WHERE id = ?').get(id);
+const linkByToken = (token) => db.prepare('SELECT * FROM assessment_links WHERE token = ?').get(token);
+
+// open / disabled / expired: whether NEW candidates may start. Candidates who
+// already started keep their own attempt and timer whatever happens here.
+function linkShareState(link) {
+  if (!link) return 'not_found';
+  if (!link.enabled) return 'disabled';
+  if (Date.now() > Date.parse(link.link_expires_at)) return 'expired';
+  return 'open';
+}
+
+// The link as HR and the candidate page see it; stages look like stage rows.
+function linkView(link) {
+  const stages = JSON.parse(link.stages).map((st, i) => ({ position: i + 1, ...st }));
+  const counts = db.prepare(`SELECT COUNT(*) AS candidates, SUM(status = 'IN_PROGRESS') AS in_progress, SUM(status = 'SUBMITTED') AS finished
+    FROM assessments WHERE link_id = ?`).get(link.id);
+  return { ...link, kind: 'link', stages, share_state: linkShareState(link),
+    candidates: counts.candidates, in_progress: counts.in_progress || 0, finished: counts.finished || 0 };
+}
+
+const hashSecret = (secret) => crypto.createHash('sha256').update(String(secret)).digest('hex');
+const newSessionSecret = () => crypto.randomBytes(32).toString('base64url');
+// The attempt belonging to this browser's session on this link, if any.
+function attemptFor(link, secret) {
+  if (!link || !secret) return undefined;
+  return db.prepare('SELECT * FROM assessments WHERE link_id = ? AND session_hash = ?').get(link.id, hashSecret(secret));
+}
+
+// A candidate submits their details on a shared link: create their own
+// attempt (and candidate record), copy the link's tests into it and start
+// the first test, all in one transaction. The same session can only ever
+// create one attempt (a double-click or second tab resumes the first one).
+const startFromLinkTx = db.transaction((linkId, info, secret) => {
+  const link = getLink(linkId);
+  const existing = attemptFor(link, secret);
+  if (existing) return existing.id;
+  if (linkShareState(link) !== 'open') throw new InputError('link_closed');
+  const created = now();
+  const aid = db.prepare(`INSERT INTO assessments
+    (token, assessment_type, sections, time_limit_minutes, link_expiry_minutes, link_expires_at, language, eligibility_mark, created_at, link_id, session_hash)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(newToken(), link.assessment_type, link.sections, link.time_limit_minutes, link.link_expiry_minutes, link.link_expires_at, link.language,
+      link.eligibility_mark, created, link.id, hashSecret(secret)).lastInsertRowid;
+  const addStage = db.prepare('INSERT INTO assessment_stages (assessment_id, position, section, question_count, time_limit_minutes, pass_mark) VALUES (?, ?, ?, ?, ?, ?)');
+  JSON.parse(link.stages).forEach((st, i) => addStage.run(aid, i + 1, st.section, st.question_count, st.time_limit_minutes, st.pass_mark));
+  startTx(getAssessment(aid), info);
+  audit('SESSION_STARTED', 'candidate', { link_id: link.id, assessment_id: aid });
+  return aid;
+});
+
+function startFromLink(link, body, secret) {
+  const info = cleanCandidateInfo(body);
+  return getAssessment(startFromLinkTx(link.id, info, secret));
 }
 
 // The tests of an assessment, in order. Links made before tests were split
@@ -287,6 +339,7 @@ function openStage(a, stage) {
     .run(stamp, deadline, stage.id);
   if (res.changes !== 1) throw new InputError('already_started');
   db.prepare('UPDATE assessments SET deadline_at = ? WHERE id = ?').run(deadline, a.id);
+  audit('STAGE_STARTED', 'candidate', { assessment_id: a.id, section: stage.section, deadline });
 }
 
 const startTx = db.transaction((a, info) => {
@@ -439,6 +492,9 @@ const finalize = db.transaction((assessmentId, auto) => {
   const stages = stagesOf(a);
   const stopped = stages.some((st) => st.status === 'SUBMITTED' && st.result === 'Not Pass');
   const more = stages.some((st) => st.status === 'NOT_STARTED');
+  const done = stages.filter((st) => st.status === 'SUBMITTED' && st.submitted_at === stamp);
+  for (const st of done) audit('STAGE_SUBMITTED', auto ? 'system (time ran out)' : 'candidate', { assessment_id: assessmentId, section: st.section, result: st.result, auto: !!auto });
+  if (stopped || !more) audit(stopped ? 'ASSESSMENT_STOPPED' : 'ASSESSMENT_COMPLETED', 'system', { assessment_id: assessmentId });
   if (stopped || !more) {
     db.prepare("UPDATE assessments SET status = 'SUBMITTED', submitted_at = ? WHERE id = ?").run(stamp, assessmentId);
     scoreAssessment(assessmentId);
@@ -512,6 +568,7 @@ function regenerateLink(id) {
 }
 
 module.exports = {
+  getLink, linkByToken, linkShareState, linkView, attemptFor, startFromLink, newSessionSecret,
   stagesOf, continueAssessment, currentStage,
   SECTIONS, TYPES, LANGUAGES, LETTERS, DIFFICULTIES, LEVEL_MARKS, LEGACY_LEVELS, levelOf, levelNumber, InputError, label, questionKey, difficultyLevel, levelSplit, pickProgressive, syncIqLevels,
   activeCounts, inactiveCounts, createAssessment, getAssessment, linkState, startAssessment, saveAnswer,

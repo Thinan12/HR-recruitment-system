@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { start, stop, client, seedQuestions, db, CANDIDATE } = require('./helpers');
+const { start, stop, client, seedQuestions, db, CANDIDATE, attemptOf } = require('./helpers');
 const { finalizeExpired } = require('../src/assessments');
 
 let admin;
@@ -53,7 +53,7 @@ test('candidate information is required and saved when the assessment starts', a
   assert.ok(r.data.remaining_seconds > 29 * 60 && r.data.remaining_seconds <= 30 * 60);
   assert.equal(r.data.candidate.name, CANDIDATE.name);
 
-  const saved = db.prepare('SELECT c.* FROM assessments a JOIN candidates c ON c.id = a.candidate_id WHERE a.id = ?').get(a.id);
+  const saved = db.prepare('SELECT c.* FROM assessments a JOIN candidates c ON c.id = a.candidate_id WHERE a.id = ?').get(attemptOf(a));
   for (const [k, v] of Object.entries(CANDIDATE)) assert.equal(saved[k], v, k);
 });
 
@@ -77,11 +77,11 @@ test('each candidate gets a random set with no duplicates, and shuffled options 
     if (r.data.questions.some((q) => q.options.map((o) => o.key).join('') !== 'ABCD')) orderChanged = true;
 
     // Answer every question correctly by the original letter; shuffling must not matter.
-    const rows = db.prepare('SELECT id, correct_answer FROM assessment_questions WHERE assessment_id = ?').all(a.id);
+    const rows = db.prepare('SELECT id, correct_answer FROM assessment_questions WHERE assessment_id = ?').all(attemptOf(a));
     const answers = Object.fromEntries(rows.map((q) => [q.id, q.correct_answer]));
     const done = await candidate.post(exam(a.token, '/submit'), { answers });
     assert.equal(done.data.state, 'submitted');
-    const scored = db.prepare('SELECT test_score, iq_points, iq_max FROM assessments WHERE id = ?').get(a.id);
+    const scored = db.prepare('SELECT test_score, iq_points, iq_max FROM assessments WHERE id = ?').get(attemptOf(a));
     assert.equal(scored.test_score, 100);
     assert.equal(scored.iq_points, 10);
   }
@@ -98,7 +98,7 @@ test('answers autosave and are counted on submit', async () => {
   const again = await candidate.get(exam(a.token));
   assert.equal(again.data.questions[0].answer, correct, 'resuming shows saved answers');
   await candidate.post(exam(a.token, '/submit'), {});
-  const s = db.prepare('SELECT iq_points FROM assessments WHERE id = ?').get(a.id);
+  const s = db.prepare('SELECT iq_points FROM assessments WHERE id = ?').get(attemptOf(a));
   assert.equal(s.iq_points, 1);
 });
 
@@ -112,7 +112,7 @@ test('candidate cannot submit twice or reuse a completed link', async () => {
   assert.equal(second.data.state, 'submitted');
   assert.equal((await startExam(a.token)).data.state, 'submitted');
   assert.equal((await candidate.get(exam(a.token))).data.state, 'submitted');
-  const count = db.prepare("SELECT COUNT(*) AS n FROM assessments WHERE id = ? AND status = 'SUBMITTED'").get(a.id).n;
+  const count = db.prepare("SELECT COUNT(*) AS n FROM assessments WHERE id = ? AND status = 'SUBMITTED'").get(attemptOf(a)).n;
   assert.equal(count, 1);
 });
 
@@ -121,46 +121,56 @@ test('double-clicking Start only starts once', async () => {
   const [r1, r2] = await Promise.all([startExam(a.token), startExam(a.token)]);
   assert.equal(r1.data.state, 'in_progress');
   assert.equal(r2.data.state, 'in_progress');
-  const n = db.prepare('SELECT COUNT(*) AS n FROM assessment_questions WHERE assessment_id = ?').get(a.id).n;
+  const n = db.prepare('SELECT COUNT(*) AS n FROM assessment_questions WHERE assessment_id = ?').get(attemptOf(a)).n;
   assert.equal(n, 10);
 });
 
-test('link expires if not opened in time', async () => {
+test('an expired link lets no new candidate start', async () => {
   const a = await newLink({ link_expiry_minutes: 10 });
-  db.prepare("UPDATE assessments SET link_expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(a.id);
-  assert.equal((await candidate.get(exam(a.token))).data.state, 'expired');
-  const r = await startExam(a.token);
+  db.prepare("UPDATE assessment_links SET link_expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(a.id);
+  const fresh = client();
+  assert.equal((await fresh.get(exam(a.token))).data.state, 'expired');
+  const r = await fresh.post(exam(a.token, '/start'), CANDIDATE);
   assert.equal(r.status, 409);
   assert.equal(r.data.state, 'expired');
+  assert.equal(attemptOf(a), undefined, 'no attempt was created');
   // The expired link is still on record for HR.
   const list = await admin.get('/api/admin/assessments');
-  assert.equal(list.data.find((x) => x.id === a.id).state, 'expired');
+  assert.equal(list.data.find((x) => x.kind === 'link' && x.id === a.id).share_state, 'expired');
 });
 
-test('disabled link cannot be opened; enabling restores it; regenerate replaces the token', async () => {
+test('disabled link cannot be started; enabling restores it; an unused link can get a new address', async () => {
   const a = await newLink();
-  await admin.post(`/api/admin/assessments/${a.id}/disable`);
-  assert.equal((await candidate.get(exam(a.token))).data.state, 'disabled');
-  assert.equal((await startExam(a.token)).status, 409);
+  await admin.post(`/api/admin/links/${a.id}/disable`);
+  const fresh = client();
+  assert.equal((await fresh.get(exam(a.token))).data.state, 'disabled');
+  assert.equal((await fresh.post(exam(a.token, '/start'), CANDIDATE)).status, 409);
 
-  await admin.post(`/api/admin/assessments/${a.id}/enable`);
-  assert.equal((await candidate.get(exam(a.token))).data.state, 'ready');
+  await admin.post(`/api/admin/links/${a.id}/enable`);
+  assert.equal((await fresh.get(exam(a.token))).data.state, 'ready');
 
-  const regen = await admin.post(`/api/admin/assessments/${a.id}/regenerate`);
+  const regen = await admin.post(`/api/admin/links/${a.id}/regenerate`);
   assert.notEqual(regen.data.token, a.token);
-  assert.equal((await candidate.get(exam(a.token))).status, 404, 'old link stops working');
-  assert.equal((await candidate.get(exam(regen.data.token))).data.state, 'ready');
+  assert.equal((await fresh.get(exam(a.token))).status, 404, 'old link stops working');
+  assert.equal((await fresh.get(exam(regen.data.token))).data.state, 'ready');
+
+  // Once a candidate has used the link its address stays, and it cannot be deleted.
+  await fresh.post(exam(regen.data.token, '/start'), CANDIDATE);
+  assert.equal((await admin.post(`/api/admin/links/${a.id}/regenerate`)).status, 400);
+  assert.equal((await admin.del(`/api/admin/links/${a.id}`)).status, 400);
+  const unused = await newLink();
+  assert.equal((await admin.del(`/api/admin/links/${unused.id}`)).status, 200);
 });
 
 test('server rejects answers after the deadline and auto-submits', async () => {
   const a = await newLink();
   const r = await startExam(a.token);
-  expireDeadline(a.id);
+  expireDeadline(attemptOf(a));
   const late = await candidate.put(exam(a.token, '/answer'), { question_id: r.data.questions[0].id, answer: 'A' });
   assert.equal(late.status, 409);
   assert.equal(late.data.state, 'submitted');
   assert.equal(late.data.auto_submitted, true);
-  const row = db.prepare('SELECT status, auto_submitted, submitted_at FROM assessments WHERE id = ?').get(a.id);
+  const row = db.prepare('SELECT status, auto_submitted, submitted_at FROM assessments WHERE id = ?').get(attemptOf(a));
   assert.equal(row.status, 'SUBMITTED');
   assert.equal(row.auto_submitted, 1);
   assert.ok(row.submitted_at);
@@ -169,36 +179,49 @@ test('server rejects answers after the deadline and auto-submits', async () => {
 test('a submit arriving long after the deadline does not count its answers', async () => {
   const a = await newLink();
   const r = await startExam(a.token);
-  expireDeadline(a.id);
-  const rows = db.prepare('SELECT id, correct_answer FROM assessment_questions WHERE assessment_id = ?').all(a.id);
+  expireDeadline(attemptOf(a));
+  const rows = db.prepare('SELECT id, correct_answer FROM assessment_questions WHERE assessment_id = ?').all(attemptOf(a));
   const res = await candidate.post(exam(a.token, '/submit'), { answers: Object.fromEntries(rows.map((q) => [q.id, q.correct_answer])) });
   assert.equal(res.data.state, 'submitted');
-  assert.equal(db.prepare('SELECT iq_points FROM assessments WHERE id = ?').get(a.id).iq_points, 0);
+  assert.equal(db.prepare('SELECT iq_points FROM assessments WHERE id = ?').get(attemptOf(a)).iq_points, 0);
   assert.ok(r.data.questions.length > 0);
 });
 
 test('the background sweep submits assessments abandoned after the deadline', async () => {
   const a = await newLink();
   await startExam(a.token);
-  expireDeadline(a.id);
+  expireDeadline(attemptOf(a));
   assert.ok(finalizeExpired() >= 1);
-  const row = db.prepare('SELECT status, auto_submitted, result FROM assessments WHERE id = ?').get(a.id);
+  const row = db.prepare('SELECT status, auto_submitted, result FROM assessments WHERE id = ?').get(attemptOf(a));
   assert.equal(row.status, 'SUBMITTED');
   assert.equal(row.auto_submitted, 1);
   assert.equal(row.result, 'Not Pass');
   assert.equal(finalizeExpired(), 0, 'running again changes nothing');
 });
 
-test('an assessment linked to an existing candidate updates that candidate', async () => {
+test('a shared link never pre-fills anyone\'s details', async () => {
   const c = await admin.post('/api/admin/candidates', { name: 'Pre-registered Person', phone: '111' });
   const a = await newLink({ candidate_id: c.data.id });
-  const ready = await candidate.get(exam(a.token));
-  assert.equal(ready.data.candidate.name, 'Pre-registered Person', 'form is pre-filled');
-  await startExam(a.token, { ...CANDIDATE, name: 'Pre-registered Person', phone: '222' });
-  const row = db.prepare('SELECT phone, university FROM candidates WHERE id = ?').get(c.data.id);
-  assert.equal(row.phone, '222');
-  assert.equal(row.university, CANDIDATE.university);
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM candidates WHERE name = ?').get('Pre-registered Person').n, 1);
+  const ready = (await client().get(exam(a.token))).data;
+  assert.equal(ready.state, 'ready');
+  assert.equal(ready.candidate, undefined);
+  assert.ok(!JSON.stringify(ready).includes('Pre-registered'));
+});
+
+test('an older one-person link (made before shared links) still works and pre-fills its candidate', async () => {
+  const c = await admin.post('/api/admin/candidates', { name: 'Legacy Invitee', phone: '111' });
+  db.prepare(`INSERT INTO assessments (token, candidate_id, assessment_type, sections, time_limit_minutes, link_expiry_minutes, link_expires_at, created_at)
+    VALUES ('legacy-one-person-link-000000000000', ?, 'IQ', '{"IQ":3}', 10, 60, '2099-01-01T00:00:00.000Z', ?)`).run(c.data.id, new Date().toISOString());
+  const aid = db.prepare("SELECT id FROM assessments WHERE token = 'legacy-one-person-link-000000000000'").get().id;
+  db.prepare("INSERT INTO assessment_stages (assessment_id, position, section, question_count, time_limit_minutes, pass_mark) VALUES (?, 1, 'IQ', 3, 10, 60)").run(aid);
+  const legacy = client();
+  const ready = (await legacy.get(exam('legacy-one-person-link-000000000000'))).data;
+  assert.equal(ready.candidate.name, 'Legacy Invitee', 'form is pre-filled');
+  const s = (await legacy.post(exam('legacy-one-person-link-000000000000', '/start'), { ...CANDIDATE, name: 'Legacy Invitee', phone: '222' })).data;
+  assert.equal(s.state, 'in_progress');
+  assert.equal(db.prepare('SELECT phone FROM candidates WHERE id = ?').get(c.data.id).phone, '222');
+  // Anyone else opening it sees the same single attempt, as before.
+  assert.equal((await client().get(exam('legacy-one-person-link-000000000000'))).data.state, 'in_progress');
 });
 
 test('selected language is returned to the exam page', async () => {
@@ -211,14 +234,14 @@ test('focus changes are counted', async () => {
   await startExam(a.token);
   await candidate.post(exam(a.token, '/focus-lost'));
   await candidate.post(exam(a.token, '/focus-lost'));
-  assert.equal(db.prepare('SELECT focus_losses FROM assessments WHERE id = ?').get(a.id).focus_losses, 2);
+  assert.equal(db.prepare('SELECT focus_losses FROM assessments WHERE id = ?').get(attemptOf(a)).focus_losses, 2);
 });
 
 test('combined assessment: one link, IQ first, General only after IQ is passed', async () => {
   const a = await newLink({ assessment_type: 'COMBINED', counts: { IQ: 3, GENERAL: 2, CALCULATION: 0, ESSAY: 0 } });
   const r = await startExam(a.token);
   assert.deepEqual([...new Set(r.data.questions.map((q) => q.section))], ['IQ']);
-  const rows = db.prepare('SELECT id, correct_answer FROM assessment_questions WHERE assessment_id = ?').all(a.id);
+  const rows = db.prepare('SELECT id, correct_answer FROM assessment_questions WHERE assessment_id = ?').all(attemptOf(a));
   const passed = await candidate.post(exam(a.token, '/submit'), { answers: Object.fromEntries(rows.map((q) => [q.id, q.correct_answer])) });
   assert.equal(passed.data.state, 'next_test');
   const next = await candidate.post(exam(a.token, '/continue'));

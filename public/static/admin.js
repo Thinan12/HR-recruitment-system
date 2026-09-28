@@ -179,6 +179,7 @@ const ROUTES = {
   candidates: (id) => (id ? renderCandidate(id) : renderCandidates()),
   questions: () => renderQuestions(),
   assessments: (id) => (id ? renderAssessment(id) : renderAssessments()),
+  links: (id) => renderLink(id),
   results: () => renderResults(),
   settings: () => renderSettings(),
 };
@@ -186,7 +187,7 @@ const ROUTES = {
 async function route() {
   const [, page = 'dashboard', id] = location.hash.split('/');
   const render = ROUTES[page] || ROUTES.dashboard;
-  document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.page === (ROUTES[page] ? page : 'dashboard')));
+  document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.page === (page === 'links' ? 'assessments' : ROUTES[page] ? page : 'dashboard')));
   loading();
   try { await render(id); } catch (e) { view().replaceChildren(message(e.message)); }
 }
@@ -705,8 +706,8 @@ const PASS_SETTING = { IQ: 'pass_iq', GENERAL: 'pass_general', CALCULATION: 'pas
 const EXPIRY_CHOICES = [[10, '10 minutes'], [30, '30 minutes'], [60, '1 hour'], [120, '2 hours'], [1440, '1 day'], [4320, '3 days'], [10080, '7 days'], ['custom', 'Custom (minutes)']];
 
 async function renderAssessments() {
-  const [settings, candidates, questionData, list] = await Promise.all([
-    api('GET', '/settings'), api('GET', '/candidates'), api('GET', '/questions/counts'), api('GET', '/assessments')]);
+  const [settings, questionData, list] = await Promise.all([
+    api('GET', '/settings'), api('GET', '/questions/counts'), api('GET', '/assessments')]);
   const counts = questionData;
 
   // One link holds all chosen tests, always in this order: IQ -> General -> Calculation -> Essay.
@@ -724,7 +725,7 @@ async function renderAssessments() {
         h('button', { type: 'button', class: 'secondary small', disabled: n > counts[sec], onclick: () => { count.value = n; } }, String(n)))) : null;
       return h('div', { class: 'test-row' },
         h('label', { class: 'test-name' }, check, ` ${i + 1}. ${TYPE_LABEL[sec]}`),
-        has ? h('span', { class: 'row small' }, count, 'questions', minutes, 'minutes', 'pass at', pass, '%', quick, h('span', { class: 'muted' }, `(bank has ${counts[sec]})`))
+        has ? h('span', { class: 'row small' }, count, h('span', {}, 'questions'), minutes, h('span', {}, 'minutes ·'), h('span', {}, 'pass at'), pass, h('span', {}, '%'), quick, h('span', { class: 'muted' }, `(bank has ${counts[sec]})`))
           : h('span', { class: 'muted small' }, 'No active questions in the bank yet'));
     }));
 
@@ -737,13 +738,13 @@ async function renderAssessments() {
 
   const output = h('div');
   const form = h('form', { class: 'grid' },
-    field('Candidate', select('candidate_id', [['', 'New candidate (fills in their own details)'], ...candidates.map((c) => [c.id, `${c.name}${c.phone ? ' - ' + c.phone : ''}`])], '')),
+    field('Link name (optional, e.g. September Recruitment)', h('input', { name: 'title', maxlength: 200 })),
     field('Language', select('language', Object.entries(LANG_LABEL), settings.default_language)),
     field('Link expires in', expirySelect),
     customField,
     testsBox,
     field('Final eligibility mark (%): every test passed AND final score at least', h('input', { name: 'eligibility_mark', type: 'number', min: 0, max: 100, step: 'any', value: settings.final_eligibility })),
-    h('p', { class: 'muted small wide' }, 'The candidate gets ONE link, enters their details once, then takes the tests in order. Each test has its own timer and its own pass mark (defaults in Settings); if a test is not passed the assessment stops and the later tests stay locked. Final score = the average of the included tests. Questions are random for each candidate and answers are shuffled. IQ: Level 1 → 5, split evenly (18 questions = 4 / 3 / 3 / 4 / 4, maximum 55 marks; 20 = 4 each, maximum 60).'),
+    h('p', { class: 'muted small wide' }, 'ONE link for MANY candidates: share the same link with everyone. Each person who opens it gets their own session (their own details, questions, timers, answers and results); a refresh or reopening the link in the same browser continues their own attempt. The candidate enters their details once, then takes the tests in order. Each test has its own timer and its own pass mark (defaults in Settings); if a test is not passed the assessment stops and the later tests stay locked. Final score = the average of the included tests. Questions are random for each candidate and answers are shuffled. IQ: Level 1 → 5, split evenly (18 questions = 4 / 3 / 3 / 4 / 4, maximum 55 marks; 20 = 4 each, maximum 60).'),
     h('div', { class: 'wide' }, h('button', { type: 'submit' }, 'Generate ONE Assessment Link')));
 
   form.addEventListener('submit', async (e) => {
@@ -751,7 +752,7 @@ async function renderAssessments() {
     const v = formValues(form);
     const tests = TESTS.filter((sec) => v['test_' + sec]);
     const body = {
-      candidate_id: v.candidate_id || null,
+      title: v.title,
       tests,
       language: v.language,
       link_expiry_minutes: Number(v.expiry_choice === 'custom' ? v.expiry_custom : v.expiry_choice),
@@ -766,12 +767,12 @@ async function renderAssessments() {
       const url = examUrl(a.token);
       const input = h('input', { value: url, readonly: true });
       const copy = h('button', { type: 'button', onclick: () => copyText(url, copy) }, 'Copy Link');
-      const who = v.candidate_id ? (candidates.find((c) => String(c.id) === String(v.candidate_id)) || {}).name : 'New candidate (fills in their own details)';
       output.replaceChildren(h('div', { class: 'message ok' },
-        h('strong', {}, 'Assessment Created'), h('br'), `Candidate: ${who}`, h('br'),
+        h('strong', {}, 'Shared Assessment Link Created' + (a.title ? ` — ${a.title}` : '')), h('br'),
+        'Send this ONE link to every candidate. Each person gets their own session and result.', h('br'),
         `Tests: ${a.stages.map((st) => `${TYPE_LABEL[st.section]} (pass ${st.pass_mark}%)`).join(' → ')}`, h('br'),
         `Company eligibility: every test passed and final score at least ${a.eligibility_mark}%`, h('br'),
-        `The link must be opened before ${fmtDateTime(a.link_expires_at)}.`),
+        `New candidates can start until ${fmtDateTime(a.link_expires_at)}.`),
         h('div', { class: 'link-box' }, input, copy));
       input.select();
       refreshList();
@@ -844,9 +845,12 @@ function assessmentTable(list, showCandidate) {
     } catch (ex) { alert(ex.message); }
   };
   return h('div', { class: 'table-wrap' }, h('table', {},
-    h('thead', {}, h('tr', {}, [showCandidate ? 'Candidate' : null, 'Tests', 'Current Stage', 'Overall Result', 'Created', 'Link expires', 'Actions'].filter(Boolean).map((t) => h('th', {}, t)))),
+    h('thead', {}, h('tr', {}, [showCandidate ? 'Candidates' : null, 'Tests', 'Status / Current Stage', 'Overall Result', 'Created', 'Link expires', 'Actions'].filter(Boolean).map((t) => h('th', {}, t)))),
     h('tbody', {}, list.map((a) => {
-      const copy = h('button', { class: 'secondary small', type: 'button', onclick: () => copyText(examUrl(a.token), copy) }, 'Copy link');
+      if (a.kind === 'link') return sharedLinkRow(a, showCandidate);
+      // A candidate's attempt on a shared link is reached through the shared URL.
+      const url = examUrl(a.link_token || a.token);
+      const copy = h('button', { class: 'secondary small', type: 'button', onclick: () => copyText(url, copy) }, 'Copy link');
       const canUse = a.state === 'ready' || a.state === 'disabled' || a.state === 'expired';
       return h('tr', {},
         showCandidate ? h('td', {}, a.candidate_id ? h('a', { href: '#/candidates/' + a.candidate_id }, a.candidate_name || 'Candidate') : h('span', { class: 'muted' }, 'Not started')) : null,
@@ -866,8 +870,84 @@ function assessmentTable(list, showCandidate) {
     }))));
 }
 
+const SHARE_STATE = { open: ['Active', 'pass'], disabled: ['Disabled', 'fail'], expired: ['Expired', 'fail'] };
+
+// One shared link in the Assessment Links table: its tests, how many
+// candidates used it, and its actions. Its candidates are on its own page.
+function sharedLinkRow(l, showCandidate) {
+  const act = (action) => async () => {
+    try {
+      if (action === 'delete') {
+        if (!confirm('Delete this unused link?')) return;
+        await api('DELETE', '/links/' + l.id);
+      } else {
+        if (action === 'regenerate' && !confirm('Create a new address for this link? The old address will stop working.')) return;
+        await api('POST', `/links/${l.id}/${action}`);
+      }
+      route();
+    } catch (ex) { alert(ex.message); }
+  };
+  const copy = h('button', { class: 'secondary small', type: 'button', onclick: () => copyText(examUrl(l.token), copy) }, 'Copy link');
+  const [stateText, stateCls] = SHARE_STATE[l.share_state] || [l.share_state, 'neutral'];
+  const who = l.candidates ? `${l.candidates} candidate${l.candidates === 1 ? '' : 's'}` : 'No candidates yet';
+  return h('tr', {},
+    showCandidate ? h('td', {}, h('a', { href: '#/links/' + l.id }, h('strong', {}, who)),
+      l.candidate_names && l.candidate_names.length ? h('div', { class: 'muted small' }, l.candidate_names.join(', ') + (l.candidates > l.candidate_names.length ? ', …' : '')) : null) : null,
+    h('td', { class: 'small' }, h('strong', {}, l.title || 'Shared link'), h('div', {}, l.stages.map((st) => SECTION_LABEL[st.section]).join(' → ')),
+      h('div', { class: 'muted small' }, `${LANG_LABEL[l.language]} · ${l.time_limit_minutes} min in total`)),
+    h('td', {}, h('span', { class: 'badge ' + stateCls }, stateText),
+      l.candidates ? h('div', { class: 'muted small' }, `${l.in_progress} in progress · ${l.finished} finished`) : null),
+    h('td', {}, '-'),
+    h('td', { class: 'small' }, fmtDate(l.created_at)),
+    h('td', { class: 'small' }, fmtDateTime(l.link_expires_at)),
+    h('td', { class: 'nowrap' },
+      l.share_state !== 'expired' ? copy : null, ' ',
+      h('a', { class: 'button secondary small', href: '#/links/' + l.id }, 'Candidates'), ' ',
+      l.enabled ? h('button', { class: 'secondary small', type: 'button', onclick: act('disable') }, 'Disable')
+        : h('button', { class: 'secondary small', type: 'button', onclick: act('enable') }, 'Enable'), ' ',
+      !l.candidates ? h('button', { class: 'secondary small', type: 'button', onclick: act('regenerate') }, 'Regenerate') : null, ' ',
+      !l.candidates ? h('button', { class: 'danger small', type: 'button', onclick: act('delete') }, 'Delete') : null));
+}
+
+// One shared link and every candidate who used it: one row per candidate session.
+async function renderLink(id) {
+  const { link: l, attempts } = await api('GET', '/links/' + id);
+  const url = examUrl(l.token);
+  const input = h('input', { value: url, readonly: true });
+  const copy = h('button', { type: 'button', onclick: () => copyText(url, copy) }, 'Copy Link');
+  const [stateText, stateCls] = SHARE_STATE[l.share_state] || [l.share_state, 'neutral'];
+  const toggle = h('button', { type: 'button', class: 'secondary', onclick: async () => {
+    try { await api('POST', `/links/${l.id}/${l.enabled ? 'disable' : 'enable'}`); route(); } catch (ex) { alert(ex.message); }
+  } }, l.enabled ? 'Disable link (no new candidates)' : 'Enable link');
+  const rows = attempts.map((a) => h('tr', {},
+    h('td', {}, a.candidate_id ? h('a', { href: '#/candidates/' + a.candidate_id }, h('strong', {}, a.candidate_name)) : '-', h('div', { class: 'muted small' }, fmt(a.candidate_phone))),
+    ...['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'].filter((sec) => l.stages.some((st) => st.section === sec)).map((sec) => {
+      const t = (a.tests || []).find((x) => x.section === sec);
+      return h('td', {}, testCell(a, sec), t && t.section === 'IQ' && t.lalco_iq_score != null ? h('div', { class: 'muted small' }, `LALCO ${t.lalco_iq_score} / 150 · ${t.level}`) : null);
+    }),
+    h('td', { class: 'small' }, fmt(a.current_stage), a.enabled ? null : h('div', {}, h('span', { class: 'badge fail' }, 'Stopped by HR'))),
+    h('td', {}, a.final_percent_text || '-', a.final_level ? h('div', { class: 'muted small' }, a.final_level) : null),
+    h('td', { title: a.eligibility_note || '' }, eligibilityBadge(a.eligibility)),
+    h('td', {}, resultBadge(a.final_result || 'Pending')),
+    h('td', { class: 'small' }, fmtDateTime(a.started_at)),
+    h('td', { class: 'small' }, fmtDateTime(a.submitted_at)),
+    h('td', { class: 'nowrap' }, h('a', { class: 'button secondary small', href: '#/assessments/' + a.id }, 'View'))));
+  view().replaceChildren(
+    h('p', {}, h('a', { href: '#/assessments' }, '< All assessment links')),
+    h('div', { class: 'row between' }, h('h1', {}, l.title || 'Shared assessment link', ' ', h('span', { class: 'badge ' + stateCls }, stateText)), toggle),
+    h('div', { class: 'card' },
+      h('div', { class: 'link-box' }, input, copy),
+      h('p', { class: 'small' }, `Tests: ${l.stages.map((st) => `${TYPE_LABEL[st.section]} (${st.question_count} questions, ${st.time_limit_minutes} min, pass ${st.pass_mark}%)`).join(' → ')}`),
+      h('p', { class: 'muted small' }, `${LANG_LABEL[l.language]} · created ${fmtDateTime(l.created_at)} · new candidates can start until ${fmtDateTime(l.link_expires_at)} · company eligibility: every test passed and final score at least ${l.eligibility_mark}%. Disabling or expiry stops NEW candidates only; candidates already in a test can finish.`)),
+    h('div', { class: 'card' }, h('h2', {}, `Candidates (${attempts.length})`),
+      attempts.length ? h('div', { class: 'table-wrap' }, h('table', {},
+        h('thead', {}, h('tr', {}, ['Candidate', ...l.stages.map((st) => SECTION_LABEL[st.section]), 'Current Stage', 'Final %', 'Company Eligibility', 'HR Final Result', 'Started', 'Finished', ''].map((t) => h('th', {}, t)))),
+        h('tbody', {}, rows)))
+        : h('p', { class: 'muted' }, 'Nobody has started yet. Share the link above; every person who opens it gets their own session.')));
+}
+
 async function renderAssessment(id) {
-  const { assessment: a, stages, tests, final, iq, candidate, questions } = await api('GET', '/assessments/' + id);
+  const { assessment: a, stages, tests, final, iq, candidate, questions, link } = await api('GET', '/assessments/' + id);
   const essayInputs = [];
   const count = { correct: 0, wrong: 0, missed: 0 };
   const submitted = a.status === 'SUBMITTED';
@@ -917,6 +997,7 @@ async function renderAssessment(id) {
   card.append(
     h('div', { class: 'table-wrap' }, h('table', { class: 'kv' }, h('tbody', {},
       h('tr', {}, h('th', {}, 'Candidate'), h('td', {}, candidate ? h('a', { href: '#/candidates/' + candidate.id }, candidate.name) : '-')),
+      link ? h('tr', {}, h('th', {}, 'Shared link'), h('td', {}, h('a', { href: '#/links/' + link.id }, link.title || 'Shared link'), h('div', { class: 'muted small' }, 'This candidate’s own session on the shared link'))) : null,
       h('tr', {}, h('th', {}, 'Type'), h('td', {}, TYPE_LABEL[a.assessment_type], ' - ', LANG_LABEL[a.language])),
       h('tr', {}, h('th', {}, 'Status'), h('td', {}, stateBadge(a.state), a.auto_submitted ? ' (time ran out on a test)' : '')),
       h('tr', {}, h('th', {}, 'Current Stage'), h('td', {}, a.current_stage ? a.current_stage.label : '-')),

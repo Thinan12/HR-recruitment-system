@@ -65,8 +65,9 @@ router.post('/candidates', (req, res) => {
 router.get('/candidates/:id', (req, res) => {
   const c = reports.candidateSummary(Number(req.params.id));
   if (!c) return notFound(res);
-  const assessments = db.prepare('SELECT * FROM assessments WHERE candidate_id = ? ORDER BY created_at DESC, id DESC').all(c.id)
-    .map((a) => ({ ...a, state: A.linkState(a) }));
+  const assessments = db.prepare(`SELECT a.*, l.token AS link_token, l.title AS link_title FROM assessments a
+    LEFT JOIN assessment_links l ON l.id = a.link_id WHERE a.candidate_id = ? ORDER BY a.created_at DESC, a.id DESC`).all(c.id)
+    .map((a) => ({ ...a, kind: 'assessment', state: A.linkState(a), stages: A.stagesOf(a), current_stage: A.currentStage(a) }));
   res.json({ candidate: c, assessments });
 });
 
@@ -269,15 +270,66 @@ router.post('/questions/import', (req, res) => {
 
 // ---- assessments -------------------------------------------------------
 
+// Shared links (kind "link", with their candidate count) and the older
+// one-person links (kind "assessment"), newest first. Candidates' attempts on
+// shared links are listed on the link's own page, not here.
 router.get('/assessments', (req, res) => {
-  const rows = db.prepare(`SELECT a.*, c.name AS candidate_name FROM assessments a
-    LEFT JOIN candidates c ON c.id = a.candidate_id ORDER BY a.created_at DESC, a.id DESC`).all();
-  res.json(rows.map((a) => ({ ...a, state: A.linkState(a), stages: A.stagesOf(a), current_stage: A.currentStage(a) })));
+  const links = db.prepare('SELECT * FROM assessment_links').all().map((l) => ({
+    ...A.linkView(l),
+    candidate_names: db.prepare(`SELECT c.name FROM assessments a JOIN candidates c ON c.id = a.candidate_id WHERE a.link_id = ? ORDER BY a.id DESC LIMIT 5`)
+      .all(l.id).map((r) => r.name),
+  }));
+  const single = db.prepare(`SELECT a.*, c.name AS candidate_name FROM assessments a
+    LEFT JOIN candidates c ON c.id = a.candidate_id WHERE a.link_id IS NULL`).all()
+    .map((a) => ({ ...a, kind: 'assessment', state: A.linkState(a), stages: A.stagesOf(a), current_stage: A.currentStage(a) }));
+  res.json([...links, ...single].sort((x, y) => y.created_at.localeCompare(x.created_at) || y.id - x.id));
 });
 
 router.post('/assessments', (req, res) => {
-  const a = A.createAssessment(req.body || {});
-  res.status(201).json({ ...a, state: A.linkState(a), stages: A.stagesOf(a) });
+  res.status(201).json(A.linkView(A.createAssessment(req.body || {})));
+});
+
+// One shared link and every candidate who used it (one row per attempt).
+router.get('/links/:id', (req, res) => {
+  const link = A.getLink(Number(req.params.id));
+  if (!link) return notFound(res);
+  const attempts = db.prepare(`SELECT a.*, c.name AS candidate_name, c.phone AS candidate_phone, c.final_result FROM assessments a
+    LEFT JOIN candidates c ON c.id = a.candidate_id WHERE a.link_id = ? ORDER BY a.started_at DESC, a.id DESC`).all(link.id)
+    .map((a) => {
+      const r = reports.testResults(a);
+      return { id: a.id, candidate_id: a.candidate_id, candidate_name: a.candidate_name, candidate_phone: a.candidate_phone, final_result: a.final_result,
+        status: a.status, state: A.linkState(a), enabled: a.enabled, started_at: a.started_at, submitted_at: a.submitted_at, auto_submitted: a.auto_submitted,
+        current_stage: r.current_stage, tests: r.tests, final_percent: r.final_percent, final_percent_text: r.final_percent_text, final_level: r.final_level,
+        eligibility: r.eligibility, eligibility_note: r.eligibility_note, assessment_result: a.result };
+    });
+  res.json({ link: A.linkView(link), attempts });
+});
+
+// Disable = no NEW candidate can start. Candidates already in a test carry on
+// with their own timer (HR can stop one candidate from their own row).
+router.post('/links/:id/:action(enable|disable)', (req, res) => {
+  const info = db.prepare('UPDATE assessment_links SET enabled = ? WHERE id = ?').run(req.params.action === 'enable' ? 1 : 0, Number(req.params.id));
+  if (!info.changes) return notFound(res);
+  res.json(A.linkView(A.getLink(Number(req.params.id))));
+});
+
+// A new URL, only while nobody has used the link (candidates resume through it).
+router.post('/links/:id/regenerate', (req, res) => {
+  const link = A.getLink(Number(req.params.id));
+  if (!link) return notFound(res);
+  if (A.linkView(link).candidates > 0) return bad(res, 'Candidates have already used this link, so its address cannot change. Disable it and create a new link instead.');
+  db.prepare('UPDATE assessment_links SET token = ?, link_expires_at = ?, enabled = 1 WHERE id = ?')
+    .run(require('crypto').randomBytes(24).toString('base64url'), new Date(Date.now() + link.link_expiry_minutes * 60000).toISOString(), link.id);
+  res.json(A.linkView(A.getLink(link.id)));
+});
+
+// Only an unused link can be deleted; one with candidates keeps their history.
+router.delete('/links/:id', (req, res) => {
+  const link = A.getLink(Number(req.params.id));
+  if (!link) return notFound(res);
+  if (A.linkView(link).candidates > 0) return bad(res, 'Candidates have used this link, so it is kept with their results. Disable it instead.');
+  db.prepare('DELETE FROM assessment_links WHERE id = ?').run(link.id);
+  res.json({ ok: true });
 });
 
 router.get('/assessments/:id', (req, res) => {
@@ -286,7 +338,9 @@ router.get('/assessments/:id', (req, res) => {
   const candidate = a.candidate_id ? db.prepare('SELECT id, name, phone FROM candidates WHERE id = ?').get(a.candidate_id) : null;
   const questions = db.prepare('SELECT * FROM assessment_questions WHERE assessment_id = ? ORDER BY position').all(a.id);
   const stages = A.stagesOf(a);
+  const link = a.link_id ? A.getLink(a.link_id) : null;
   res.json({ assessment: { ...a, state: A.linkState(a), current_stage: A.currentStage(a, stages) }, stages,
+    link: link ? { id: link.id, title: link.title, token: link.token } : null,
     tests: stages.map((st) => reports.stageView(a, st, stages)), final: reports.finalAssessment(a, stages), iq: reports.iqResult(a), candidate, questions });
 });
 

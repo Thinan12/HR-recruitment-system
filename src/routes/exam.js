@@ -1,28 +1,59 @@
-// Public candidate API. The unguessable link token is the only credential.
-// Error codes (not sentences) are returned so the page can show them in the
-// assessment's language.
+// Public candidate API. Error codes (not sentences) are returned so the page
+// can show them in the assessment's language.
+//
+// A shared link (assessment_links) is opened by many candidates at the same
+// URL. Each browser gets a random secret in an HttpOnly cookie scoped to that
+// link; the server stores only its SHA-256 on the candidate's own attempt.
+// Every request works on the attempt found from link + cookie, never on an id
+// sent by the browser. Older one-person links (an assessments.token without a
+// link) work exactly as before: the token is the only credential.
 const express = require('express');
-const { db } = require('../db');
+const { db, audit } = require('../db');
 const A = require('../assessments');
 const reports = require('../reports');
 const images = require('../images');
 
 const router = express.Router();
 
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const COOKIE = 'lalco_candidate_session';
+const SESSION_DAYS = 30;
 const PREFILL = ['name', 'phone', 'graduate_from', 'high_school', 'college', 'university', 'school_name', 'subject', 'gpa'];
 
-function load(req) {
-  return db.prepare('SELECT * FROM assessments WHERE token = ?').get(String(req.params.token || ''));
+function readSecret(req) {
+  for (const part of (req.headers.cookie || '').split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0 && part.slice(0, i).trim() === COOKIE) {
+      const v = decodeURIComponent(part.slice(i + 1).trim());
+      return /^[A-Za-z0-9_-]{32,100}$/.test(v) ? v : null;
+    }
+  }
+  return null;
+}
+// The cookie is only sent back to this link's API, so two links open in one
+// browser never share a session.
+function setSecret(res, token, secret) {
+  res.cookie(COOKIE, secret, { httpOnly: true, sameSite: 'lax', secure: IS_PRODUCTION, maxAge: SESSION_DAYS * 86400 * 1000, path: '/api/exam/' + token });
+}
+
+// { link, a, secret }: the shared link (if the token is one) and the attempt
+// of this browser's session; or { a } for an older one-person link.
+function resolve(req) {
+  const token = String(req.params.token || '');
+  const link = A.linkByToken(token);
+  if (!link) return { a: db.prepare('SELECT * FROM assessments WHERE token = ? AND link_id IS NULL').get(token) };
+  const secret = readSecret(req);
+  return { link, secret, a: A.attemptFor(link, secret) };
 }
 
 // If time has run out, submit it now so the candidate sees the final state.
 function loadFresh(req) {
-  let a = load(req);
-  if (a && a.status === 'IN_PROGRESS' && A.isPastDeadline(a)) {
-    A.finalize(a.id, true);
-    a = load(req);
+  const r = resolve(req);
+  if (r.a && r.a.status === 'IN_PROGRESS' && A.isPastDeadline(r.a)) {
+    A.finalize(r.a.id, true);
+    r.a = A.getAssessment(r.a.id);
   }
-  return a;
+  return r;
 }
 
 // The tests of this link and where the candidate is:
@@ -53,9 +84,24 @@ function lastResult(a, stages) {
     lalco_iq_score: v.lalco_iq_score, pass_mark: v.pass_mark };
 }
 
+// A shared link before this browser has started: the start form, fresh and
+// empty for every new candidate (nobody's details are ever pre-filled).
+function linkResponse(link) {
+  const share = A.linkShareState(link);
+  const view = A.linkView(link);
+  const base = { state: share === 'open' ? 'ready' : share, shared: true, language: link.language, assessment_type: link.assessment_type,
+    time_limit_minutes: link.time_limit_minutes };
+  if (share !== 'open') return base;
+  base.tests = progress(view.stages.map((st) => ({ ...st, status: 'NOT_STARTED' })), 'ready');
+  base.question_count = view.stages[0].question_count;
+  base.time_limit_minutes = view.stages[0].time_limit_minutes;
+  base.current_stage = 'NOT_STARTED';
+  return base;
+}
+
 function stateResponse(a) {
   const state = A.linkState(a);
-  const base = { state, language: a.language, assessment_type: a.assessment_type, time_limit_minutes: a.time_limit_minutes };
+  const base = { state, shared: !!a?.link_id, language: a?.language, assessment_type: a?.assessment_type, time_limit_minutes: a?.time_limit_minutes };
   if (state === 'not_found') return base;
   const stages = A.stagesOf(a);
   base.tests = progress(stages, state);
@@ -86,7 +132,9 @@ function stateResponse(a) {
     base.candidate = { name: c ? c.name : '' };
     base.section = current[0];
     base.remaining_seconds = Math.max(0, Math.floor((Date.parse(a.deadline_at) - Date.now()) / 1000));
-    const imageUrl = (id) => (id ? `/api/exam/${encodeURIComponent(a.token)}/images/${id}` : null);
+    // Pictures are fetched through the URL the candidate is using.
+    const token = a.link_id ? A.getLink(a.link_id).token : a.token;
+    const img = (id) => (id ? `/api/exam/${encodeURIComponent(token)}/images/${id}` : null);
     // Only the questions of the test that is running now.
     base.questions = db.prepare('SELECT * FROM assessment_questions WHERE assessment_id = ? ORDER BY position').all(a.id)
       .filter((q) => current.includes(q.section)).map((q) => {
@@ -95,11 +143,11 @@ function stateResponse(a) {
           id: q.id,
           section: q.section,
           text: q.question_text,
-          image: imageUrl(q.image_id),
+          image: img(q.image_id),
           kind: q.section === 'ESSAY' ? 'essay' : order.length ? 'choice' : 'short',
           // Options in this candidate's shuffled order; the key is the original
           // letter, which tells the browser nothing about which one is correct.
-          options: order.map((L) => ({ key: L, text: q['option_' + L.toLowerCase()], image: imageUrl(q[`option_${L.toLowerCase()}_image`]) })),
+          options: order.map((L) => ({ key: L, text: q['option_' + L.toLowerCase()], image: img(q[`option_${L.toLowerCase()}_image`]) })),
           answer: q.answer,
         };
       });
@@ -113,14 +161,40 @@ function stateResponse(a) {
   return base;
 }
 
+// What to send when a request needs an attempt this browser does not have.
+function noAttempt(res, r) {
+  if (r.link) return res.status(409).json(linkResponse(r.link));
+  return res.status(404).json({ state: 'not_found' });
+}
+
 router.get('/:token', (req, res) => {
-  const a = loadFresh(req);
-  if (!a) return res.status(404).json({ state: 'not_found' });
-  res.json(stateResponse(a));
+  const r = loadFresh(req);
+  if (r.link && !r.a) {
+    // Opening the link creates no record; the browser only receives its
+    // session secret, used once the candidate presses Start.
+    if (!r.secret) setSecret(res, r.link.token, A.newSessionSecret());
+    return res.json(linkResponse(r.link));
+  }
+  if (!r.a) return res.status(404).json({ state: 'not_found' });
+  res.json(stateResponse(r.a));
 });
 
 router.post('/:token/start', (req, res) => {
-  const a = loadFresh(req);
+  const r = loadFresh(req);
+  if (r.link && !r.a) {
+    let secret = r.secret;
+    if (!secret) { secret = A.newSessionSecret(); setSecret(res, r.link.token, secret); }
+    try {
+      return res.json(stateResponse(A.startFromLink(r.link, req.body, secret)));
+    } catch (e) {
+      if (e instanceof A.InputError) {
+        if (e.message === 'link_closed') return res.status(409).json(linkResponse(A.getLink(r.link.id)));
+        return res.status(400).json({ error: e.message });
+      }
+      throw e;
+    }
+  }
+  const a = r.a;
   if (!a) return res.status(404).json({ state: 'not_found' });
   const state = A.linkState(a);
   if (state === 'in_progress') return res.json(stateResponse(a));
@@ -129,17 +203,29 @@ router.post('/:token/start', (req, res) => {
     A.startAssessment(a, req.body);
   } catch (e) {
     if (e instanceof A.InputError) {
-      if (e.message === 'already_started') return res.json(stateResponse(load(req)));
+      if (e.message === 'already_started') return res.json(stateResponse(A.getAssessment(a.id)));
       return res.status(400).json({ error: e.message });
     }
     throw e;
   }
-  res.json(stateResponse(load(req)));
+  res.json(stateResponse(A.getAssessment(a.id)));
+});
+
+// "Start New Candidate" on a shared device: this browser gets a new, empty
+// session. The previous candidate's attempt is kept exactly as it is (a
+// running test still ends at its own deadline).
+router.post('/:token/new-candidate', (req, res) => {
+  const r = resolve(req);
+  if (!r.link) return res.status(404).json({ state: 'not_found' });
+  if (r.a) audit('NEW_CANDIDATE_ON_DEVICE', 'candidate', { link_id: r.link.id, previous_assessment_id: r.a.id });
+  setSecret(res, r.link.token, A.newSessionSecret());
+  res.json(linkResponse(r.link));
 });
 
 router.post('/:token/continue', (req, res) => {
-  const a = loadFresh(req);
-  if (!a) return res.status(404).json({ state: 'not_found' });
+  const r = loadFresh(req);
+  const a = r.a;
+  if (!a) return noAttempt(res, r);
   const state = A.linkState(a);
   if (state === 'in_progress') return res.json(stateResponse(a));
   if (state !== 'next_test') return res.status(409).json(stateResponse(a));
@@ -149,14 +235,15 @@ router.post('/:token/continue', (req, res) => {
     if (e instanceof A.InputError) return res.status(400).json({ error: e.message });
     throw e;
   }
-  res.json(stateResponse(load(req)));
+  res.json(stateResponse(A.getAssessment(a.id)));
 });
 
 router.put('/:token/answer', (req, res) => {
-  const a = loadFresh(req);
-  if (!a) return res.status(404).json({ state: 'not_found' });
-  const state = A.linkState(a);
-  if (state !== 'in_progress') return res.status(409).json(stateResponse(a));
+  const r = loadFresh(req);
+  const a = r.a;
+  if (!a) return noAttempt(res, r);
+  if (A.linkState(a) !== 'in_progress') return res.status(409).json(stateResponse(a));
+  // saveAnswer only touches a question of THIS attempt's running test.
   if (!A.saveAnswer(a, req.body?.question_id, req.body?.answer)) return res.status(400).json({ error: 'unknown_question' });
   res.json({ ok: true, remaining_seconds: Math.max(0, Math.floor((Date.parse(a.deadline_at) - Date.now()) / 1000)) });
 });
@@ -164,7 +251,7 @@ router.put('/:token/answer', (req, res) => {
 // A picture is only served to the candidate whose running test contains it.
 const IMAGE_COLS = ['image_id', 'option_a_image', 'option_b_image', 'option_c_image', 'option_d_image', 'option_e_image'];
 router.get('/:token/images/:id', (req, res) => {
-  const a = loadFresh(req);
+  const { a } = loadFresh(req);
   const id = Number(req.params.id);
   if (!a || A.linkState(a) !== 'in_progress' || !Number.isInteger(id)) return res.status(404).json({ error: 'Not found.' });
   const used = db.prepare(`SELECT 1 FROM assessment_questions WHERE assessment_id = ? AND ? IN (${IMAGE_COLS.join(', ')})
@@ -174,19 +261,20 @@ router.get('/:token/images/:id', (req, res) => {
 });
 
 router.post('/:token/focus-lost', (req, res) => {
-  const a = load(req);
+  const { a } = resolve(req);
   if (a && a.status === 'IN_PROGRESS') db.prepare('UPDATE assessments SET focus_losses = focus_losses + 1 WHERE id = ?').run(a.id);
   res.json({ ok: true });
 });
 
 router.post('/:token/submit', (req, res) => {
   // Not loadFresh: a submit arriving a few seconds late must still get its answers saved.
-  const a = load(req);
-  if (!a) return res.status(404).json({ state: 'not_found' });
+  const r = resolve(req);
+  const a = r.a;
+  if (!a) return noAttempt(res, r);
   if (a.status === 'SUBMITTED') return res.status(409).json(stateResponse(a));
   if (A.linkState(a) !== 'in_progress') return res.status(409).json(stateResponse(a));
   A.submitAssessment(a, req.body?.answers);
-  res.json(stateResponse(load(req)));
+  res.json(stateResponse(A.getAssessment(a.id)));
 });
 
 module.exports = router;

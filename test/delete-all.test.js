@@ -2,7 +2,7 @@
 // another area and never a candidate's past assessment.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { start, stop, client, seedQuestions, db, CANDIDATE } = require('./helpers');
+const { start, stop, client, seedQuestions, db, CANDIDATE, attemptOf } = require('./helpers');
 
 let admin;
 const candidate = client();
@@ -42,8 +42,8 @@ test.before(async () => {
   s = (await candidate.post(url(a.token, '/continue'))).data;
   s = (await candidate.post(url(a.token, '/submit'), { answers: right(s) })).data;
   assert.equal(s.outcome, 'completed');
-  pastId = a.id;
-  pastCandidate = db.prepare('SELECT candidate_id FROM assessments WHERE id = ?').get(a.id).candidate_id;
+  pastId = attemptOf(a);
+  pastCandidate = db.prepare('SELECT candidate_id FROM assessments WHERE id = ?').get(attemptOf(a)).candidate_id;
   pastBefore = history(pastId);
 });
 test.after(stop);

@@ -46,6 +46,9 @@ const TEXT = {
     stopped_short: 'Assessment stopped. The later tests are locked.\nPlease contact HR.',
     thanks: 'Thank you. Your assessment has been submitted successfully.\nHR will review your results.',
     levels: { Exceptional: 'Exceptional', 'Very High': 'Very High', High: 'High', Average: 'Average', Low: 'Low', 'Very Low': 'Very Low' },
+    new_candidate: 'Start New Candidate',
+    new_candidate_confirm: 'Start a new candidate on this device?\n\nThe current candidate\'s assessment is kept for HR, but it can no longer be continued from this browser.',
+    new_candidate_running: 'A test is still running. If you continue, it will end automatically when its time runs out.\n\n',
   },
   lo: {
     title: 'ການທົດສອບ',
@@ -90,6 +93,9 @@ const TEXT = {
     stopped_short: 'ການປະເມີນໄດ້ຢຸດລົງ. ແບບທົດສອບຕໍ່ໄປຖືກລັອກ.\nກະລຸນາຕິດຕໍ່ຝ່າຍບຸກຄະລາກອນ (HR).',
     thanks: 'ຂອບໃຈ. ການປະເມີນຂອງທ່ານໄດ້ຖືກສົ່ງສຳເລັດແລ້ວ.\nຝ່າຍບຸກຄະລາກອນ (HR) ຈະກວດຜົນຂອງທ່ານ.',
     levels: { Exceptional: 'ດີເລີດ', 'Very High': 'ສູງຫຼາຍ', High: 'ສູງ', Average: 'ປານກາງ', Low: 'ຕ່ຳ', 'Very Low': 'ຕ່ຳຫຼາຍ' },
+    new_candidate: 'ເລີ່ມຜູ້ສະໝັກຄົນໃໝ່',
+    new_candidate_confirm: 'ເລີ່ມຜູ້ສະໝັກຄົນໃໝ່ໃນອຸປະກອນນີ້ບໍ່?\n\nການປະເມີນຂອງຜູ້ສະໝັກຄົນປັດຈຸບັນຈະຖືກເກັບໄວ້ໃຫ້ HR, ແຕ່ຈະບໍ່ສາມາດສືບຕໍ່ຈາກບຣາວເຊີນີ້ໄດ້ອີກ.',
+    new_candidate_running: 'ຍັງມີແບບທົດສອບທີ່ກຳລັງເຮັດຢູ່. ຖ້າສືບຕໍ່, ມັນຈະສິ້ນສຸດອັດຕະໂນມັດເມື່ອໝົດເວລາ.\n\n',
   },
 };
 
@@ -137,9 +143,28 @@ function setLanguage(lang) {
   document.title = 'LALCO - ' + T.title;
 }
 
-function bigMessage(text, tests) {
+function bigMessage(text, tests, data) {
   stopTimer();
-  root.replaceChildren(h('div', { class: 'card big-message' }, text), tests && tests.length > 1 ? progressBox(tests) : null);
+  root.replaceChildren(h('div', { class: 'card big-message' }, text), tests && tests.length > 1 ? progressBox(tests) : null, newCandidateBox(data));
+}
+
+// Shared links only: lets the next person on the same device start fresh.
+// The server gives this browser a new, empty session; the previous
+// candidate's assessment stays saved for HR.
+function newCandidateBox(data, running) {
+  if (!data || !data.shared) return null;
+  const button = h('button', { type: 'button', class: 'secondary small' }, T.new_candidate);
+  button.addEventListener('click', async () => {
+    if (!confirm((running ? T.new_candidate_running : '') + T.new_candidate_confirm)) return;
+    button.disabled = true;
+    try {
+      const r = await call('POST', '/new-candidate');
+      stopTimer();
+      exam = null;
+      show(r.data.state ? r.data : { state: 'error' });
+    } catch { button.disabled = false; bigMessage(T.error); }
+  });
+  return h('div', { class: 'center section-gap new-candidate' }, button);
 }
 
 // ✓ passed · → now / next · ○ not started yet · ✕ not passed · 🔒 locked · … waiting for HR
@@ -179,7 +204,7 @@ function renderFinished(data) {
         : h('h1', { class: 'passed' }, r && !essayPending ? '✓ ' + fill(T.test_passed, { name }) : T.completed_title),
       resultTable(r),
       h('p', { class: 'message ' + (stopped ? 'error' : 'ok') }, stopped ? T.stopped_short : essayPending ? T.essay_pending : T.thanks)),
-    data.tests && data.tests.length > 1 ? progressBox(data.tests) : null);
+    data.tests && data.tests.length > 1 ? progressBox(data.tests) : null, newCandidateBox(data));
 }
 
 // Between tests: the last one was passed; the next opens when the candidate is ready.
@@ -204,7 +229,7 @@ function renderNext(data) {
       h('p', {}, h('span', { class: 'muted' }, T.next_test + ': '), h('strong', {}, T.sections[data.next_section])),
       h('p', { class: 'message ok' }, fillCount(T.next_rules, { m: data.time_limit_minutes, n: data.question_count })),
       button),
-    progressBox(data.tests));
+    progressBox(data.tests), newCandidateBox(data));
 }
 
 // Handles any server reply that carries a state.
@@ -218,10 +243,10 @@ function show(data) {
     // Finished or stopped: the same result is shown every time the link is opened.
     case 'submitted': if (data.last_result) return renderFinished(data);
       // "exam" is set when the candidate sat the test in this page.
-      if (data.outcome === 'stopped') return bigMessage(T.stopped, data.tests);
-      return bigMessage(!exam ? T.already_submitted : data.auto_submitted ? T.auto_submitted : T.submitted, data.tests);
+      if (data.outcome === 'stopped') return bigMessage(T.stopped, data.tests, data);
+      return bigMessage(!exam ? T.already_submitted : data.auto_submitted ? T.auto_submitted : T.submitted, data.tests, data);
     case 'expired': return bigMessage(T.expired);
-    case 'disabled': return bigMessage(T.disabled);
+    case 'disabled': return bigMessage(T.disabled, null, data.current_stage ? data : null);
     case 'not_found': return bigMessage(T.not_found);
     default: return bigMessage(T.error);
   }
@@ -277,6 +302,7 @@ function renderExam(data) {
     section: data.section,
     isIq: data.section === 'IQ',
     tests: data.tests || [],
+    shared: !!data.shared,
   };
   submitting = false;
   startTimer();
@@ -363,7 +389,7 @@ function drawQuestion() {
         onclick: () => go(i),
       }, i + 1)))),
     h('div', { class: 'center' }, h('button', { type: 'button', id: 'submit', onclick: () => submit(false) }, exam.tests.length > 1 ? T.submit_test : T.submit)),
-    exam.tests.length > 1 ? progressBox(exam.tests) : null);
+    exam.tests.length > 1 ? progressBox(exam.tests) : null, newCandidateBox({ shared: exam.shared }, true));
   // Refresh the timer text immediately so it never flashes empty.
   const left = Math.max(0, Math.round((exam.deadline - Date.now()) / 1000));
   document.getElementById('timer').textContent = `${T.time_remaining}: ${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`;

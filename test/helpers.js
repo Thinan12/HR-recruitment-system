@@ -83,9 +83,16 @@ function seedQuestions(section, n, marks = 1, level = section === 'IQ' ? 'Easy' 
   return ids;
 }
 
+// The candidate's attempt (assessments row) on a shared link: the latest one
+// started through it. Tests that run one candidate per link use this as "the" assessment.
+function attemptOf(link) {
+  const row = db.prepare('SELECT id FROM assessments WHERE link_id = ? ORDER BY id DESC LIMIT 1').get(typeof link === 'object' ? link.id : link);
+  return row ? row.id : undefined;
+}
+
 const CANDIDATE = {
   name: 'Test Candidate', phone: '020 5555 1234', graduate_from: 'University', high_school: 'Vientiane High School',
   college: '', university: 'National University of Laos', school_name: 'NUOL', subject: 'Accounting', gpa: '3.4',
 };
 
-module.exports = { start, stop, client, upload, seedQuestions, db, CANDIDATE };
+module.exports = { start, stop, client, upload, seedQuestions, db, CANDIDATE, attemptOf };

@@ -148,7 +148,28 @@ CREATE TABLE IF NOT EXISTS assessment_stages (
   UNIQUE (assessment_id, section)
 );
 
--- Record of high-risk admin actions (e.g. DELETE_ALL_QUESTIONS).
+-- A shareable assessment link. Many candidates can open the same URL; each
+-- one who starts gets their own row in assessments (their attempt), found
+-- again through a random session cookie. stages holds the tests of the link:
+-- [{"section":"IQ","question_count":18,"time_limit_minutes":20,"pass_mark":70}, ...]
+CREATE TABLE IF NOT EXISTS assessment_links (
+  id INTEGER PRIMARY KEY,
+  token TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL DEFAULT '',
+  assessment_type TEXT NOT NULL,
+  sections TEXT NOT NULL,
+  stages TEXT NOT NULL,
+  time_limit_minutes INTEGER NOT NULL,
+  link_expiry_minutes INTEGER NOT NULL,
+  link_expires_at TEXT NOT NULL,
+  language TEXT NOT NULL DEFAULT 'en',
+  eligibility_mark REAL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL
+);
+
+-- Record of high-risk admin actions (e.g. DELETE_ALL_QUESTIONS) and of
+-- candidate session steps (no personal data).
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY,
   action TEXT NOT NULL,
@@ -187,6 +208,12 @@ addMissingColumns('assessments', [['iq_correct', 'INTEGER'], ['iq_total', 'INTEG
 // eligibility mark, so changing Settings later never changes a finished result.
 addMissingColumns('assessment_stages', [['pass_mark', 'REAL']]);
 addMissingColumns('assessments', [['eligibility_mark', 'REAL']]);
+// A candidate's attempt on a shared link: which link, and the SHA-256 of the
+// random secret in that candidate's session cookie. Older one-person links
+// have no link_id and keep working through their own token.
+addMissingColumns('assessments', [['link_id', 'INTEGER REFERENCES assessment_links(id)'], ['session_hash', 'TEXT']]);
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_attempt_session ON assessments(link_id, session_hash) WHERE link_id IS NOT NULL');
+db.exec('CREATE INDEX IF NOT EXISTS idx_assessments_link ON assessments(link_id)');
 
 const DEFAULT_SETTINGS = {
   default_time_minutes: '30',
@@ -228,4 +255,9 @@ function saveSettings(values) {
 
 const now = () => new Date().toISOString();
 
-module.exports = { db, getSettings, saveSettings, now, DB_PATH, PASS_KEYS };
+const insertAudit = db.prepare('INSERT INTO audit_log (action, admin, details, created_at) VALUES (?, ?, ?, ?)');
+function audit(action, actor, details = {}) {
+  insertAudit.run(action, actor, JSON.stringify(details), now());
+}
+
+module.exports = { db, getSettings, saveSettings, now, audit, DB_PATH, PASS_KEYS };

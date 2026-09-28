@@ -75,12 +75,19 @@ function finalAssessment(a, stages = a ? A.stagesOf(a) : []) {
     : out('Not Eligible', `All tests passed but the final score is below ${mark}%`, percent);
 }
 
+// The shared link an attempt came from: its name, or the start of its URL.
+function linkName(a) {
+  if (!a || !a.link_id) return a ? 'Single-candidate link' : null;
+  const l = A.getLink(a.link_id);
+  return l ? l.title || `Shared link ${l.token.slice(0, 6)}…` : null;
+}
+
 // Every test of one assessment link with its own score and result, and the final result.
 function testResults(a) {
   if (!a) return { tests: [], current_stage: null, assessment_result: null, assessment_date: null, ...finalAssessment(null) };
   const stages = A.stagesOf(a);
   return { tests: stages.map((st) => stageView(a, st, stages)), current_stage: A.currentStage(a, stages).label,
-    assessment_result: a.result, assessment_date: a.submitted_at || a.started_at, ...finalAssessment(a, stages) };
+    assessment_result: a.result, assessment_date: a.submitted_at || a.started_at, assessment_link: linkName(a), ...finalAssessment(a, stages) };
 }
 
 const FONT = path.join(__dirname, 'assets', 'NotoSansLao-Regular.ttf');
@@ -298,6 +305,7 @@ const COLUMNS = [
   ['Final Level', (c) => c.final_level],
   ['Company Eligibility', (c) => eligibilityText(c)],
   ['Eligibility Note', (c) => c.eligibility_note],
+  ['Assessment Link', (c) => c.assessment_link],
   ['Current Stage', (c) => c.current_stage],
   ['Assessment Result', (c) => c.assessment_result],
   ['Interview', (c) => c.interview],
@@ -441,4 +449,4 @@ function questionTemplateXlsx() {
   return XLSX.write(book, { type: 'buffer', bookType: 'xlsx' });
 }
 
-module.exports = { percentLevel, finalAssessment, stageView, iqResult, lalcoIqScore, iqCategory, allCandidateSummaries, candidateSummary, dashboard, candidatePdf, candidateDocx, candidatesXlsx, questionTemplateXlsx };
+module.exports = { testResults, percentLevel, finalAssessment, stageView, iqResult, lalcoIqScore, iqCategory, allCandidateSummaries, candidateSummary, dashboard, candidatePdf, candidateDocx, candidatesXlsx, questionTemplateXlsx };

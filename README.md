@@ -53,12 +53,12 @@ Options may also be on one line (`A. Red  B. Blue  C. Green  D. Chair`).
 
 ### How an assessment works
 
-1. On **Assessments → Create Assessment**, choose the candidate (or "New candidate"), the language and how long the link stays valid, then tick the **Tests Included** — IQ, General, Calculation, Essay — with the number of questions and minutes for each. Press **Generate Assessment Link**.
-2. The candidate gets **one link** for all the chosen tests. They enter their details once, then take the tests **one by one, always in the order IQ → General → Calculation → Essay** (only the ticked ones). A progress list shows ✓ done, → current, ○ still to come.
+1. On **Assessments → Create Assessment**, optionally give the link a name (e.g. "September Recruitment"), choose the language and how long new candidates may start, then tick the **Tests Included** — IQ, General, Calculation, Essay — with the number of questions, minutes and pass mark for each. Press **Generate ONE Assessment Link**.
+2. **One link for many candidates.** Send the same link to everyone. Each person who opens it and presses Start gets their **own session**: their own details, their own random questions and option order, their own timers, answers, stages and results. They enter their details once, then take the tests **one by one, always in the order IQ → General → Calculation → Essay** (only the ticked ones). A progress list shows ✓ done, → current, ○ still to come, ✕ not passed, 🔒 locked. A refresh, or closing and reopening the link in the same browser, continues that person's own attempt (same questions, answers and deadline). On a shared computer, **Start New Candidate** gives the next person an empty form; the previous candidate's attempt is kept for HR.
 3. Each test has **its own timer**, enforced by the server; when it runs out the test is submitted automatically and scored. A test is **passed** when its percentage reaches its pass mark. After every test the candidate sees the result — score, percentage, level (IQ: LALCO IQ Score and IQ Level), PASS / NOT PASS and the pass mark. After a pass: "Next Test — Continue". If a test is **not passed the assessment stops**, the later tests are locked (🔒) and the candidate is asked to contact HR. The Essay is last and waits for HR marking.
 4. The server decides which test comes next: refreshing, a second tab or a changed address cannot skip or reopen a test. Each candidate gets a different random set of questions, with shuffled answers.
 5. On **Assessments → View**, HR sees each test (status, times, score, %, PASS / NOT PASS) and every answer: chosen option (and the letter the candidate saw), the correct answer, Correct / Wrong / Not answered.
-6. A link can be used only once. An unused link stops working at its expiry time, or whenever you press **Disable**.
+6. The link stays the same for everyone. **Disable** (or the expiry time) stops NEW candidates from starting; candidates already in a test can finish. To stop one candidate, press Disable on their own row. A link that nobody has used can be deleted or given a new address; a used link is kept with its candidates' results. On **Assessments**, each shared link is one row with its number of candidates; **Candidates** opens the list of everyone who used it (one row per candidate: details, current stage, each test, final score, eligibility, HR Final Result, start and finish times). Links created before shared links were introduced keep working for their one candidate, exactly as before.
 
 ### The LALCO IQ test
 
@@ -90,7 +90,7 @@ Node.js 24 LTS, Express, SQLite (`better-sqlite3`), plain HTML/JS frontend (no b
 ```
 npm install
 ADMIN_PASSWORD=choose-a-password npm start    # http://localhost:3000
-npm test                                       # 121 tests, uses temporary databases
+npm test                                       # 131 tests, uses temporary databases
 ```
 
 ```
@@ -109,7 +109,9 @@ public/
 test/              node:test suites and Word-generated fixtures
 ```
 
-**Database tables:** `admins`, `settings`, `candidates` (incl. interview and final decision), `questions`, `assessments` (link and scores), `assessment_stages` (the tests inside one link: order, timer, score, result), `assessment_questions` (each candidate's questions, copied from the bank so later edits never change a past result), `images` (question and option pictures), `audit_log` (high-risk admin actions such as Delete All Questions).
+**Database tables:** `admins`, `settings`, `candidates` (incl. interview and final decision), `questions`, `assessment_links` (a shared link: token, tests, counts, timers, pass marks, expiry, enabled), `assessments` (one candidate's attempt and scores; `link_id` + `session_hash` tie it to the shared link and the SHA-256 of that browser's session cookie; older one-person links have no `link_id` and use their own token), `assessment_stages` (the tests inside one attempt: order, timer, score, result), `assessment_questions` (each candidate's questions, copied from the bank so later edits never change a past result), `images` (question and option pictures), `audit_log` (Delete All Questions and candidate session steps, without personal data).
+
+**Candidate sessions:** opening a shared link gives the browser a random 256-bit secret in an HttpOnly, SameSite=Lax cookie (Secure in production) scoped to that link's API path; no record is created until the candidate presses Start. Every candidate request is resolved from link + cookie on the server — ids sent by the browser never decide whose attempt is used — and starting is one transaction with a unique (link, session) index, so a double-click or second tab never creates a second attempt.
 
 ### Railway
 

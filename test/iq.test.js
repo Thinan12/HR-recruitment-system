@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const XLSX = require('xlsx');
-const { start, stop, client, seedQuestions, db, CANDIDATE } = require('./helpers');
+const { start, stop, client, seedQuestions, db, CANDIDATE, attemptOf } = require('./helpers');
 const { levelSplit, syncIqLevels, rescoreAll } = require('../src/assessments');
 
 let admin;
@@ -46,7 +46,7 @@ test('the pool has 95 active IQ questions; marks follow the level (1-5), an ente
 test('TEST 1: pool of 95, IQ count 20 -> exactly 20 questions, 4 per level, maximum 60', async () => {
   const a = await sit('Twenty');
   assert.equal(a.state.questions.length, 20);
-  const rows = copies(a.id);
+  const rows = copies(attemptOf(a));
   assert.equal(rows.length, 20, '20 copies saved, not 95');
   assert.deepEqual(rows.map((r) => r.difficulty), LEVELS.flatMap((l) => Array(4).fill(l)), 'Level 1 first, up to Level 5');
   assert.equal(rows.reduce((s, r) => s + r.max_marks, 0), 60);
@@ -82,8 +82,8 @@ test('the default 18 questions = 4 / 3 / 3 / 4 / 4, maximum 55; other lengths sp
   assert.deepEqual(levelSplit(10), { Easy: 2, Basic: 2, Moderate: 2, Difficult: 2, 'Very Difficult': 2 });
   assert.deepEqual(levelSplit(30), { Easy: 6, Basic: 6, Moderate: 6, Difficult: 6, 'Very Difficult': 6 });
   const a = await sit('Eighteen', 18);
-  assert.equal(copies(a.id).length, 18);
-  assert.equal(copies(a.id).reduce((s, r) => s + r.max_marks, 0), 55);
+  assert.equal(copies(attemptOf(a)).length, 18);
+  assert.equal(copies(attemptOf(a)).reduce((s, r) => s + r.max_marks, 0), 55);
 });
 
 test('TEST 6 and 7: random sets, no duplicates, shuffled answer order', async () => {
@@ -91,7 +91,7 @@ test('TEST 6 and 7: random sets, no duplicates, shuffled answer order', async ()
   let shuffled = false;
   for (let i = 0; i < 4; i++) {
     const a = await sit('Random ' + i);
-    const rows = copies(a.id);
+    const rows = copies(attemptOf(a));
     assert.equal(new Set(rows.map((r) => r.question_id)).size, 20, 'no question twice');
     sets.add(rows.map((r) => r.question_id).sort().join(','));
     if (rows.some((r) => r.option_order !== '["A","B","C","D"]')) shuffled = true;
@@ -106,11 +106,11 @@ test('TEST 12: scoring uses only the selected questions (20 questions, maximum 6
   const want = { Easy: 4, Basic: 2, Moderate: 4, Difficult: 1, 'Very Difficult': 0 };
   const seen = Object.fromEntries(LEVELS.map((l) => [l, 0]));
   const answers = {};
-  for (const q of copies(a.id)) answers[q.id] = seen[q.difficulty]++ < want[q.difficulty] ? 'A' : 'B';
+  for (const q of copies(attemptOf(a))) answers[q.id] = seen[q.difficulty]++ < want[q.difficulty] ? 'A' : 'B';
   await candidate.post(url(a.token, '/submit'), { answers });
-  const row = db.prepare('SELECT iq_points, iq_max, iq_correct, iq_total FROM assessments WHERE id = ?').get(a.id);
+  const row = db.prepare('SELECT iq_points, iq_max, iq_correct, iq_total FROM assessments WHERE id = ?').get(attemptOf(a));
   assert.deepEqual(row, { iq_points: 4 + 4 + 12 + 4, iq_max: 60, iq_correct: 11, iq_total: 20 });
-  const r = (await admin.get('/api/admin/results/iq')).data.find((x) => x.id === a.id);
+  const r = (await admin.get('/api/admin/results/iq')).data.find((x) => x.id === attemptOf(a));
   assert.equal(r.iq_text, '24 / 60');
   assert.equal(r.iq_score, 40);
   assert.deepEqual(r.iq_levels.map((l) => [l.level, l.correct_text, l.marks_text]),
@@ -154,24 +154,24 @@ test('TEST 9: one link with the 95 pool: 20 IQ -> General -> Calculation -> Essa
   while (s.state === 'in_progress') {
     keys.push(s.section);
     if (s.section === 'IQ') assert.equal(s.questions.length, 20, 'exactly 20 IQ questions from the 95');
-    const rows = copies(a.id).filter((q) => s.questions.some((x) => x.id === q.id));
+    const rows = copies(attemptOf(a)).filter((q) => s.questions.some((x) => x.id === q.id));
     const answers = Object.fromEntries(rows.map((q) => [q.id, q.section === 'ESSAY' ? 'My essay.' : q.correct_answer]));
     s = (await candidate.post(url(a.token, '/submit'), { answers })).data;
     if (s.state === 'next_test') s = (await candidate.post(url(a.token, '/continue'))).data;
   }
   assert.deepEqual(keys, ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY']);
   assert.equal(s.outcome, 'completed');
-  const essay = copies(a.id).find((q) => q.section === 'ESSAY');
-  await admin.put(`/api/admin/assessments/${a.id}/essay-marks`, { marks: { [essay.id]: 8 } });
+  const essay = copies(attemptOf(a)).find((q) => q.section === 'ESSAY');
+  await admin.put(`/api/admin/assessments/${attemptOf(a)}/essay-marks`, { marks: { [essay.id]: 8 } });
   assert.equal((await candidate.get(url(a.token))).data.current_stage, 'COMPLETE');
 });
 
 test('TEST 10 and 11: IQ failure stops the link; refresh resumes the same 20 questions', async () => {
   const a = await sit('Fails', 20, ['IQ', 'GENERAL']);
-  const again = (await client().get(url(a.token))).data;
+  const again = (await candidate.get(url(a.token))).data;
   assert.deepEqual(again.questions.map((q) => q.id), a.state.questions.map((q) => q.id), 'same 20 questions after a refresh');
-  assert.equal(copies(a.id).length, 20, 'no new questions drawn on refresh');
-  const answers = Object.fromEntries(copies(a.id).map((q) => [q.id, 'B']));
+  assert.equal(copies(attemptOf(a)).length, 20, 'no new questions drawn on refresh');
+  const answers = Object.fromEntries(copies(attemptOf(a)).map((q) => [q.id, 'B']));
   const s = (await candidate.post(url(a.token, '/submit'), { answers })).data;
   assert.equal(s.outcome, 'stopped');
   assert.equal((await candidate.post(url(a.token, '/continue'))).status, 409);
@@ -194,8 +194,8 @@ test('inactive questions are never selected and stay visible in the bank', async
   const inactive = new Set(easy.slice(4).map((q) => q.id));
   for (let i = 0; i < 3; i++) {
     const a = await sit('After Cleanup ' + i);
-    assert.ok(copies(a.id).every((u) => !inactive.has(u.question_id)));
-    assert.equal(copies(a.id).length, 20);
+    assert.ok(copies(attemptOf(a)).every((u) => !inactive.has(u.question_id)));
+    assert.equal(copies(attemptOf(a)).length, 20);
   }
   assert.equal((await admin.get('/api/admin/questions?section=IQ&status=Inactive')).data.questions.length, inactive.size);
   assert.equal((await admin.get('/api/admin/questions/counts')).data.IQ, 95 - inactive.size);

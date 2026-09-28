@@ -5,7 +5,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const XLSX = require('xlsx');
 const { PDFParse } = require('pdf-parse');
-const { start, stop, client, seedQuestions, db, CANDIDATE } = require('./helpers');
+const { start, stop, client, seedQuestions, db, CANDIDATE, attemptOf } = require('./helpers');
 const { finalizeExpired } = require('../src/assessments');
 const { percentLevel, lalcoIqScore, iqCategory } = require('../src/reports');
 
@@ -49,7 +49,7 @@ async function run(name, tests, plan, extra) {
     seen.push(s);
     if (s.state === 'next_test') s = (await c.post(url(a.token, '/continue'))).data;
   }
-  const candidateId = db.prepare('SELECT candidate_id FROM assessments WHERE id = ?').get(a.id).candidate_id;
+  const candidateId = db.prepare('SELECT candidate_id FROM assessments WHERE id = ?').get(attemptOf(a)).candidate_id;
   return { a, s, c, seen, candidateId };
 }
 const profile = async (id) => (await admin.get('/api/admin/candidates/' + id)).data.candidate;
@@ -98,7 +98,7 @@ test('default pass marks: IQ 70%, General / Calculation / Essay 60%, final eligi
 // ---- the full path -------------------------------------------------------------
 
 test('all four PASS and final >= 70% -> ELIGIBLE; the same URL is used from start to end', async () => {
-  const { a, seen, candidateId } = await run('Full Pass', ALL, { IQ: 8, GENERAL: 7, CALCULATION: 9 });
+  const { a, c: browser, seen, candidateId } = await run('Full Pass', ALL, { IQ: 8, GENERAL: 7, CALCULATION: 9 });
   // After each passed test the candidate sees the result and the next test.
   assert.deepEqual(seen.map((s) => [s.state, s.last_result.section, s.last_result.result, s.last_result.percent, s.last_result.level]), [
     ['next_test', 'IQ', 'Pass', 80, 'Exceptional'],
@@ -108,7 +108,8 @@ test('all four PASS and final >= 70% -> ELIGIBLE; the same URL is used from star
   ]);
   assert.equal(seen[0].last_result.lalco_iq_score, 130);
   assert.equal(seen[0].next_section, 'GENERAL');
-  assert.equal(db.prepare('SELECT token FROM assessments WHERE id = ?').get(a.id).token, a.token, 'one link, never replaced');
+  assert.equal(db.prepare('SELECT token FROM assessment_links WHERE id = ?').get(a.id).token, a.token, 'one link, never replaced');
+  assert.equal(db.prepare('SELECT link_id FROM assessments WHERE id = ?').get(attemptOf(a)).link_id, a.id);
 
   // Essay pending -> final eligibility pending, no final score yet.
   let c = await profile(candidateId);
@@ -117,7 +118,7 @@ test('all four PASS and final >= 70% -> ELIGIBLE; the same URL is used from star
   assert.deepEqual(brief(c.tests[3]), ['ESSAY', null, null, null, 'Pending', 'PENDING HR MARKING']);
 
   // HR marks the essay 6 / 10 = 60% (pass mark 60%) -> final (80 + 70 + 90 + 60) / 4 = 75.0%.
-  await markEssay(a.id, 6);
+  await markEssay(attemptOf(a), 6);
   c = await profile(candidateId);
   assert.deepEqual(c.tests.map(brief), [
     ['IQ', '8 / 10', 80, 'Exceptional', 'Pass', 'PASS'],
@@ -138,14 +139,14 @@ test('all four PASS and final >= 70% -> ELIGIBLE; the same URL is used from star
   assert.equal(c.eligibility, 'Eligible');
 
   // The candidate reopening the link sees the finished assessment on the same URL.
-  const again = (await client().get(url(a.token))).data;
+  const again = (await browser.get(url(a.token))).data;
   assert.equal(again.state, 'submitted');
   assert.equal(again.current_stage, 'COMPLETE');
 });
 
 test('Essay NOT PASS -> NOT ELIGIBLE, no final score', async () => {
   const { a, candidateId } = await run('Essay Fail', ALL, { IQ: 10, GENERAL: 10, CALCULATION: 10 });
-  await markEssay(a.id, 5); // 50% < 60%
+  await markEssay(attemptOf(a), 5); // 50% < 60%
   const c = await profile(candidateId);
   assert.deepEqual(brief(c.tests[3]), ['ESSAY', '5 / 10', 50, 'Low', 'Not Pass', 'NOT PASS']);
   assert.equal(c.eligibility, 'Not Eligible');
@@ -155,7 +156,7 @@ test('Essay NOT PASS -> NOT ELIGIBLE, no final score', async () => {
 
 test('all four PASS but final < 70% -> NOT ELIGIBLE', async () => {
   const { a, candidateId } = await run('Low Final', ALL, { IQ: 7, GENERAL: 6, CALCULATION: 6 });
-  await markEssay(a.id, 6);
+  await markEssay(attemptOf(a), 6);
   const c = await profile(candidateId);
   assert.ok(c.tests.every((t) => t.result === 'Pass'));
   assert.equal(c.final_percent, 62.5); // (70 + 60 + 60 + 60) / 4
@@ -199,10 +200,10 @@ test('IQ FAIL -> General, Calculation and Essay stay locked; refresh or changing
     const r = await c[method](url(a.token, path), body);
     assert.equal(r.status, 409, `${method} ${path}`);
   }
-  const refreshed = (await client().get(url(a.token))).data;
+  const refreshed = (await c.get(url(a.token))).data;
   assert.equal(refreshed.outcome, 'stopped');
   assert.deepEqual(refreshed.tests.map((t) => t.status), ['failed', 'locked', 'locked', 'locked']);
-  assert.deepEqual(db.prepare('SELECT DISTINCT section FROM assessment_questions WHERE assessment_id = ?').all(a.id).map((r) => r.section), ['IQ']);
+  assert.deepEqual(db.prepare('SELECT DISTINCT section FROM assessment_questions WHERE assessment_id = ?').all(attemptOf(a)).map((r) => r.section), ['IQ']);
 
   const p = await profile(candidateId);
   assert.deepEqual(p.tests.map((t) => t.state), ['NOT PASS', 'LOCKED', 'LOCKED', 'LOCKED']);
@@ -234,11 +235,11 @@ test('IQ PASS -> General unlocks; General PASS -> Calculation unlocks; Calculati
     assert.equal(s.state, 'next_test');
     assert.equal(s.next_section, next);
     // A refresh (or another browser) still offers the same next test.
-    const again = (await client().get(url(a.token))).data;
+    const again = (await c.get(url(a.token))).data;
     assert.equal(again.state, 'next_test');
     assert.equal(again.next_section, next);
     assert.equal(again.last_result.section, sec);
-    const p = await profile(db.prepare('SELECT candidate_id FROM assessments WHERE id = ?').get(a.id).candidate_id);
+    const p = await profile(db.prepare('SELECT candidate_id FROM assessments WHERE id = ?').get(attemptOf(a)).candidate_id);
     assert.equal(p.tests.find((t) => t.section === next).state, 'NOT STARTED');
     s = (await c.post(url(a.token, '/continue'))).data;
   }
@@ -254,18 +255,18 @@ test('a candidate cannot skip a test or change a finished one', async () => {
   const early = (await c.post(url(a.token, '/continue'))).data;
   assert.equal(early.section, 'IQ');
   assert.ok(early.questions.every((q) => q.section === 'IQ'));
-  const cid = db.prepare('SELECT candidate_id FROM assessments WHERE id = ?').get(a.id).candidate_id;
+  const cid = db.prepare('SELECT candidate_id FROM assessments WHERE id = ?').get(attemptOf(a)).candidate_id;
   assert.deepEqual((await profile(cid)).tests.map((t) => t.state), ['IN PROGRESS', 'LOCKED']);
 
   s = await sit(c, a.token, s, 8);
-  const pointsAfter = db.prepare("SELECT points FROM assessment_stages WHERE assessment_id = ? AND section = 'IQ'").get(a.id).points;
+  const pointsAfter = db.prepare("SELECT points FROM assessment_stages WHERE assessment_id = ? AND section = 'IQ'").get(attemptOf(a)).points;
   s = (await c.post(url(a.token, '/continue'))).data;
   assert.equal(s.section, 'GENERAL');
   // Answers to the finished IQ test are refused, and resubmitting does not rescore it.
   assert.equal((await c.put(url(a.token, '/answer'), { question_id: iqIds[9], answer: 'A' })).status, 400);
   const right = Object.fromEntries(iqIds.map((id) => [id, db.prepare('SELECT correct_answer FROM assessment_questions WHERE id = ?').get(id).correct_answer]));
   await c.post(url(a.token, '/submit'), { answers: right });
-  assert.equal(db.prepare("SELECT points FROM assessment_stages WHERE assessment_id = ? AND section = 'IQ'").get(a.id).points, pointsAfter);
+  assert.equal(db.prepare("SELECT points FROM assessment_stages WHERE assessment_id = ? AND section = 'IQ'").get(attemptOf(a)).points, pointsAfter);
 });
 
 test('when the time runs out the test is scored: a pass unlocks the next test, a fail stops the assessment', async () => {
@@ -280,7 +281,7 @@ test('when the time runs out the test is scored: a pass unlocks the next test, a
   const a = await link(['IQ', 'GENERAL']);
   let s = (await c.post(url(a.token, '/start'), { ...CANDIDATE, name: 'Timed Pass' })).data;
   await answerSome(c, a.token, s, 8);
-  expire(a.id);
+  expire(attemptOf(a));
   assert.ok(finalizeExpired() >= 1);
   s = (await c.get(url(a.token))).data;
   assert.equal(s.state, 'next_test');
@@ -290,7 +291,7 @@ test('when the time runs out the test is scored: a pass unlocks the next test, a
   const b = await link(['IQ', 'GENERAL']);
   s = (await c.post(url(b.token, '/start'), { ...CANDIDATE, name: 'Timed Fail' })).data;
   await answerSome(c, b.token, s, 3);
-  expire(b.id);
+  expire(attemptOf(b));
   s = (await c.get(url(b.token))).data; // opening the link also finishes an expired test
   assert.equal(s.state, 'submitted');
   assert.equal(s.outcome, 'stopped');

@@ -2,7 +2,7 @@
 // each opened only after the one before it was passed.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { start, stop, client, seedQuestions, db, CANDIDATE } = require('./helpers');
+const { start, stop, client, seedQuestions, db, CANDIDATE, attemptOf } = require('./helpers');
 const { finalizeExpired } = require('../src/assessments');
 
 let admin;
@@ -77,14 +77,14 @@ test('one link runs IQ -> General -> Calculation -> Essay in order, details ente
   assert.equal(s.outcome, 'completed');
 
   // The candidate was saved once; the essay waits for HR.
-  const row = db.prepare('SELECT candidate_id, result, status FROM assessments WHERE id = ?').get(a.id);
+  const row = db.prepare('SELECT candidate_id, result, status FROM assessments WHERE id = ?').get(attemptOf(a));
   assert.equal(row.status, 'SUBMITTED');
   assert.equal(row.result, 'Pending');
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM candidates WHERE name = ?').get(CANDIDATE.name).n >= 1, true);
-  const review = (await admin.get('/api/admin/assessments/' + a.id)).data;
+  const review = (await admin.get('/api/admin/assessments/' + attemptOf(a))).data;
   assert.deepEqual(review.stages.map((st) => [st.section, st.status, st.result]),
     [['IQ', 'SUBMITTED', 'Pass'], ['GENERAL', 'SUBMITTED', 'Pass'], ['CALCULATION', 'SUBMITTED', 'Pass'], ['ESSAY', 'SUBMITTED', 'Pending']]);
-  const marked = await admin.put(`/api/admin/assessments/${a.id}/essay-marks`, { marks: { [essay.id]: 7 } });
+  const marked = await admin.put(`/api/admin/assessments/${attemptOf(a)}/essay-marks`, { marks: { [essay.id]: 7 } });
   assert.equal(marked.data.result, 'Pass');
 });
 
@@ -99,9 +99,9 @@ test('failing IQ stops the assessment: no later test can be opened', async () =>
   assert.equal((await candidate.post(url(a.token, '/continue'))).status, 409);
   assert.equal((await candidate.post(url(a.token, '/start'), CANDIDATE)).data.state, 'submitted');
   assert.equal((await candidate.get(url(a.token))).data.outcome, 'stopped', 'refreshing shows the same end');
-  const sections = db.prepare('SELECT DISTINCT section FROM assessment_questions WHERE assessment_id = ?').all(a.id).map((r) => r.section);
+  const sections = db.prepare('SELECT DISTINCT section FROM assessment_questions WHERE assessment_id = ?').all(attemptOf(a)).map((r) => r.section);
   assert.deepEqual(sections, ['IQ'], 'no General or Calculation questions were ever drawn');
-  assert.equal(db.prepare('SELECT result FROM assessments WHERE id = ?').get(a.id).result, 'Not Pass');
+  assert.equal(db.prepare('SELECT result FROM assessments WHERE id = ?').get(attemptOf(a)).result, 'Not Pass');
 });
 
 test('the server enforces the order: no answering, opening or skipping out of turn', async () => {
@@ -127,7 +127,7 @@ test('the server enforces the order: no answering, opening or skipping out of tu
   const [c1, c2] = await Promise.all([candidate.post(url(a.token, '/continue')), candidate.post(url(a.token, '/continue'))]);
   assert.equal(c1.data.section, 'GENERAL');
   assert.equal(c2.data.section, 'GENERAL');
-  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM assessment_questions WHERE assessment_id = ? AND section = 'GENERAL'").get(a.id).n, 4);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM assessment_questions WHERE assessment_id = ? AND section = 'GENERAL'").get(attemptOf(a)).n, 4);
   // Only the running test's questions are sent.
   assert.ok(c1.data.questions.every((q) => q.section === 'GENERAL'));
 });
@@ -136,10 +136,10 @@ test('each test has its own timer; when it runs out the test is submitted and pa
   const a = await link(['IQ', 'GENERAL']);
   let s = (await candidate.post(url(a.token, '/start'), { ...CANDIDATE, name: 'Timer' })).data;
   // Answer everything correctly, then let the IQ time run out.
-  const rows = db.prepare('SELECT id, correct_answer FROM assessment_questions WHERE assessment_id = ?').all(a.id);
+  const rows = db.prepare('SELECT id, correct_answer FROM assessment_questions WHERE assessment_id = ?').all(attemptOf(a));
   for (const q of rows) await candidate.put(url(a.token, '/answer'), { question_id: q.id, answer: q.correct_answer });
-  db.prepare("UPDATE assessments SET deadline_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(a.id);
-  db.prepare("UPDATE assessment_stages SET deadline_at = '2000-01-01T00:00:00.000Z' WHERE assessment_id = ? AND status = 'IN_PROGRESS'").run(a.id);
+  db.prepare("UPDATE assessments SET deadline_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(attemptOf(a));
+  db.prepare("UPDATE assessment_stages SET deadline_at = '2000-01-01T00:00:00.000Z' WHERE assessment_id = ? AND status = 'IN_PROGRESS'").run(attemptOf(a));
   assert.ok(finalizeExpired() >= 1);
   s = (await candidate.get(url(a.token))).data;
   assert.equal(s.state, 'next_test');
@@ -195,7 +195,7 @@ test('General FAIL stops before Calculation; Calculation FAIL stops before Essay
   const g = await run('Fails General', all, { IQ: true, GENERAL: false });
   assert.equal(g.s.outcome, 'stopped');
   assert.equal(statuses(g.s), 'IQ:done GENERAL:failed CALCULATION:locked ESSAY:locked');
-  assert.deepEqual(db.prepare('SELECT DISTINCT section FROM assessment_questions WHERE assessment_id = ?').all(g.a.id).map((r) => r.section), ['IQ', 'GENERAL']);
+  assert.deepEqual(db.prepare('SELECT DISTINCT section FROM assessment_questions WHERE assessment_id = ?').all(attemptOf(g.a)).map((r) => r.section), ['IQ', 'GENERAL']);
   assert.equal(g.s.current_stage, 'STOPPED');
 
   const c = await run('Fails Calculation', all, { IQ: true, GENERAL: true, CALCULATION: false });
@@ -208,11 +208,11 @@ test('the server reports the current stage: IQ -> GENERAL -> CALCULATION -> ESSA
   const r = await run('Stage Keys', ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'], { IQ: true, GENERAL: true, CALCULATION: true });
   assert.deepEqual(r.keys, ['IQ', 'GENERAL', 'GENERAL', 'CALCULATION', 'CALCULATION', 'ESSAY', 'ESSAY']);
   assert.equal(r.s.outcome, 'completed');
-  const detail = (await admin.get('/api/admin/assessments/' + r.a.id)).data;
+  const detail = (await admin.get('/api/admin/assessments/' + attemptOf(r.a))).data;
   assert.equal(detail.assessment.current_stage.key, 'ESSAY', 'the essay is waiting for HR');
   const essayQ = detail.questions.find((q) => q.section === 'ESSAY');
-  await admin.put(`/api/admin/assessments/${r.a.id}/essay-marks`, { marks: { [essayQ.id]: 9 } });
-  const after = (await admin.get('/api/admin/assessments/' + r.a.id)).data;
+  await admin.put(`/api/admin/assessments/${attemptOf(r.a)}/essay-marks`, { marks: { [essayQ.id]: 9 } });
+  const after = (await admin.get('/api/admin/assessments/' + attemptOf(r.a))).data;
   assert.equal(after.assessment.current_stage.key, 'COMPLETE');
   assert.equal(after.assessment.result, 'Pass');
   assert.equal((await candidate.get(url(r.a.token))).data.current_stage, 'COMPLETE');
@@ -223,7 +223,7 @@ test('refresh / reopening the link resumes the same test, answers and timer', as
   const first = (await candidate.post(url(a.token, '/start'), { ...CANDIDATE, name: 'Resumer' })).data;
   const q = first.questions[2];
   await candidate.put(url(a.token, '/answer'), { question_id: q.id, answer: 'C' });
-  const again = (await client().get(url(a.token))).data; // a fresh browser with no session
+  const again = (await candidate.get(url(a.token))).data; // the same browser, reloaded
   assert.equal(again.state, 'in_progress');
   assert.equal(again.section, 'IQ');
   assert.deepEqual(again.questions.map((x) => x.id), first.questions.map((x) => x.id), 'same questions, same order');
@@ -231,22 +231,29 @@ test('refresh / reopening the link resumes the same test, answers and timer', as
   assert.ok(again.remaining_seconds <= first.remaining_seconds, 'the timer keeps running; it does not restart');
 });
 
-test('disabling the link blocks every test; expiry only applies before the start', async () => {
+test('disabling or expiring the link stops NEW candidates only; HR can still stop one candidate', async () => {
   const a = await link(['IQ', 'GENERAL']);
   let s = (await candidate.post(url(a.token, '/start'), { ...CANDIDATE, name: 'Blocked' })).data;
   s = await answerAndSubmit(a.token, s, true);
   assert.equal(s.state, 'next_test');
 
-  await admin.post(`/api/admin/assessments/${a.id}/disable`);
-  assert.equal((await candidate.get(url(a.token))).data.state, 'disabled');
-  assert.equal((await candidate.post(url(a.token, '/continue'))).status, 409);
-  await admin.post(`/api/admin/assessments/${a.id}/enable`);
+  // Link disabled: a new person cannot start, the candidate already in it carries on.
+  await admin.post(`/api/admin/links/${a.id}/disable`);
+  const newcomer = client();
+  assert.equal((await newcomer.get(url(a.token))).data.state, 'disabled');
+  assert.equal((await newcomer.post(url(a.token, '/start'), { ...CANDIDATE, name: 'Too Late' })).status, 409);
+  assert.equal((await candidate.get(url(a.token))).data.state, 'next_test');
+  await admin.post(`/api/admin/links/${a.id}/enable`);
 
   // The link's expiry time passing does not cut off a candidate who already started.
-  db.prepare("UPDATE assessments SET link_expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(a.id);
+  db.prepare("UPDATE assessment_links SET link_expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(a.id);
+  assert.equal((await newcomer.get(url(a.token))).data.state, 'expired');
   s = (await candidate.post(url(a.token, '/continue'))).data;
   assert.equal(s.section, 'GENERAL');
-  await admin.post(`/api/admin/assessments/${a.id}/disable`);
+
+  // Disabling this one candidate's attempt stops them.
+  await admin.post(`/api/admin/assessments/${attemptOf(a)}/disable`);
+  assert.equal((await candidate.get(url(a.token))).data.state, 'disabled');
   assert.equal((await candidate.put(url(a.token, '/answer'), { question_id: s.questions[0].id, answer: 'A' })).status, 409);
 });
 
