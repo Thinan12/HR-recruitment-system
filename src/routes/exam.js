@@ -8,7 +8,7 @@
 // sent by the browser. Older one-person links (an assessments.token without a
 // link) work exactly as before: the token is the only credential.
 const express = require('express');
-const { db, audit } = require('../db');
+const { db } = require('../db');
 const A = require('../assessments');
 const reports = require('../reports');
 const images = require('../images');
@@ -212,17 +212,6 @@ router.post('/:token/start', (req, res) => {
     throw e;
   }
   res.json(stateResponse(A.getAssessment(a.id)));
-});
-
-// "Start New Candidate" on a shared device: this browser gets a new, empty
-// session. The previous candidate's attempt is kept exactly as it is (a
-// running test still ends at its own deadline).
-router.post('/:token/new-candidate', (req, res) => {
-  const r = resolve(req);
-  if (!r.link) return res.status(404).json({ state: 'not_found' });
-  if (r.a) audit('NEW_CANDIDATE_ON_DEVICE', 'candidate', { link_id: r.link.id, previous_assessment_id: r.a.id });
-  setSecret(res, r.link.token, A.newSessionSecret());
-  res.json(linkResponse(r.link));
 });
 
 router.post('/:token/continue', (req, res) => {

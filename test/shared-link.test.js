@@ -192,27 +192,37 @@ test('isolation: A cannot read, answer, submit, time out or move B, and the reve
   assert.equal((await browser({ ...A.jar }).get(u(other))).data.state, 'ready', 'a session on one link means nothing on another');
 });
 
-test('Start New Candidate on a shared device: a fresh session; the previous candidate is kept', async () => {
+test('no "Start New Candidate": the candidate page has no control to switch or create a candidate', async () => {
+  // The candidate page is one script for every screen (start form, IQ, General,
+  // Calculation, Essay, between tests, completion, stopped): none of it offers it.
+  const page = await (await fetch(base + '/exam/some-token')).text();
+  const script = await (await fetch(base + '/static/exam.js')).text();
+  for (const text of [page, script]) {
+    for (const bad of ['Start New Candidate', 'new-candidate', 'new_candidate', 'ເລີ່ມຜູ້ສະໝັກຄົນໃໝ່']) assert.ok(!text.includes(bad), bad);
+  }
+  // The server endpoint that reset a browser's session is gone.
   const link = await shared(['IQ', 'GENERAL']);
-  const device = browser();
-  const first = (await device.post(u(link, '/start'), person('First On Device', '701'))).data;
-  await device.put(u(link, '/answer'), { question_id: first.questions[0].id, answer: 'B' });
-  const firstRow = attemptsOf(link)[0];
-
-  const fresh = await device.post(u(link, '/new-candidate'));
-  assert.equal(fresh.data.state, 'ready');
-  assert.equal(fresh.data.candidate, undefined);
-  assert.equal((await device.get(u(link))).data.state, 'ready', 'the page now shows an empty form');
-  const second = (await device.post(u(link, '/start'), person('Second On Device', '702'))).data;
-  assert.equal(second.candidate.name, 'Second On Device');
-
-  const rows = attemptsOf(link);
-  assert.equal(rows.length, 2);
-  const kept = db.prepare('SELECT * FROM assessments WHERE id = ?').get(firstRow.id);
-  assert.equal(kept.status, 'IN_PROGRESS');
-  assert.equal(kept.deadline_at, firstRow.deadline_at);
-  assert.equal(db.prepare('SELECT answer FROM assessment_questions WHERE id = ?').get(first.questions[0].id).answer, 'B', "the first candidate's answer is kept");
-  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'NEW_CANDIDATE_ON_DEVICE'").get().n >= 1, true);
+  const A = browser();
+  const first = (await A.post(u(link, '/start'), person('Only Once', '901'))).data;
+  const r = await A.post(u(link, '/new-candidate'));
+  assert.equal(r.status, 404);
+  // The same browser cannot start a second attempt: Start again resumes the first one.
+  const again = (await A.post(u(link, '/start'), person('Someone Else', '902'))).data;
+  assert.equal(again.state, 'in_progress');
+  assert.equal(again.candidate.name, 'Only Once');
+  assert.deepEqual(again.questions.map((q) => q.id), first.questions.map((q) => q.id));
+  assert.equal(attemptsOf(link).length, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM candidates WHERE name = 'Someone Else'").get().n, 0);
+  // A new browser (no session cookie) is a new candidate, naturally.
+  const B = browser();
+  const ready = (await B.get(u(link))).data;
+  assert.equal(ready.state, 'ready');
+  assert.equal(ready.candidate, undefined);
+  const b = (await B.post(u(link, '/start'), person('Second Person', '903'))).data;
+  assert.equal(b.candidate.name, 'Second Person');
+  assert.equal(attemptsOf(link).length, 2);
+  assert.ok(b.questions.every((q) => !first.questions.some((x) => x.id === q.id)), 'own question copies');
+  assert.equal((await A.get(u(link))).data.candidate.name, 'Only Once', 'A still resumes their own attempt');
 });
 
 test('five candidates at the same time on one URL: no collisions, and each can be at a different stage', async () => {
