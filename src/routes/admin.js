@@ -6,6 +6,7 @@ const auth = require('../auth');
 const A = require('../assessments');
 const reports = require('../reports');
 const { parseFile, validateQuestion, ImportError, IMAGE_KEYS } = require('../importer');
+const standardReport = require('../standardReport');
 const images = require('../images');
 const lao = require('../lao');
 const categories = require('../categories');
@@ -93,15 +94,22 @@ router.delete('/candidates/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// Standard report (15 fields) by default; ?detail=full gives the detailed report.
 router.get('/candidates/:id/export.:format', (req, res, next) => {
   const c = reports.candidateSummary(Number(req.params.id));
   if (!c) return notFound(res);
   const base = 'LALCO_' + fileName(c.name);
-  const build = {
+  const standard = {
+    pdf: async () => sendFile(res, await standardReport.pdf(c), base + '.pdf', 'application/pdf'),
+    docx: async () => sendFile(res, await standardReport.word(c), base + '.docx', DOCX_TYPE),
+    xlsx: async () => sendFile(res, await standardReport.xlsx([c]), base + '.xlsx', XLSX_TYPE),
+  };
+  const detailed = {
     pdf: async () => sendFile(res, await reports.candidatePdf(c), base + '.pdf', 'application/pdf'),
     docx: async () => sendFile(res, await reports.candidateDocx(c), base + '.docx', DOCX_TYPE),
-    xlsx: async () => sendFile(res, reports.candidatesXlsx([c]), base + '.xlsx', XLSX_TYPE),
-  }[req.params.format];
+    xlsx: async () => sendFile(res, reports.candidatesXlsx([c]), base + '_Detailed.xlsx', XLSX_TYPE),
+  };
+  const build = (req.query.detail === 'full' ? detailed : standard)[req.params.format];
   if (!build) return notFound(res);
   build().catch(next);
 });
@@ -115,9 +123,18 @@ router.get('/results/iq', (req, res) => {
   res.json(rows.map((r) => ({ id: r.id, candidate_id: r.candidate_id, candidate_name: r.candidate_name, ...reports.iqResult(r) })));
 });
 
-router.get('/export/candidates.xlsx', (req, res) => {
+// All candidates, one row each: the standard 15 columns, or ?detail=full for every detailed column.
+router.get('/export/candidates.xlsx', async (req, res, next) => {
   const stamp = new Date().toISOString().slice(0, 10);
-  sendFile(res, reports.candidatesXlsx(reports.allCandidateSummaries()), `LALCO_All_Candidates_${stamp}.xlsx`, XLSX_TYPE);
+  try {
+    if (req.query.detail === 'full') return sendFile(res, reports.candidatesXlsx(reports.allCandidateSummaries()), `LALCO_All_Candidates_Detailed_${stamp}.xlsx`, XLSX_TYPE);
+    sendFile(res, await standardReport.xlsx(reports.allCandidateSummaries()), `LALCO_All_Candidates_${stamp}.xlsx`, XLSX_TYPE);
+  } catch (e) { next(e); }
+});
+
+// The standard report for the web page: the same 15 fields, one row per candidate.
+router.get('/report/standard', (req, res) => {
+  res.json({ fields: standardReport.FIELDS, rows: standardReport.rows(reports.allCandidateSummaries()).map(({ candidate_id, values, duplicate_phone, phone_count }) => ({ candidate_id, values, duplicate_phone, phone_count })) });
 });
 
 // ---- questions ---------------------------------------------------------

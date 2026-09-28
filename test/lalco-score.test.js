@@ -77,7 +77,7 @@ test('a finished test shows weighted score, %, LALCO IQ Score and category every
   assert.equal(dash.highest_iq.lalco_iq_score, 60);
   assert.equal(dash.highest_iq.iq_category, 'Extremely low');
 
-  const x = XLSX.utils.sheet_to_json(XLSX.read((await admin.get('/api/admin/export/candidates.xlsx', { raw: true })).buffer).Sheets.Candidates)
+  const x = XLSX.utils.sheet_to_json(XLSX.read((await admin.get('/api/admin/export/candidates.xlsx?detail=full', { raw: true })).buffer).Sheets.Candidates)
     .find((row) => row['Candidate Name'] === 'Score Display');
   assert.equal(x['IQ Weighted Score'], 24);
   assert.equal(x['IQ Max Marks'], 60);
@@ -88,7 +88,7 @@ test('a finished test shows weighted score, %, LALCO IQ Score and category every
   assert.equal(x['Level 5 Max Marks'], 20);
   assert.ok(x['IQ Test Score'] && x['Assessment Result'] && x['Final Result'], 'existing columns kept');
 
-  const word = (await mammoth.extractRawText({ buffer: (await admin.get(`/api/admin/candidates/${c.id}/export.docx`, { raw: true })).buffer })).value;
+  const word = (await mammoth.extractRawText({ buffer: (await admin.get(`/api/admin/candidates/${c.id}/export.docx?detail=full`, { raw: true })).buffer })).value;
   for (const want of ['IQ Weighted Score', '24 / 60 marks (40%)', 'LALCO IQ Score', '60 / 150', 'IQ Classification', 'Extremely low (0–69)', '0–150 scale']) assert.ok(word.includes(want), want);
 });
 

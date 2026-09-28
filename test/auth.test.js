@@ -30,7 +30,7 @@ test('invalid login is rejected', async () => {
 
 test('admin pages are blocked without login', async () => {
   const c = client();
-  for (const url of ['/api/admin/dashboard', '/api/admin/candidates', '/api/admin/questions', '/api/admin/assessments', '/api/admin/export/candidates.xlsx']) {
+  for (const url of ['/api/admin/dashboard', '/api/admin/candidates', '/api/admin/questions', '/api/admin/assessments', '/api/admin/export/candidates.xlsx?detail=full']) {
     const r = await c.get(url);
     assert.equal(r.status, 401, url);
   }

@@ -98,7 +98,7 @@ test('assessments: a new type is offered in order after the core four; its quest
   const cand = (await admin.get('/api/admin/candidates')).data.find((x) => x.name === 'Tech Person');
   assert.deepEqual(cand.tests.map((t) => [t.name, t.state]), [['IQ Test', 'PASS'], ['Technical Test', 'PASS']]);
   assert.equal(cand.eligibility, 'Eligible');
-  const x = XLSX.utils.sheet_to_json(XLSX.read((await admin.get(`/api/admin/candidates/${cand.id}/export.xlsx`, { raw: true })).buffer).Sheets.Candidates)[0];
+  const x = XLSX.utils.sheet_to_json(XLSX.read((await admin.get(`/api/admin/candidates/${cand.id}/export.xlsx?detail=full`, { raw: true })).buffer).Sheets.Candidates)[0];
   assert.equal(x['Technical Test PASS / NOT PASS'], 'PASS');
   assert.equal(x['Technical Test %'], 100);
 

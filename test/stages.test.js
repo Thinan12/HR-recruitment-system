@@ -268,7 +268,7 @@ test('results, candidate page and PDF / Word / Excel show every test of the link
   assert.equal(c.assessment_result, 'Pending');
   assert.equal(c.final_result, 'Pending', 'HR decision stays separate');
 
-  const x = XLSX.utils.sheet_to_json(XLSX.read((await admin.get(`/api/admin/candidates/${c.id}/export.xlsx`, { raw: true })).buffer).Sheets.Candidates)[0];
+  const x = XLSX.utils.sheet_to_json(XLSX.read((await admin.get(`/api/admin/candidates/${c.id}/export.xlsx?detail=full`, { raw: true })).buffer).Sheets.Candidates)[0];
   assert.equal(x['IQ Result'], '100.0% PASS');
   assert.equal(x['General Result'], '100.0% PASS');
   assert.equal(x['Calculation Result'], '100.0% PASS');
@@ -276,8 +276,8 @@ test('results, candidate page and PDF / Word / Excel show every test of the link
   assert.equal(x['Assessment Result'], 'Pending');
   assert.ok(x['Level 1 Marks']);
 
-  const word = (await mammoth.extractRawText({ buffer: (await admin.get(`/api/admin/candidates/${c.id}/export.docx`, { raw: true })).buffer })).value;
-  const pdfBuf = (await admin.get(`/api/admin/candidates/${c.id}/export.pdf`, { raw: true })).buffer;
+  const word = (await mammoth.extractRawText({ buffer: (await admin.get(`/api/admin/candidates/${c.id}/export.docx?detail=full`, { raw: true })).buffer })).value;
+  const pdfBuf = (await admin.get(`/api/admin/candidates/${c.id}/export.pdf?detail=full`, { raw: true })).buffer;
   const p = new PDFParse({ data: new Uint8Array(pdfBuf) });
   const pdf = (await p.getText()).text;
   await p.destroy();

@@ -156,7 +156,7 @@ test('past results survive editing and deleting bank questions', async () => {
 });
 
 test('candidate PDF export contains the report', async () => {
-  const r = await admin.get(`/api/admin/candidates/${passer}/export.pdf`, { raw: true });
+  const r = await admin.get(`/api/admin/candidates/${passer}/export.pdf?detail=full`, { raw: true });
   assert.equal(r.status, 200);
   assert.equal(r.headers.get('content-type'), 'application/pdf');
   const text = await pdfText(r.buffer);
@@ -164,20 +164,20 @@ test('candidate PDF export contains the report', async () => {
 });
 
 test('candidate Word export contains the report', async () => {
-  const r = await admin.get(`/api/admin/candidates/${passer}/export.docx`, { raw: true });
+  const r = await admin.get(`/api/admin/candidates/${passer}/export.docx?detail=full`, { raw: true });
   assert.equal(r.status, 200);
   const text = (await mammoth.extractRawText({ buffer: r.buffer })).value;
   for (const s of ['LALCO', 'High Scorer', 'Interviewer', 'Ms. Somchay', 'Strong candidate', 'Approved']) assert.ok(text.includes(s), s);
 });
 
 test('candidate Excel export and all-candidate Excel export', async () => {
-  const one = await admin.get(`/api/admin/candidates/${passer}/export.xlsx`, { raw: true });
+  const one = await admin.get(`/api/admin/candidates/${passer}/export.xlsx?detail=full`, { raw: true });
   assert.equal(one.status, 200);
   const oneRows = XLSX.utils.sheet_to_json(XLSX.read(one.buffer).Sheets.Candidates);
   assert.equal(oneRows.length, 1);
   assert.equal(oneRows[0]['Candidate Name'], 'High Scorer');
 
-  const all = await admin.get('/api/admin/export/candidates.xlsx', { raw: true });
+  const all = await admin.get('/api/admin/export/candidates.xlsx?detail=full', { raw: true });
   assert.equal(all.status, 200);
   assert.match(all.headers.get('content-disposition'), /LALCO_All_Candidates/);
   const sheet = XLSX.read(all.buffer).Sheets.Candidates;
@@ -196,10 +196,10 @@ test('candidate Excel export and all-candidate Excel export', async () => {
 
 test('Lao text renders in exports', async () => {
   const c = await admin.post('/api/admin/candidates', { name: 'ສົມໃຈ ພົມມະວົງ', phone: '020' });
-  const pdf = await admin.get(`/api/admin/candidates/${c.data.id}/export.pdf`, { raw: true });
+  const pdf = await admin.get(`/api/admin/candidates/${c.data.id}/export.pdf?detail=full`, { raw: true });
   assert.equal(pdf.status, 200);
   assert.ok((await pdfText(pdf.buffer)).includes('ສົມໃຈ'), 'Lao name is embedded as real text');
-  const word = await admin.get(`/api/admin/candidates/${c.data.id}/export.docx`, { raw: true });
+  const word = await admin.get(`/api/admin/candidates/${c.data.id}/export.docx?detail=full`, { raw: true });
   assert.ok((await mammoth.extractRawText({ buffer: word.buffer })).value.includes('ສົມໃຈ'));
 });
 

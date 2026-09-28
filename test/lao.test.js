@@ -133,7 +133,7 @@ test('ONE Lao link, candidates A / B / C: own random questions, all in Lao, stab
   assert.equal((await people[1].put(u(l, '/answer'), { question_id: people[0].s.questions[1].id, answer: 'B' })).status, 400);
   // Export shows the language used.
   const cid = db.prepare("SELECT id FROM candidates WHERE name = 'Lao A'").get().id;
-  const x = XLSX.utils.sheet_to_json(XLSX.read((await admin.get(`/api/admin/candidates/${cid}/export.xlsx`, { raw: true })).buffer).Sheets.Candidates)[0];
+  const x = XLSX.utils.sheet_to_json(XLSX.read((await admin.get(`/api/admin/candidates/${cid}/export.xlsx?detail=full`, { raw: true })).buffer).Sheets.Candidates)[0];
   assert.equal(x['Assessment Language'], 'Lao');
   const review = (await admin.get('/api/admin/assessments/' + aid)).data.questions;
   assert.ok(review.every((r) => r.question_text && r.question_text_lo), 'HR sees English and Lao side by side');

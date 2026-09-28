@@ -86,12 +86,12 @@ test('one IQ test: the same classification on results, review, candidate, dashbo
   assert.equal(dash.iq_classification.length, 7);
   assert.ok(!Object.keys(dash.summary.iq_levels).some((k) => ['Exceptional', 'Very High', 'Very Low'].includes(k)), 'old IQ names gone');
 
-  const x = XLSX.utils.sheet_to_json(XLSX.read((await admin.get(`/api/admin/candidates/${cand.id}/export.xlsx`, { raw: true })).buffer).Sheets.Candidates)[0];
+  const x = XLSX.utils.sheet_to_json(XLSX.read((await admin.get(`/api/admin/candidates/${cand.id}/export.xlsx?detail=full`, { raw: true })).buffer).Sheets.Candidates)[0];
   assert.deepEqual([x['IQ Weighted Score'], x['IQ Max Marks'], x['IQ %'], x['LALCO IQ Score'], x['IQ Classification'], x['IQ Classification Range'], x['IQ Category'], x['IQ Level']],
     [15, 20, 75, 113, 'High average', '110–119', 'High average', 'High average']);
-  const word = (await mammoth.extractRawText({ buffer: (await admin.get(`/api/admin/candidates/${cand.id}/export.docx`, { raw: true })).buffer })).value;
+  const word = (await mammoth.extractRawText({ buffer: (await admin.get(`/api/admin/candidates/${cand.id}/export.docx?detail=full`, { raw: true })).buffer })).value;
   const { PDFParse } = require('pdf-parse');
-  const pp = new PDFParse({ data: new Uint8Array((await admin.get(`/api/admin/candidates/${cand.id}/export.pdf`, { raw: true })).buffer) });
+  const pp = new PDFParse({ data: new Uint8Array((await admin.get(`/api/admin/candidates/${cand.id}/export.pdf?detail=full`, { raw: true })).buffer) });
   const pdf = (await pp.getText()).text.replace(/\s+/g, ' ');
   await pp.destroy();
   for (const text of [word.replace(/\s+/g, ' '), pdf]) {

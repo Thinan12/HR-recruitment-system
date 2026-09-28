@@ -116,7 +116,7 @@ test('TEST 12: scoring uses only the selected questions (20 questions, maximum 6
   assert.deepEqual(r.iq_levels.map((l) => [l.level, l.correct_text, l.marks_text]),
     [[1, '4 / 4', '4 / 4'], [2, '2 / 4', '4 / 8'], [3, '4 / 4', '12 / 12'], [4, '1 / 4', '4 / 16'], [5, '0 / 4', '0 / 20']]);
   const cand = (await admin.get('/api/admin/candidates')).data.find((c) => c.name === 'Scorer');
-  const x = XLSX.utils.sheet_to_json(XLSX.read((await admin.get(`/api/admin/candidates/${cand.id}/export.xlsx`, { raw: true })).buffer).Sheets.Candidates)[0];
+  const x = XLSX.utils.sheet_to_json(XLSX.read((await admin.get(`/api/admin/candidates/${cand.id}/export.xlsx?detail=full`, { raw: true })).buffer).Sheets.Candidates)[0];
   assert.equal(x['IQ Test Score'], '24 / 60');
   assert.equal(x['Level 5 Marks'], '0 / 20');
 });

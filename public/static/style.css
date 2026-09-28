@@ -256,3 +256,8 @@ td.failed { font-weight: 700; }
 .bulk-bar { background: #eef4fa; border-radius: 6px; padding: 8px 10px; margin: 8px 0; }
 .iq-class-table { max-width: 560px; } .iq-class-table td, .iq-class-table th { padding: 7px 14px; }
 .wrap-note { display: block; white-space: normal; margin-top: 4px; }
+
+/* Standard report: duplicate phone numbers and PASS / NOT PASS */
+.dup-phone { background: #fff2cc; }
+.pass-text { color: #1e7b34; }
+.fail-text { color: #c00000; }

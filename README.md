@@ -13,6 +13,7 @@ A simple recruitment and assessment system for LALCO HR.
 | **Questions** | The question bank (IQ, General, Calculation, Essay). Upload a file, or add / edit / delete questions |
 | **Assessments** | Create a link for a candidate, copy it, disable / enable / regenerate it, and review answers |
 | **Results** | One row per candidate, with export buttons and "Export all candidates (Excel)" |
+| **Report** | The **standard report**: one row per candidate with exactly 15 fields — Candidate Name, Phone Number, Graduate From, High School, College, University, School Name, Subject, GPA / Mark, Date and Time, IQ Test Score, Behavioral Assessment Score, Calculation Score, Essay Score, Pass / Not Pass Status |
 | **Settings** | Default exam time, default link expiry, pass mark of each test, final eligibility mark, default language, change password |
 
 ### Uploading questions
@@ -109,6 +110,7 @@ Options may also be on one line (`A. Red  B. Blue  C. Green  D. Chair`).
 - **Final Overall Score** = the average of the percentages of the tests included in the link (two tests → divided by 2). It is worked out only when every test is finished and the essay is marked.
 - **Company Eligibility** (system result): **ELIGIBLE** when every test in the link is passed **and** the Final Overall Score reaches the final eligibility mark (Settings, default **70%**). A test not passed = NOT ELIGIBLE, with no final score from tests that were never taken. While a test or the essay marking is outstanding it is PENDING. A high score in one test never makes up for a failed one.
 - **HR Final Result** is HR's own decision, entered on the candidate page with the interview details. The system never changes it, and it never changes the Company Eligibility.
+- **Standard report / exports.** "Export all (Excel)" and each candidate's **PDF / Word / Excel** buttons give the standard report: the 15 fields above, nothing else. Scores are the ones already calculated: IQ Test Score = LALCO IQ Score (e.g. 74 / 150), Behavioral Assessment (the General test) and Calculation = percentage, Essay = HR's marks (e.g. 8 / 10), or "Pending HR marking" until marked — never 0 unless 0 was given; a test not reached shows Locked / Not started, and "—" means not part of the assessment. Date and Time = when the assessment was submitted (or started), Lao time. Pass / Not Pass Status is **PASS** / **NOT PASS** (PENDING while an essay waits), in bold on the Report page, PDF, Word and Excel. The Excel has an AutoFilter on every column (the two % columns are numbers, so they filter by value) and a frozen header; a phone number used by more than one candidate (compared by its digits, +856 20 … = 020 …) is highlighted with a note — nothing is merged or deleted. The Report page can show only duplicate phone numbers. The full detailed files are still there as **Detailed Excel / PDF / Word** (`?detail=full`).
 - The **Dashboard** shows summary counts (eligible / not eligible / pending, passed / not passed per test, essays pending marking, IQ levels; click a card to filter) and one row per candidate with every test's score, %, level and result, the final %, final level, eligibility and HR Final Result, with filters. The candidate page, the review page and the PDF / Word / Excel exports show the same.
 - **Test Score** (still shown and exported) is the percentage over all marks of the latest assessment.
 
@@ -119,7 +121,7 @@ Node.js 24 LTS, Express, SQLite (`better-sqlite3`), plain HTML/JS frontend (no b
 ```
 npm install
 ADMIN_PASSWORD=choose-a-password npm start    # http://localhost:3000
-npm test                                       # 182 tests, uses temporary databases (set LALCO_SAMPLE_DOCX / LALCO_BEHAVIOURAL_PDF to also test real documents)
+npm test                                       # 186 tests, uses temporary databases (set LALCO_SAMPLE_DOCX / LALCO_BEHAVIOURAL_PDF to also test real documents)
 ```
 
 ```
@@ -130,7 +132,8 @@ src/
   auth.js          admin login (bcrypt + JWT in an httpOnly cookie)
   assessments.js   links, random selection, timer rules, scoring
   importer.js      question file parsing and validation
-  reports.js       dashboard, candidate summaries, PDF / Word / Excel exports
+  reports.js       dashboard, candidate summaries, detailed PDF / Word / Excel exports
+  standardReport.js the standard 15-field report (web, Excel, PDF, Word)
   routes/admin.js  admin API
   routes/exam.js   candidate API
 public/

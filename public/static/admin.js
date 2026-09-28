@@ -283,6 +283,7 @@ const ROUTES = {
   assessments: (id) => (id ? renderAssessment(id) : renderAssessments()),
   links: (id) => renderLink(id),
   results: () => renderResults(),
+  report: () => renderReport(),
   settings: () => renderSettings(),
 };
 
@@ -428,7 +429,7 @@ async function renderDashboard() {
     h('div', { class: 'stats' }, IQ_CLASSES.map((c) => card(`${c.description} (${c.range})`, s.iq_levels[c.description] ?? 0, 'iq_' + c.description))),
     h('div', { class: 'card' },
       h('div', { class: 'row between' }, h('h2', {}, 'Candidates'),
-        h('div', { class: 'row' }, filter, count, h('a', { class: 'button small', href: '#/assessments' }, 'Create assessment link'), downloadLink('/export/candidates.xlsx', 'Export all (Excel)'))),
+        h('div', { class: 'row' }, filter, count, h('a', { class: 'button small', href: '#/assessments' }, 'Create assessment link'), downloadLink('/export/candidates.xlsx', 'Export all (Excel)'), downloadLink('/export/candidates.xlsx?detail=full', 'Detailed Excel'))),
       tableBox,
       h('p', { class: 'muted small' }, 'Each column group is one test of the candidate\'s latest assessment link. General / Calculation / Essay level: 90%+ Exceptional, 80%+ Very High, 70%+ High, 60%+ Average, 50%+ Low, below 50% Very Low. IQ Classification comes from the LALCO IQ Score (see Results). Result uses each test\'s pass mark. Final % = the average of the included tests; Company Eligibility = every test passed and Final % reaches the eligibility mark. HR Final Result is HR\'s own decision.')));
   draw();
@@ -462,7 +463,7 @@ async function renderCandidates() {
 
   view().replaceChildren(
     h('div', { class: 'row between' }, h('h1', {}, 'Candidates'),
-      h('div', { class: 'row' }, search, h('button', { type: 'button', onclick: addCandidate }, 'Add candidate'), downloadLink('/export/candidates.xlsx', 'Export all (Excel)', 'secondary'))),
+      h('div', { class: 'row' }, search, h('button', { type: 'button', onclick: addCandidate }, 'Add candidate'), downloadLink('/export/candidates.xlsx', 'Export all (Excel)', 'secondary'), downloadLink('/export/candidates.xlsx?detail=full', 'Detailed Excel', 'secondary'))),
     h('div', { class: 'card' }, body));
   await load();
 }
@@ -539,6 +540,10 @@ async function renderCandidate(id) {
         downloadLink(`/candidates/${c.id}/export.pdf`, 'PDF'),
         downloadLink(`/candidates/${c.id}/export.docx`, 'Word'),
         downloadLink(`/candidates/${c.id}/export.xlsx`, 'Excel'),
+        h('span', { class: 'muted small' }, 'Detailed:'),
+        downloadLink(`/candidates/${c.id}/export.pdf?detail=full`, 'PDF'),
+        downloadLink(`/candidates/${c.id}/export.docx?detail=full`, 'Word'),
+        downloadLink(`/candidates/${c.id}/export.xlsx?detail=full`, 'Excel'),
         h('button', { class: 'danger small', type: 'button', onclick: del }, 'Delete'))),
     card,
     h('div', { class: 'card' }, h('h2', {}, 'Assessments'), assessmentTable(assessments, false)));
@@ -1208,6 +1213,39 @@ async function renderAssessments() {
     h('div', { class: 'card' }, h('h2', {}, 'Assessment Links'), listBox));
 }
 
+// ---------------------------------------------------------------------------
+// Standard report: the same 15 fields as the standard Excel, PDF and Word.
+// ---------------------------------------------------------------------------
+
+async function renderReport() {
+  const data = await api('GET', '/report/standard');
+  const search = h('input', { type: 'search', placeholder: 'Search name, phone, school, status…', class: 'inline-input' });
+  const dupOnly = h('input', { type: 'checkbox' });
+  const body = h('tbody');
+  const STATUS_CLASS = { PASS: 'pass-text', 'NOT PASS': 'fail-text' };
+  const draw = () => {
+    const q = search.value.trim().toLowerCase();
+    const shown = data.rows.filter((r) => (!q || r.values.join(' ').toLowerCase().includes(q)) && (!dupOnly.checked || r.duplicate_phone));
+    body.replaceChildren(...(shown.length ? shown.map((r) => h('tr', {}, r.values.map((v, i) => {
+      if (i === 0) return h('td', {}, h('a', { href: '#/candidates/' + r.candidate_id }, v));
+      if (i === 1) return h('td', { class: r.duplicate_phone ? 'dup-phone' : null, title: r.duplicate_phone ? `Duplicate phone number: used by ${r.phone_count} candidates` : null }, v, r.duplicate_phone ? h('div', { class: 'small' }, 'Duplicate') : null);
+      if (i === 14) return h('td', { class: 'nowrap' }, h('strong', { class: STATUS_CLASS[v] || null }, v));
+      return h('td', { class: i >= 9 ? 'nowrap' : null }, v);
+    }))) : [h('tr', {}, h('td', { colspan: data.fields.length, class: 'muted' }, 'No candidates.'))]));
+  };
+  search.addEventListener('input', draw);
+  dupOnly.addEventListener('change', draw);
+  const dups = data.rows.filter((r) => r.duplicate_phone).length;
+  view().replaceChildren(
+    h('div', { class: 'row between' }, h('h1', {}, 'Standard Report'),
+      h('div', { class: 'row' }, downloadLink('/export/candidates.xlsx', 'Download Excel (15 columns)', ''), downloadLink('/export/candidates.xlsx?detail=full', 'Detailed Excel'))),
+    h('div', { class: 'card' },
+      h('div', { class: 'row' }, search, h('label', { class: 'small' }, dupOnly, ` Only duplicate phone numbers (${dups})`)),
+      h('p', { class: 'muted small' }, 'One row per candidate. Scores are the ones the assessment already calculated: IQ = LALCO IQ Score, Behavioral Assessment and Calculation = percentage, Essay = marks (or "Pending HR marking" until HR marks it). "—" = not part of the candidate\'s assessment. A highlighted phone number is used by more than one candidate (nothing is merged or deleted). Each candidate\'s PDF / Word report has the same 15 fields.'),
+      h('div', { class: 'table-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, data.fields.map((f) => h('th', {}, f)))), body))));
+  draw();
+}
+
 // "✓ IQ → ✗ General → ○ Calculation" for the admin tables.
 // "69.4% PASS" / "Pending HR marking" / "-" for one test of a candidate.
 function testCell(c, sec) {
@@ -1494,7 +1532,7 @@ async function renderResults() {
       : h('p', { class: 'muted' }, 'No IQ tests submitted yet.'),
     h('p', { class: 'muted small' }, 'IQ Test Score = marks earned out of the maximum. Each correct answer is worth its level: Level 1 = 1 mark up to Level 5 = 5 marks. The maximum comes from the questions the candidate actually got (e.g. 20 questions = 4 per level = 60). Tests taken before the 5-level scale keep their earlier Easy / Medium / Hard marks. It is a test score, not a clinical IQ measurement.'));
   view().replaceChildren(
-    h('div', { class: 'row between' }, h('h1', {}, 'Results'), downloadLink('/export/candidates.xlsx', 'Export all candidates (Excel)', '')),
+    h('div', { class: 'row between' }, h('h1', {}, 'Results'), h('div', { class: 'row' }, downloadLink('/export/candidates.xlsx', 'Export all candidates (Excel)', ''), downloadLink('/export/candidates.xlsx?detail=full', 'Detailed Excel'))),
     iqClassificationTable(classes),
     iqCard,
     h('div', { class: 'card' }, h('h2', {}, 'All candidates'), list.length ? h('div', { class: 'table-wrap' }, h('table', {},

@@ -295,14 +295,14 @@ test('HR sees ONE link with its candidates; results and exports are one row per 
   assert.ok(detail.attempts.every((x) => x.started_at && x.current_stage));
 
   // Export all: one row per candidate, each with its own IQ result and the link name.
-  const rows = XLSX.utils.sheet_to_json(XLSX.read((await admin.get('/api/admin/export/candidates.xlsx', { raw: true })).buffer).Sheets.Candidates);
+  const rows = XLSX.utils.sheet_to_json(XLSX.read((await admin.get('/api/admin/export/candidates.xlsx?detail=full', { raw: true })).buffer).Sheets.Candidates);
   const mine = rows.filter((r) => /HR$/.test(r['Candidate Name']));
   assert.equal(mine.length, 3);
   assert.deepEqual(mine.map((r) => [r['Candidate Name'], r['IQ Test Score'], r['Assessment Link']]).sort(),
     [['David HR', '2 / 10', 'September Recruitment'], ['John HR', '10 / 10', 'September Recruitment'], ['Mary HR', '9 / 10', 'September Recruitment']]);
   // One candidate's export holds only that candidate.
   const john = detail.attempts.find((x) => x.candidate_name === 'John HR');
-  const one = XLSX.utils.sheet_to_json(XLSX.read((await admin.get(`/api/admin/candidates/${john.candidate_id}/export.xlsx`, { raw: true })).buffer).Sheets.Candidates);
+  const one = XLSX.utils.sheet_to_json(XLSX.read((await admin.get(`/api/admin/candidates/${john.candidate_id}/export.xlsx?detail=full`, { raw: true })).buffer).Sheets.Candidates);
   assert.equal(one.length, 1);
   assert.equal(one[0]['Candidate Name'], 'John HR');
 

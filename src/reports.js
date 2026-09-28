@@ -393,7 +393,7 @@ function reportSections(c) {
 }
 
 const NOTE = 'Scores are percentages of available marks. IQ Test Score = marks earned (Level 1 = 1 up to Level 5 = 5 per correct answer) out of the maximum; it is not a clinical IQ measurement. LALCO IQ Score: ' + LALCO_NOTE
-  + ' Level: 90%+ Exceptional, 80%+ Very High, 70%+ High, 60%+ Average, 50%+ Low, below 50% Very Low for General, Calculation, Essay and the final score. IQ Classification (from the LALCO IQ Score): 130–150 Very superior, 120–129 Superior, 110–119 High average, 90–109 Average, 80–89 Low average, 70–79 Borderline, 50–69 Extremely low. PASS / NOT PASS uses each test\'s own pass mark. Final Overall Score = the average of the included tests\' percentages. Company Eligibility = every test passed and the final score reaches the eligibility mark. HR Final Result is HR\'s own decision.';
+  + ' Level: 90%+ Exceptional, 80%+ Very High, 70%+ High, 60%+ Average, 50%+ Low, below 50% Very Low for General, Calculation, Essay and the final score. IQ Classification (from the LALCO IQ Score): 130–150 Very superior, 120–129 Superior, 110–119 High average, 90–109 Average, 80–89 Low average, 70–79 Borderline, 0–69 Extremely low. PASS / NOT PASS uses each test\'s own pass mark. Final Overall Score = the average of the included tests\' percentages. Company Eligibility = every test passed and the final score reaches the eligibility mark. HR Final Result is HR\'s own decision.';
 
 function candidatePdf(c) {
   return new Promise((resolve, reject) => {

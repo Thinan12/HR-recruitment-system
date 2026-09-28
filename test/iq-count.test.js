@@ -79,12 +79,12 @@ test('18 questions: exactly 18 saved (4/3/3/4/4, max 55); 27 marks -> 27 / 55, 1
   const cand = (await admin.get('/api/admin/candidates')).data.find((x) => x.name === 'Eighteen');
   assert.deepEqual([cand.iq_text, cand.iq_correct_text, cand.iq_score, cand.lalco_iq_score], ['27 / 55', '10 / 18', 49.1, 74]);
 
-  const x = XLSX.utils.sheet_to_json(XLSX.read((await admin.get(`/api/admin/candidates/${cand.id}/export.xlsx`, { raw: true })).buffer).Sheets.Candidates)[0];
+  const x = XLSX.utils.sheet_to_json(XLSX.read((await admin.get(`/api/admin/candidates/${cand.id}/export.xlsx?detail=full`, { raw: true })).buffer).Sheets.Candidates)[0];
   assert.deepEqual([x['IQ Correct Answers'], x['IQ Weighted Score'], x['IQ Max Marks'], x['IQ %'], x['LALCO IQ Score'], x['IQ Classification'], x['Level 1 Max Marks'], x['Level 5 Max Marks']],
     ['10 / 18', 27, 55, 49.1, 74, 'Borderline', 4, 20]);
-  const word = (await mammoth.extractRawText({ buffer: (await admin.get(`/api/admin/candidates/${cand.id}/export.docx`, { raw: true })).buffer })).value.replace(/\s+/g, ' ');
+  const word = (await mammoth.extractRawText({ buffer: (await admin.get(`/api/admin/candidates/${cand.id}/export.docx?detail=full`, { raw: true })).buffer })).value.replace(/\s+/g, ' ');
   const { PDFParse } = require('pdf-parse');
-  const pp = new PDFParse({ data: new Uint8Array((await admin.get(`/api/admin/candidates/${cand.id}/export.pdf`, { raw: true })).buffer) });
+  const pp = new PDFParse({ data: new Uint8Array((await admin.get(`/api/admin/candidates/${cand.id}/export.pdf?detail=full`, { raw: true })).buffer) });
   const pdf = (await pp.getText()).text.replace(/\s+/g, ' ');
   await pp.destroy();
   for (const text of [word, pdf]) {

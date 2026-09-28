@@ -319,7 +319,7 @@ test('dashboard: summary counts and one row per candidate with every test and th
 
 test('exports: Excel, PDF and Word show each test, the final score, level and company eligibility', async () => {
   const c = (await admin.get('/api/admin/candidates')).data.find((x) => x.name === 'Full Pass');
-  const sheet = XLSX.read((await admin.get(`/api/admin/candidates/${c.id}/export.xlsx`, { raw: true })).buffer).Sheets.Candidates;
+  const sheet = XLSX.read((await admin.get(`/api/admin/candidates/${c.id}/export.xlsx?detail=full`, { raw: true })).buffer).Sheets.Candidates;
   const x = XLSX.utils.sheet_to_json(sheet)[0];
   const header = XLSX.utils.sheet_to_json(sheet, { header: 1 })[0];
   assert.equal(x['IQ Level'], 'Superior');
@@ -338,11 +338,11 @@ test('exports: Excel, PDF and Word show each test, the final score, level and co
   assert.equal(x['Final Result'], 'Not Pass', 'HR Final Result kept as its own column');
   for (const col of ['Interviewer', 'Interview Score', 'Chairman Interview', 'Date Come to Work', 'Remark', 'IQ Weighted Score', 'Eligibility Note']) assert.ok(header.includes(col), col);
 
-  const pdfBuf = (await admin.get(`/api/admin/candidates/${c.id}/export.pdf`, { raw: true })).buffer;
+  const pdfBuf = (await admin.get(`/api/admin/candidates/${c.id}/export.pdf?detail=full`, { raw: true })).buffer;
   const p = new PDFParse({ data: new Uint8Array(pdfBuf) });
   const pdf = (await p.getText()).text;
   await p.destroy();
-  const word = (await require('mammoth').extractRawText({ buffer: (await admin.get(`/api/admin/candidates/${c.id}/export.docx`, { raw: true })).buffer })).value;
+  const word = (await require('mammoth').extractRawText({ buffer: (await admin.get(`/api/admin/candidates/${c.id}/export.docx?detail=full`, { raw: true })).buffer })).value;
   for (const text of [pdf, word].map((t) => t.replace(/\s+/g, ' '))) {
     for (const want of ['Final Overall Score', '75.0%', 'Final Level', 'Company Eligibility', 'ELIGIBLE', 'HR Final Result', 'LALCO IQ 120 / 150', 'Exceptional', 'pass mark 70%']) {
       assert.ok(text.includes(want), want);
