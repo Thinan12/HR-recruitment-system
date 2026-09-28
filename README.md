@@ -46,6 +46,7 @@ Type: IQ
 
 Options may also be on one line (`A. Red  B. Blue  C. Green  D. Chair`).
 
+- **Delete All Questions:** the **Question Bank** box on the Questions page lists each test area (IQ, General, Calculation, Essay) with its number of questions, an **Upload** button and a **Delete All Questions** button. It clears only that area — active, inactive and duplicate rows — after two confirmations ("Delete All IQ Questions?", then "Are you sure you want to delete ALL 95 IQ questions?"). Candidates' past assessments keep their own copy of every question, so their answers, scores, results and reports do not change. The deletion runs in one transaction (all or nothing), needs an admin login, and is recorded in the `audit_log` table (action `DELETE_ALL_QUESTIONS`, area, number deleted, admin, time). A new file can be uploaded straight away.
 - **Pictures:** in **Add question** / **Edit**, any question and any option (A–E) can have a picture (PNG, JPG, GIF or WebP, up to 2 MB). An option can be text, a picture, or both. A fifth option (E) is optional.
 - **Essay** questions need no options. HR enters the marks on the assessment review page.
 - **Calculation** questions can have options, or just one exact answer (e.g. `Answer: 1250`). Spaces and commas are ignored when marking.
@@ -89,7 +90,7 @@ Node.js 24 LTS, Express, SQLite (`better-sqlite3`), plain HTML/JS frontend (no b
 ```
 npm install
 ADMIN_PASSWORD=choose-a-password npm start    # http://localhost:3000
-npm test                                       # 114 tests, uses temporary databases
+npm test                                       # 121 tests, uses temporary databases
 ```
 
 ```
@@ -108,7 +109,7 @@ public/
 test/              node:test suites and Word-generated fixtures
 ```
 
-**Database tables:** `admins`, `settings`, `candidates` (incl. interview and final decision), `questions`, `assessments` (link and scores), `assessment_stages` (the tests inside one link: order, timer, score, result), `assessment_questions` (each candidate's questions, copied from the bank so later edits never change a past result), `images` (question and option pictures).
+**Database tables:** `admins`, `settings`, `candidates` (incl. interview and final decision), `questions`, `assessments` (link and scores), `assessment_stages` (the tests inside one link: order, timer, score, result), `assessment_questions` (each candidate's questions, copied from the bank so later edits never change a past result), `images` (question and option pictures), `audit_log` (high-risk admin actions such as Delete All Questions).
 
 ### Railway
 

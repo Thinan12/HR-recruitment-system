@@ -124,7 +124,15 @@ router.get('/questions', (req, res) => {
     args.push(`%${req.query.q}%`, `%${req.query.q}%`);
   }
   const sql = 'SELECT * FROM questions' + (where.length ? ' WHERE ' + where.join(' AND ') : '') + ' ORDER BY id DESC';
-  res.json({ questions: db.prepare(sql).all(...args), counts: A.activeCounts(), inactive_counts: A.inactiveCounts() });
+  // Every row of each area (active + inactive), and the IQ bank per level.
+  const totals = Object.fromEntries(A.SECTIONS.map((s) => [s, 0]));
+  for (const r of db.prepare('SELECT section, COUNT(*) AS n FROM questions GROUP BY section').all()) totals[r.section] = r.n;
+  const iqLevels = Object.fromEntries(A.DIFFICULTIES.map((d) => [d, 0]));
+  for (const r of db.prepare("SELECT difficulty, COUNT(*) AS n FROM questions WHERE section = 'IQ' GROUP BY difficulty").all()) {
+    const level = A.levelOf(r);
+    if (level in iqLevels) iqLevels[level] += r.n;
+  }
+  res.json({ questions: db.prepare(sql).all(...args), counts: A.activeCounts(), inactive_counts: A.inactiveCounts(), total_counts: totals, iq_levels: iqLevels });
 });
 
 const QUESTION_COLS = ['section', 'category', 'difficulty', 'question_text', 'option_a', 'option_b', 'option_c', 'option_d', 'option_e',
@@ -162,6 +170,29 @@ router.delete('/questions/:id', (req, res) => {
   const info = db.prepare('DELETE FROM questions WHERE id = ?').run(Number(req.params.id));
   if (!info.changes) return notFound(res);
   res.json({ ok: true });
+});
+
+// Clears the question bank of ONE test area: active, inactive and duplicate
+// rows alike. Candidates' assessments keep their own copies of every question
+// (text, options, answer, marks, pictures), so no past result changes.
+router.post('/questions/delete-all', (req, res) => {
+  const section = String(req.body?.section || '').toUpperCase();
+  if (!A.SECTIONS.includes(section)) return res.status(400).json({ success: false, message: 'Please choose a test area.' });
+  try {
+    const deletedCount = db.transaction(() => {
+      const n = db.prepare('SELECT COUNT(*) AS n FROM questions WHERE section = ?').get(section).n;
+      const info = db.prepare('DELETE FROM questions WHERE section = ?').run(section);
+      if (info.changes !== n) throw new Error(`expected to delete ${n}, deleted ${info.changes}`);
+      db.prepare("INSERT INTO audit_log (action, admin, details, created_at) VALUES ('DELETE_ALL_QUESTIONS', ?, ?, ?)")
+        .run(req.admin.username, JSON.stringify({ test_type: section, deleted: n }), now());
+      return n;
+    })();
+    console.log(`[audit] DELETE_ALL_QUESTIONS area=${section} deleted=${deletedCount} admin=${req.admin.username}`);
+    res.json({ success: true, testType: section, deletedCount });
+  } catch (e) {
+    console.error('Delete all questions failed:', e);
+    res.status(500).json({ success: false, message: 'Questions were not deleted. Please try again or check the server logs.' });
+  }
 });
 
 // Pictures for questions and options. Upload returns an id to put on the question.

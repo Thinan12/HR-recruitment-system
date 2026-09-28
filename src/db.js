@@ -148,6 +148,15 @@ CREATE TABLE IF NOT EXISTS assessment_stages (
   UNIQUE (assessment_id, section)
 );
 
+-- Record of high-risk admin actions (e.g. DELETE_ALL_QUESTIONS).
+CREATE TABLE IF NOT EXISTS audit_log (
+  id INTEGER PRIMARY KEY,
+  action TEXT NOT NULL,
+  admin TEXT NOT NULL,
+  details TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
+
 -- Pictures for questions and answer options (PNG / JPEG / GIF / WebP only).
 -- Never deleted with a question, so past assessments keep showing them.
 CREATE TABLE IF NOT EXISTS images (

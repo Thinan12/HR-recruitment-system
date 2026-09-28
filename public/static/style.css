@@ -241,3 +241,6 @@ td.failed { font-weight: 700; }
 .stat-group-title { font-size: 13px; color: var(--muted); font-weight: 600; margin: 12px 0 4px; }
 .stat.clickable { cursor: pointer; }
 .stat.clickable:hover { border-color: var(--primary); }
+/* question bank: one row per test area */
+.bank-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.bank-count { font-weight: 600; }

@@ -490,10 +490,12 @@ async function renderQuestions() {
   const summary = h('p', { class: 'small' });
   const body = h('div');
   const card = h('div', { class: 'card' }, h('div', { class: 'row between' }, tabs, h('div', { class: 'row' }, statusFilter, search)), summary, body);
+  const bankCard = h('div', { class: 'card' });
   statusFilter.addEventListener('change', () => { questionStatus = statusFilter.value; load(); });
 
   const load = async () => {
-    const { questions, counts, inactive_counts: inactive } = await api('GET', `/questions?section=${questionSection}&status=${questionStatus}&q=${encodeURIComponent(search.value)}`);
+    const { questions, counts, inactive_counts: inactive, total_counts: totals, iq_levels: iqLevels } = await api('GET', `/questions?section=${questionSection}&status=${questionStatus}&q=${encodeURIComponent(search.value)}`);
+    bankCard.replaceChildren(questionBankCard(totals, counts, inactive, iqLevels, load));
     const shown = questionSection ? [questionSection] : Object.keys(SECTION_LABEL);
     summary.replaceChildren(...shown.flatMap((s, i) => [i ? ' · ' : '', h('strong', {}, `Active ${SECTION_LABEL[s]} Questions: ${counts[s]}`), `  Inactive ${SECTION_LABEL[s]} Questions: ${inactive[s]}`]));
     const total = Object.values(counts).reduce((a, b) => a + b, 0);
@@ -521,18 +523,74 @@ async function renderQuestions() {
   view().replaceChildren(
     h('div', { class: 'row between' }, h('h1', {}, 'Questions'),
       h('button', { type: 'button', onclick: () => editQuestion(null, load) }, 'Add question')),
+    bankCard,
     uploadCard(load),
     card);
   await load();
 }
 
+// QUESTION BANK: one row per test area with its count, Upload and Delete All Questions.
+function questionBankCard(totals, active, inactive, iqLevels, reload) {
+  const rows = Object.keys(SECTION_LABEL).map((sec) => {
+    const total = totals[sec] || 0;
+    const upload = () => {
+      const pick = $('upload-section');
+      if (pick) pick.value = sec;
+      $('upload-card')?.scrollIntoView({ behavior: 'smooth' });
+    };
+    return h('div', { class: 'bank-row' },
+      h('div', { class: 'bank-name' }, h('strong', {}, TYPE_LABEL[sec]), ' — ', h('span', { class: 'bank-count' }, `${total} question${total === 1 ? '' : 's'}`),
+        h('div', { class: 'muted small' }, `Active ${active[sec] || 0} · Inactive ${inactive[sec] || 0}`,
+          sec === 'IQ' ? ' · ' + IQ_LEVELS.map((n) => `L${n}: ${iqLevels?.[Object.keys(LEVEL_MARK)[n - 1]] ?? 0}`).join(' / ') : '')),
+      h('div', { class: 'row' },
+        h('button', { type: 'button', class: 'secondary small', onclick: upload }, 'Upload'),
+        h('button', { type: 'button', class: 'danger small', disabled: total === 0, onclick: () => confirmDeleteAll(sec, total, reload) }, 'Delete All Questions')));
+  });
+  return h('div', {}, h('h2', {}, 'Question Bank'), rows,
+    h('p', { class: 'muted small' }, 'Delete All Questions clears only that test area (active and inactive). Candidates\' past assessments keep their own copy of every question, so their answers, scores and reports do not change.'));
+}
+
+// Two clear confirmations, then the server deletes that one test area.
+function confirmDeleteAll(sec, total, reload) {
+  const name = SECTION_LABEL[sec];
+  const step1 = h('div', {},
+    h('p', {}, `This will permanently remove all ${name} questions from the question bank.`),
+    h('p', {}, 'Historical candidate assessment results will not be affected.'),
+    h('div', { class: 'row section-gap' },
+      h('button', { type: 'button', class: 'secondary', onclick: () => close1() }, 'Cancel'),
+      h('button', { type: 'button', class: 'danger', onclick: () => { close1(); step2(); } }, 'Delete All Questions')));
+  const close1 = modal(`Delete All ${name} Questions?`, step1);
+  function step2() {
+    const yes = h('button', { type: 'button', class: 'danger' }, 'Yes, Delete All');
+    const box = h('div', {},
+      h('p', {}, h('strong', {}, `Are you sure you want to delete ALL ${total} ${name} question${total === 1 ? '' : 's'}?`)),
+      h('p', {}, 'This action cannot be undone.'),
+      h('div', { class: 'row section-gap' }, h('button', { type: 'button', class: 'secondary', onclick: () => close2() }, 'Cancel'), yes));
+    const close2 = modal('Please confirm', box);
+    yes.addEventListener('click', async () => {
+      yes.disabled = true;
+      try {
+        const r = await api('POST', '/questions/delete-all', { section: sec });
+        close2();
+        await reload();
+        const view = document.querySelector('#view .card');
+        if (view) flash(view, `All ${name} questions deleted successfully.\n${r.deletedCount} question${r.deletedCount === 1 ? '' : 's'} removed.\nHistorical assessment results were preserved.`, 'ok');
+      } catch {
+        yes.disabled = false;
+        flash(box, 'Questions were not deleted.\nPlease try again or check the server logs.');
+      }
+    });
+  }
+}
+
 function uploadCard(onImported) {
   const fileInput = h('input', { type: 'file', class: 'inline-input', accept: '.xlsx,.xls,.docx,.doc,.pdf,.csv,.tsv,.txt' });
   const section = select('section', Object.entries(SECTION_LABEL).map(([k, v]) => [k, v + ' questions']), questionSection || 'IQ');
+  section.id = 'upload-section';
   section.classList.add('inline-input');
   const result = h('div');
   const button = h('button', { type: 'button' }, 'Read file');
-  const card = h('div', { class: 'card' },
+  const card = h('div', { class: 'card', id: 'upload-card' },
     h('h2', {}, 'Upload questions'),
     h('p', { class: 'muted small' },
       'Excel, Word, PDF, CSV, TSV or TXT. Either a table with columns such as Question, Option A-D, Correct Answer (optional: Type, Category, Level, Marks), or numbered questions (1. / Q1) with options A-D and the answer as an "Answer: B" line or in an Answer Key section at the end. Essay questions need no options. ',
