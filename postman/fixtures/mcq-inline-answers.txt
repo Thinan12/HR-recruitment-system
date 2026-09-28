@@ -1,0 +1,29 @@
+General knowledge — Postman fixture
+
+1. Which planet is known as the Red Planet?
+A. Venus
+B. Mars
+C. Jupiter
+D. Mercury
+Answer: B
+
+2. How many days are in a leap year?
+A. 365
+B. 364
+C. 366
+D. 360
+Answer: C
+
+3. Which gas do plants absorb from the air
+A. Oxygen
+B. Nitrogen
+C. Carbon dioxide
+D. Helium
+Ans: C
+
+4. Which ocean is the largest?
+A) Atlantic
+B) Indian
+C) Arctic
+D) Pacific
+Correct Answer: D

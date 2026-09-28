@@ -1,0 +1,9 @@
+Calculation
+
+1. Calculate 15 x 7.
+Answer: 105
+
+2. A loan of 12,000 is repaid in 12 equal monthly payments. How much is each payment?
+Expected Answer: 1000
+
+3. What is 18% of 2,500?

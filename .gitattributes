@@ -1,0 +1,2 @@
+# Import fixtures are uploaded byte for byte by the Postman tests: never convert line endings.
+postman/fixtures/** -text

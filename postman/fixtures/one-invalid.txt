@@ -1,0 +1,17 @@
+1. Which month has 28 or 29 days?
+A. January
+B. February
+C. March
+Answer: B
+
+2. Which shape has three sides?
+A. Square
+B. Circle
+C. Triangle
+Answer: E
+
+3. How many hours are in a day?
+A. 12
+B. 24
+C. 48
+Answer: B

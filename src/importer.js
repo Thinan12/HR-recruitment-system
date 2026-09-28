@@ -763,7 +763,7 @@ function rowsFromWorkbook(workbook, defaultSection, mapping) {
     const table = XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1, raw: false, defval: '', blankrows: false });
     if (!table.length) continue;
     const sheetRows = rowsFromTable(table, sectionFrom(name) || defaultSection, mapping && !found ? mapping : null);
-    if (sheetRows) { found = true; for (const r of sheetRows) r.sheet = name; rows.push(...sheetRows); } else if (!unmapped) unmapped = table.slice(0, 50);
+    if (sheetRows) { found = true; for (const r of sheetRows) r.sheet = name; rows.push(...sheetRows); if (sheetRows.fromMapping) rows.fromMapping = true; } else if (!unmapped) unmapped = table.slice(0, 50);
   }
   rows.format = rows.length ? 'table (header row)' + (workbook.SheetNames.length > 1 ? ` — ${workbook.SheetNames.length} sheets` : '') : 'table without a recognised header row';
   if (!found && unmapped) rows.unmapped = unmapped;
