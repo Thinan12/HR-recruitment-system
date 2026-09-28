@@ -5706,7 +5706,7 @@
               "formdata": [
                 {
                   "key": "section",
-                  "value": "GENERAL",
+                  "value": "{{testTypeKey}}",
                   "type": "text"
                 },
                 {
@@ -6044,7 +6044,7 @@
               "formdata": [
                 {
                   "key": "section",
-                  "value": "GENERAL",
+                  "value": "{{testTypeKey}}",
                   "type": "text"
                 },
                 {
@@ -6111,7 +6111,7 @@
               "formdata": [
                 {
                   "key": "section",
-                  "value": "GENERAL",
+                  "value": "{{testTypeKey}}",
                   "type": "text"
                 },
                 {
@@ -6155,7 +6155,7 @@
                   "pm.test('4 found, all 4 importable (no options or answers needed)', () => { pm.expect(body.found).to.equal(4); pm.expect(usable.length).to.equal(4); });",
                   "pm.test('Categories from \"1. ADAPTABILITY\" / \"2. COLLABORATION\"', () => pm.expect(body.rows.map((r) => r.question.category)).to.eql(['Adaptability', 'Adaptability', 'Collaboration', 'Collaboration']));",
                   "pm.test('Sample answers kept as HR-only guidance, not in the question', () => body.rows.forEach((r) => { pm.expect(r.question.question_text).to.not.include('Sample Answer'); pm.expect(r.question.correct_answer.length).to.be.above(20); }));",
-                  "pm.test('Open questions are not put into General', () => pm.expect(body.by_section.GENERAL).to.equal(0));",
+                  "pm.test('Open questions are not put into the default multiple-choice type', () => pm.expect(body.by_section[env('testTypeKey')]).to.equal(0));",
                   "set('importRowsBehavioral', usable.map((r) => r.question));"
                 ]
               }
@@ -6183,7 +6183,7 @@
               "formdata": [
                 {
                   "key": "section",
-                  "value": "GENERAL",
+                  "value": "{{testTypeKey}}",
                   "type": "text"
                 },
                 {
@@ -6387,7 +6387,7 @@
               "formdata": [
                 {
                   "key": "section",
-                  "value": "GENERAL",
+                  "value": "{{testTypeKey}}",
                   "type": "text"
                 },
                 {
@@ -6462,7 +6462,7 @@
               "formdata": [
                 {
                   "key": "section",
-                  "value": "GENERAL",
+                  "value": "{{testTypeKey}}",
                   "type": "text"
                 },
                 {
@@ -6533,7 +6533,7 @@
               "formdata": [
                 {
                   "key": "section",
-                  "value": "GENERAL",
+                  "value": "{{testTypeKey}}",
                   "type": "text"
                 },
                 {
@@ -6876,7 +6876,7 @@
               "formdata": [
                 {
                   "key": "section",
-                  "value": "GENERAL",
+                  "value": "{{testTypeKey}}",
                   "type": "text"
                 },
                 {
@@ -6943,7 +6943,7 @@
               "formdata": [
                 {
                   "key": "section",
-                  "value": "GENERAL",
+                  "value": "{{testTypeKey}}",
                   "type": "text"
                 },
                 {
@@ -7011,7 +7011,7 @@
               "formdata": [
                 {
                   "key": "section",
-                  "value": "GENERAL",
+                  "value": "{{testTypeKey}}",
                   "type": "text"
                 },
                 {
@@ -7078,7 +7078,7 @@
               "formdata": [
                 {
                   "key": "section",
-                  "value": "GENERAL",
+                  "value": "{{testTypeKey}}",
                   "type": "text"
                 },
                 {
@@ -7278,7 +7278,7 @@
               "formdata": [
                 {
                   "key": "section",
-                  "value": "GENERAL",
+                  "value": "{{testTypeKey}}",
                   "type": "text"
                 },
                 {
@@ -7345,7 +7345,7 @@
               "formdata": [
                 {
                   "key": "section",
-                  "value": "GENERAL",
+                  "value": "{{testTypeKey}}",
                   "type": "text"
                 },
                 {
@@ -7412,7 +7412,7 @@
               "formdata": [
                 {
                   "key": "section",
-                  "value": "GENERAL",
+                  "value": "{{testTypeKey}}",
                   "type": "text"
                 },
                 {
@@ -7479,7 +7479,7 @@
               "formdata": [
                 {
                   "key": "section",
-                  "value": "GENERAL",
+                  "value": "{{testTypeKey}}",
                   "type": "text"
                 },
                 {
@@ -7546,7 +7546,7 @@
               "formdata": [
                 {
                   "key": "section",
-                  "value": "GENERAL",
+                  "value": "{{testTypeKey}}",
                   "type": "text"
                 },
                 {
@@ -7613,7 +7613,7 @@
               "formdata": [
                 {
                   "key": "section",
-                  "value": "GENERAL",
+                  "value": "{{testTypeKey}}",
                   "type": "text"
                 },
                 {
@@ -7680,7 +7680,7 @@
               "formdata": [
                 {
                   "key": "section",
-                  "value": "GENERAL",
+                  "value": "{{testTypeKey}}",
                   "type": "text"
                 },
                 {

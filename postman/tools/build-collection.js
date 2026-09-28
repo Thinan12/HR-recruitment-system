@@ -463,7 +463,7 @@ const imports = folder('08 Question Import', 'Real multipart uploads of the file
     }],
   }),
   importReq('POST Import Questions — MCQ (TXT) into the temporary MCQ type', 'importRowsTxt', 'testTypeKey', { imported: 4 }),
-  preview('POST Import Preview — MCQ with the answer key at the end (PDF)', 'mcq-answer-key.pdf', 'GENERAL', {
+  preview('POST Import Preview — MCQ with the answer key at the end (PDF)', 'mcq-answer-key.pdf', '{{testTypeKey}}', {
     test: [() => { eval(pm.environment.get('libUsable')); }, () => {
       pm.test('5 found, 5 valid', () => { pm.expect(body.found).to.equal(5); pm.expect(body.valid).to.equal(5); });
       pm.test('Answer key detected (5 entries) and applied', () => { pm.expect(body.answer_key).to.equal(5); pm.expect(body.rows.map((r) => r.question.correct_answer)).to.eql(['B', 'A', 'B', 'C', 'C']); });
@@ -489,19 +489,19 @@ const imports = folder('08 Question Import', 'Real multipart uploads of the file
       pm.test('Reason says Duplicate', () => body.rows.forEach((r) => pm.expect(r.errors.join(' ')).to.include('Duplicate')));
     },
   }),
-  preview('POST Import Preview — CSV with semicolons and quotes', 'mcq-semicolon.csv', 'GENERAL', {
+  preview('POST Import Preview — CSV with semicolons and quotes', 'mcq-semicolon.csv', '{{testTypeKey}}', {
     test: () => {
       pm.test('3 found, 3 valid', () => { pm.expect(body.found).to.equal(3); pm.expect(body.valid).to.equal(3); });
       pm.test('A quoted value keeps its semicolon', () => pm.expect(body.rows[0].question.question_text).to.equal('Which one is a fruit; not a vegetable?'));
     },
   }),
-  preview('POST Import Preview — TSV', 'questions.tsv', 'GENERAL', { test: () => { pm.test('3 found, 3 valid', () => { pm.expect(body.found).to.equal(3); pm.expect(body.valid).to.equal(3); }); pm.test('Answer C = 7 continents', () => pm.expect(body.rows[1].question.correct_answer).to.equal('C')); } }),
-  preview('POST Import Preview — Behavioural questions + sample answers (DOCX)', 'behavioral-numbered.docx', 'GENERAL', {
+  preview('POST Import Preview — TSV', 'questions.tsv', '{{testTypeKey}}', { test: () => { pm.test('3 found, 3 valid', () => { pm.expect(body.found).to.equal(3); pm.expect(body.valid).to.equal(3); }); pm.test('Answer C = 7 continents', () => pm.expect(body.rows[1].question.correct_answer).to.equal('C')); } }),
+  preview('POST Import Preview — Behavioural questions + sample answers (DOCX)', 'behavioral-numbered.docx', '{{testTypeKey}}', {
     test: [() => { eval(pm.environment.get('libUsable')); }, () => {
       pm.test('4 found, all 4 importable (no options or answers needed)', () => { pm.expect(body.found).to.equal(4); pm.expect(usable.length).to.equal(4); });
       pm.test('Categories from "1. ADAPTABILITY" / "2. COLLABORATION"', () => pm.expect(body.rows.map((r) => r.question.category)).to.eql(['Adaptability', 'Adaptability', 'Collaboration', 'Collaboration']));
       pm.test('Sample answers kept as HR-only guidance, not in the question', () => body.rows.forEach((r) => { pm.expect(r.question.question_text).to.not.include('Sample Answer'); pm.expect(r.question.correct_answer.length).to.be.above(20); }));
-      pm.test('Open questions are not put into General', () => pm.expect(body.by_section.GENERAL).to.equal(0));
+      pm.test('Open questions are not put into the default multiple-choice type', () => pm.expect(body.by_section[env('testTypeKey')]).to.equal(0));
       set('importRowsBehavioral', usable.map((r) => r.question));
     }],
   }),
@@ -512,14 +512,14 @@ const imports = folder('08 Question Import', 'Real multipart uploads of the file
       pm.expect([...new Set(body.questions.map((q) => q.category))].sort()).to.eql(['Adaptability', 'Collaboration']);
     });
   }),
-  preview('POST Import Preview — Behavioural bullets under headings (TXT)', 'behavioral-bullets.txt', 'GENERAL', {
+  preview('POST Import Preview — Behavioural bullets under headings (TXT)', 'behavioral-bullets.txt', '{{testTypeKey}}', {
     test: [() => { eval(pm.environment.get('libUsable')); }, () => {
       pm.test('5 found, 5 importable', () => { pm.expect(body.found).to.equal(5); pm.expect(usable.length).to.equal(5); });
       pm.test('Categories from headings', () => pm.expect(body.rows.map((r) => r.question.category)).to.eql(['Leadership', 'Leadership', 'Leadership', 'Customer Service', 'Customer Service']));
       pm.test('A wrapped bullet stays one question; no question mark needed', () => { pm.expect(body.rows[0].question.question_text).to.equal('Tell me about a time when you led a team through a difficult deadline and what you learned from it.'); pm.expect(body.rows[2].question.question_text).to.not.include('?'); });
     }],
   }),
-  preview('REGRESSION — TABLE QUESTION IMPORT', 'behavioral-competency-table.docx', 'GENERAL', {
+  preview('REGRESSION — TABLE QUESTION IMPORT', 'behavioral-competency-table.docx', '{{testTypeKey}}', {
     desc: 'Permanent regression test for the reported bug ("Detected format: table (header row) · Questions found: 4 · Options found: 0 · Answers found: 0 · Valid questions: 0"). A competency table with several bullet questions per cell must give one question per bullet, with the competency as category.',
     test: [() => { eval(pm.environment.get('libUsable')); }, () => {
       pm.test('Not the reported failure (4 found, 0 valid)', () => pm.expect(!(body.found === 4 && body.valid + (body.pending_type || 0) === 0)).to.equal(true));
@@ -532,7 +532,7 @@ const imports = folder('08 Question Import', 'Real multipart uploads of the file
       pm.test('No options or answers required', () => body.rows.forEach((r) => pm.expect(r.errors.filter((e) => !/^Test Type "/.test(e))).to.eql([])));
     }],
   }),
-  preview('REGRESSION — PDF FOOTER READ AS A TABLE', 'behavioral-footer-regression.pdf', 'GENERAL', {
+  preview('REGRESSION — PDF FOOTER READ AS A TABLE', 'behavioral-footer-regression.pdf', '{{testTypeKey}}', {
     desc: 'The exact reported file layout: "Question N:" + "Sample Answer:" with a footer "Title <tab> Page n of 2" on every page. It used to be read as a 4-row table with 0 valid questions.',
     test: [() => { eval(pm.environment.get('libUsable')); }, () => {
       pm.test('Not read as a table', () => pm.expect(body.format).to.not.equal('table (header row)'));
@@ -562,7 +562,7 @@ const imports = folder('08 Question Import', 'Real multipart uploads of the file
       pm.expect(body.questions.filter((q) => q.status === 'Inactive' && q.correct_answer === '').length).to.equal(1);
     });
   }),
-  preview('POST Import Preview — Mixed sections, numbering restarts (DOCX)', 'mixed-sections.docx', 'GENERAL', {
+  preview('POST Import Preview — Mixed sections, numbering restarts (DOCX)', 'mixed-sections.docx', '{{testTypeKey}}', {
     test: () => {
       pm.test('2 Calculation + 1 Essay', () => pm.expect(body.rows.map((r) => [r.number, r.question.section])).to.eql([[1, 'CALCULATION'], [2, 'CALCULATION'], [1, 'ESSAY']]));
       pm.test('All 3 valid', () => pm.expect(body.valid).to.equal(3));
@@ -570,26 +570,26 @@ const imports = folder('08 Question Import', 'Real multipart uploads of the file
       pm.test('Sections reported', () => pm.expect(body.sections.filter((s) => s.kind === 'questions').length).to.be.at.least(2));
     },
   }),
-  preview('POST Import Preview — Duplicate inside the same file (TXT)', 'duplicate-in-file.txt', 'GENERAL', { test: () => { pm.test('3 found, 2 valid, 1 duplicate', () => { pm.expect(body.found).to.equal(3); pm.expect(body.valid).to.equal(2); pm.expect(body.duplicates).to.equal(1); }); } }),
-  preview('POST Import Preview — One invalid question does not block the rest (TXT)', 'one-invalid.txt', 'GENERAL', {
+  preview('POST Import Preview — Duplicate inside the same file (TXT)', 'duplicate-in-file.txt', '{{testTypeKey}}', { test: () => { pm.test('3 found, 2 valid, 1 duplicate', () => { pm.expect(body.found).to.equal(3); pm.expect(body.valid).to.equal(2); pm.expect(body.duplicates).to.equal(1); }); } }),
+  preview('POST Import Preview — One invalid question does not block the rest (TXT)', 'one-invalid.txt', '{{testTypeKey}}', {
     test: () => {
       pm.test('3 found, 2 valid, 1 invalid (whole file not rejected)', () => { pm.expect(body.found).to.equal(3); pm.expect(body.valid).to.equal(2); pm.expect(body.invalid).to.equal(1); });
       pm.test('The reason is explained', () => pm.expect(body.rows[1].errors.join(' ')).to.include('Correct answer E'));
     },
   }),
-  preview('POST Import Preview — Unknown columns: table shown for mapping (XLSX)', 'unknown-columns.xlsx', 'GENERAL', { test: () => { pm.test('Not rejected; the table comes back for HR to map', () => { pm.expect(body.found).to.equal(0); pm.expect(body.unmapped[0]).to.eql(['Name', 'Phone']); }); } }),
+  preview('POST Import Preview — Unknown columns: table shown for mapping (XLSX)', 'unknown-columns.xlsx', '{{testTypeKey}}', { test: () => { pm.test('Not rejected; the table comes back for HR to map', () => { pm.expect(body.found).to.equal(0); pm.expect(body.unmapped[0]).to.eql(['Name', 'Phone']); }); } }),
   req('POST Import Preview — Unknown columns with HR column mapping', 'POST', '/api/admin/questions/import/preview', {
     form: [{ key: 'section', value: '{{interviewTypeKey}}' }, { key: 'mapping', value: '{"header_row":0,"columns":{"0":"question_text"}}' }, file('unknown-columns.xlsx')], maxMs: 10000,
     test: () => { pm.test('Mapped column read as the question', () => { pm.expect(body.found).to.equal(1); pm.expect(body.rows[0].question.question_text).to.equal('A person'); pm.expect(body.mapped).to.equal(true); }); },
   }),
   req('POST Import Preview — no file', 'POST', '/api/admin/questions/import/preview', { form: [{ key: 'section', value: 'GENERAL' }], status: 400, error: 'Please choose a file.' }),
-  preview('POST Import Preview — empty file', 'empty.txt', 'GENERAL', { status: 400, error: 'The file is empty.' }),
-  preview('POST Import Preview — unsupported file type (.exe)', 'unsupported.exe', 'GENERAL', { status: 400, error: 'This file type is not supported.' }),
-  preview('POST Import Preview — fake XLSX (text file)', 'fake.xlsx', 'GENERAL', { status: 400, error: 'does not look like a real .xlsx file' }),
-  preview('POST Import Preview — corrupt DOCX', 'corrupt.docx', 'GENERAL', { status: 400, error: 'Unable to read this file.' }),
-  preview('POST Import Preview — corrupt PDF', 'corrupt.pdf', 'GENERAL', { status: 400, error: 'Unable to read this file.' }),
-  preview('POST Import Preview — malformed CSV', 'malformed.csv', 'GENERAL', { status: [200, 400], desc: 'An unclosed quote: the server must answer in a controlled way (a preview with the problem, or a 400), never a 500.', test: () => { pm.test('Controlled answer (preview rows or an error message)', () => pm.expect(Array.isArray(body.rows) || typeof body.error === 'string').to.equal(true)); } }),
-  preview('POST Import Preview — file with no questions', 'no-questions.txt', 'GENERAL', { status: 400, error: 'Could not detect a valid question structure' }),
+  preview('POST Import Preview — empty file', 'empty.txt', '{{testTypeKey}}', { status: 400, error: 'The file is empty.' }),
+  preview('POST Import Preview — unsupported file type (.exe)', 'unsupported.exe', '{{testTypeKey}}', { status: 400, error: 'This file type is not supported.' }),
+  preview('POST Import Preview — fake XLSX (text file)', 'fake.xlsx', '{{testTypeKey}}', { status: 400, error: 'does not look like a real .xlsx file' }),
+  preview('POST Import Preview — corrupt DOCX', 'corrupt.docx', '{{testTypeKey}}', { status: 400, error: 'Unable to read this file.' }),
+  preview('POST Import Preview — corrupt PDF', 'corrupt.pdf', '{{testTypeKey}}', { status: 400, error: 'Unable to read this file.' }),
+  preview('POST Import Preview — malformed CSV', 'malformed.csv', '{{testTypeKey}}', { status: [200, 400], desc: 'An unclosed quote: the server must answer in a controlled way (a preview with the problem, or a 400), never a 500.', test: () => { pm.test('Controlled answer (preview rows or an error message)', () => pm.expect(Array.isArray(body.rows) || typeof body.error === 'string').to.equal(true)); } }),
+  preview('POST Import Preview — file with no questions', 'no-questions.txt', '{{testTypeKey}}', { status: 400, error: 'Could not detect a valid question structure' }),
   req('POST Import Questions — nothing to import', 'POST', '/api/admin/questions/import', { json: { questions: [] }, status: 400, error: 'There are no valid questions to import.' }),
   req('POST Import Questions — unknown test type without a decision', 'POST', '/api/admin/questions/import', { json: { questions: [{ question_text: '{{runTag}} open question', type_name: '{{runTag}} UNDECIDED' }] }, status: 400, error: 'does not exist. Create it, or choose an existing test type.' }),
 ]);
