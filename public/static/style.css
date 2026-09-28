@@ -252,3 +252,4 @@ td.failed { font-weight: 700; }
 .lao-pair textarea, .lao-pair input { width: 100%; }
 .lao-source { background: #f6f8fa; border-radius: 6px; padding: 6px 8px; min-height: 34px; }
 @media (max-width: 640px) { .lao-pair { grid-template-columns: 1fr; } }
+.bulk-bar { background: #eef4fa; border-radius: 6px; padding: 8px 10px; margin: 8px 0; }

@@ -178,6 +178,7 @@ const ROUTES = {
   dashboard: () => renderDashboard(),
   candidates: (id) => (id ? renderCandidate(id) : renderCandidates()),
   questions: () => renderQuestions(),
+  categories: (id) => renderCategories(id),
   assessments: (id) => (id ? renderAssessment(id) : renderAssessments()),
   links: (id) => renderLink(id),
   results: () => renderResults(),
@@ -187,7 +188,7 @@ const ROUTES = {
 async function route() {
   const [, page = 'dashboard', id] = location.hash.split('/');
   const render = ROUTES[page] || ROUTES.dashboard;
-  document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.page === (page === 'links' ? 'assessments' : ROUTES[page] ? page : 'dashboard')));
+  document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.page === (page === 'links' ? 'assessments' : page === 'categories' ? 'questions' : ROUTES[page] ? page : 'dashboard')));
   loading();
   try { await render(id); } catch (e) { view().replaceChildren(message(e.message)); }
 }
@@ -440,6 +441,7 @@ async function renderCandidate(id) {
 let questionSection = '';
 let questionStatus = ''; // '' = all, 'Active', 'Inactive'
 let questionLao = ''; // Lao filter
+let questionCategory = ''; // category filter: '' = all, 'none', or a category id
 
 // Lao translation state of a question.
 const LAO_STATUS = { '': ['English only', 'neutral'], translated: ['Lao ready', 'pass'], reviewed: ['Lao reviewed', 'pass'], needs_review: ['Needs review', 'pending'], failed: ['Failed', 'fail'] };
@@ -554,28 +556,74 @@ async function renderQuestions() {
     ['needs_review', 'Lao needs review'], ['failed', 'Lao translation failed']], questionLao);
   laoFilter.classList.add('inline-input');
   laoFilter.addEventListener('change', () => { questionLao = laoFilter.value; load(); });
+  const categoryFilter = h('select', { class: 'inline-input', name: 'category_filter' });
+  categoryFilter.addEventListener('change', () => { questionCategory = categoryFilter.value; load(); });
   const tabs = h('div', { class: 'tabs' });
   const summary = h('p', { class: 'small' });
+  const bulkBar = h('div', { class: 'row bulk-bar hidden' });
   const body = h('div');
-  const card = h('div', { class: 'card' }, h('div', { class: 'row between' }, tabs, h('div', { class: 'row' }, statusFilter, laoFilter, search)), summary, body);
+  const card = h('div', { class: 'card' }, h('div', { class: 'row between' }, tabs, h('div', { class: 'row' }, categoryFilter, statusFilter, laoFilter, search)), summary, bulkBar, body);
   const bankCard = h('div', { class: 'card' });
   statusFilter.addEventListener('change', () => { questionStatus = statusFilter.value; load(); });
+  const selected = new Set();
 
   const load = async () => {
-    const data = await api('GET', `/questions?section=${questionSection}&status=${questionStatus}&lao=${questionLao}&q=${encodeURIComponent(search.value)}`);
+    const data = await api('GET', `/questions?section=${questionSection}&status=${questionStatus}&lao=${questionLao}&category=${questionCategory}&q=${encodeURIComponent(search.value)}`);
     const { questions, counts, inactive_counts: inactive, total_counts: totals, iq_levels: iqLevels } = data;
+    const cats = data.categories || [];
     bankCard.replaceChildren(questionBankCard(totals, counts, inactive, iqLevels, load, data));
+    // Category filter: the categories of the chosen test (or all, labelled by test).
+    const shownCats = cats.filter((c) => !questionSection || c.section === questionSection);
+    if (questionCategory && questionCategory !== 'none' && !shownCats.some((c) => String(c.id) === questionCategory)) questionCategory = '';
+    categoryFilter.replaceChildren(...[['', 'All categories'], ['none', 'No category (needs category)'],
+      ...shownCats.map((c) => [c.id, (questionSection ? '' : SECTION_LABEL[c.section] + ' · ') + c.name + (c.active ? '' : ' (inactive)')])]
+      .map(([v, t]) => h('option', { value: v, selected: String(v) === questionCategory }, t)));
+    const chosen = cats.find((c) => String(c.id) === questionCategory);
     const shown = questionSection ? [questionSection] : Object.keys(SECTION_LABEL);
-    summary.replaceChildren(...shown.flatMap((s, i) => [i ? ' · ' : '', h('strong', {}, `Active ${SECTION_LABEL[s]} Questions: ${counts[s]}`), `  Inactive ${SECTION_LABEL[s]} Questions: ${inactive[s]}`]));
+    summary.replaceChildren(...(chosen
+      ? [h('strong', {}, `Active ${chosen.name} Questions: ${chosen.active_questions}`), `  Inactive ${chosen.name} Questions: ${chosen.inactive_questions}`, chosen.active ? '' : ' · this category is inactive']
+      : questionCategory === 'none'
+        ? [h('strong', {}, 'Questions without a category: '), shown.map((s) => `${SECTION_LABEL[s]} ${data.no_category?.[s] ?? 0}`).join(' · ')]
+        : shown.flatMap((s, i) => [i ? ' · ' : '', h('strong', {}, `Active ${SECTION_LABEL[s]} Questions: ${counts[s]}`), `  Inactive ${SECTION_LABEL[s]} Questions: ${inactive[s]}`,
+          data.no_category?.[s] && s === 'IQ' ? h('span', { class: 'badge pending' }, `${data.no_category[s]} need a category`) : null])));
     const total = Object.values(counts).reduce((a, b) => a + b, 0);
     tabs.replaceChildren(...[['', `All (${total})`], ...Object.keys(SECTION_LABEL).map((s) => [s, `${SECTION_LABEL[s]} (${counts[s]})`])]
-      .map(([s, label]) => h('button', { type: 'button', class: s === questionSection ? 'active' : '', onclick: () => { questionSection = s; load(); } }, label)));
+      .map(([s, label]) => h('button', { type: 'button', class: s === questionSection ? 'active' : '', onclick: () => { questionSection = s; questionCategory = ''; selected.clear(); load(); } }, label)));
+
+    // Bulk: set / clear the category of the ticked questions (nothing else changes).
+    for (const id of [...selected]) if (!questions.some((q) => q.id === id)) selected.delete(id);
+    const drawBulk = () => {
+      bulkBar.classList.toggle('hidden', selected.size === 0);
+      if (!selected.size) return bulkBar.replaceChildren();
+      const sections = [...new Set(questions.filter((q) => selected.has(q.id)).map((q) => q.section))];
+      const pick = h('select', { class: 'inline-input' }, h('option', { value: '' }, 'Choose a category…'),
+        cats.filter((c) => c.active && sections.includes(c.section)).map((c) => h('option', { value: c.id }, (sections.length > 1 ? SECTION_LABEL[c.section] + ' · ' : '') + c.name)));
+      const run = async (categoryId) => {
+        try {
+          const r = await api('POST', '/questions/bulk-category', { ids: [...selected], category_id: categoryId });
+          selected.clear();
+          await load();
+          flash(card, `Category changed for ${r.updated} question${r.updated === 1 ? '' : 's'}.` + (r.skipped ? ` ${r.skipped} skipped (another test type).` : ''), 'ok');
+        } catch (ex) { flash(card, ex.message); }
+      };
+      bulkBar.replaceChildren(h('strong', {}, `${selected.size} selected`), h('span', { class: 'small' }, 'Set category'), pick,
+        h('button', { type: 'button', class: 'small', onclick: () => { if (!pick.value) return flash(card, 'Please choose a category.'); run(Number(pick.value)); } }, 'Apply'),
+        h('button', { type: 'button', class: 'secondary small', onclick: () => { if (confirm(`Remove the category from ${selected.size} question(s)? The questions themselves are kept.`)) run(null); } }, 'Remove category'),
+        h('button', { type: 'button', class: 'secondary small', onclick: () => { selected.clear(); load(); } }, 'Clear selection'));
+    };
+    const all = h('input', { type: 'checkbox', title: 'Select all shown', checked: questions.length > 0 && questions.every((q) => selected.has(q.id)),
+      onchange: (e) => { questions.forEach((q) => (e.target.checked ? selected.add(q.id) : selected.delete(q.id))); load(); } });
+    drawBulk();
     body.replaceChildren(questions.length ? h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, ['Question (English / Lao)', 'Type', 'Area', 'Level', 'Correct Answer', 'Marks', 'Status', 'Lao', ''].map((t) => h('th', {}, t)))),
+      h('thead', {}, h('tr', {}, h('th', {}, all), ...['Question (English / Lao)', 'Type', 'Category', 'Level', 'Correct Answer', 'Marks', 'Status', 'Lao', ''].map((t) => h('th', {}, t)))),
       h('tbody', {}, questions.map((q) => h('tr', {},
+        h('td', {}, h('input', { type: 'checkbox', checked: selected.has(q.id), onchange: (e) => { if (e.target.checked) selected.add(q.id); else selected.delete(q.id); drawBulk(); } })),
         h('td', { class: 'question-cell' }, h('div', { class: 'pre' }, q.question_text), q.question_text_lo ? h('div', { class: 'pre lao-text', lang: 'lo' }, q.question_text_lo) : null,
           q.image_id ? h('div', { class: 'thumb-row' }, thumb(q.image_id)) : null),
-        h('td', {}, SECTION_LABEL[q.section]), h('td', {}, fmt(q.category)), h('td', { class: 'nowrap' }, LEVEL_NAMES[q.difficulty] || fmt(q.difficulty)),
+        h('td', {}, SECTION_LABEL[q.section]),
+        h('td', {}, q.category ? q.category : q.section === 'IQ' ? h('span', { class: 'badge pending' }, 'Needs category') : '-',
+          q.category_id && cats.some((c) => c.id === q.category_id && !c.active) ? h('div', { class: 'muted small' }, '(inactive category)') : null),
+        h('td', { class: 'nowrap' }, LEVEL_NAMES[q.difficulty] || fmt(q.difficulty)),
         h('td', {}, q.section === 'ESSAY' ? 'HR marks' : /^[A-E]$/.test(q.correct_answer) ? optionContent(q, q.correct_answer) : q.correct_answer),
         h('td', { class: 'nowrap' }, q.marks + (q.marks === 1 ? ' mark' : ' marks')),
         h('td', {}, h('span', { class: 'badge ' + (q.status === 'Active' ? 'pass' : 'neutral') }, q.status)),
@@ -587,18 +635,109 @@ async function renderQuestions() {
             if (!confirm('Delete this question? Past results are not affected.')) return;
             try { await api('DELETE', '/questions/' + q.id); load(); } catch (ex) { alert(ex.message); }
           } }, 'Delete')))))))
-      : h('p', { class: 'muted' }, 'No questions yet. Upload a file or add a question.'));
+      : h('p', { class: 'muted' }, 'No questions match. Upload a file or add a question.'));
   };
   let timer;
   search.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 250); });
 
   view().replaceChildren(
     h('div', { class: 'row between' }, h('h1', {}, 'Questions'),
-      h('button', { type: 'button', onclick: () => editQuestion(null, load) }, 'Add question')),
+      h('div', { class: 'row' }, h('a', { class: 'button secondary', href: '#/categories' }, 'Question Categories'),
+        h('button', { type: 'button', onclick: () => editQuestion(null, load) }, 'Add question'))),
     bankCard,
     uploadCard(load),
     card);
   await load();
+}
+
+// ---------------------------------------------------------------------------
+// Question categories: a topic inside one test type. HR adds, renames,
+// deactivates / reactivates them; a category in use is never deleted.
+// ---------------------------------------------------------------------------
+
+let categorySection = '';
+
+async function renderCategories(id) {
+  if (id) return renderCategory(id);
+  const search = h('input', { placeholder: 'Search categories', class: 'inline-input' });
+  const tabs = h('div', { class: 'tabs' });
+  const body = h('div');
+  const card = h('div', { class: 'card' }, h('div', { class: 'row between' }, tabs, search), body);
+  const load = async () => {
+    const list = await api('GET', `/categories?section=${categorySection}&q=${encodeURIComponent(search.value)}`);
+    tabs.replaceChildren(...[['', 'All'], ...Object.keys(SECTION_LABEL).map((s) => [s, SECTION_LABEL[s]])]
+      .map(([s, label]) => h('button', { type: 'button', class: s === categorySection ? 'active' : '', onclick: () => { categorySection = s; load(); } }, label)));
+    const table = (rows) => h('div', { class: 'table-wrap' }, h('table', {},
+      h('thead', {}, h('tr', {}, ['Category', 'Lao name', 'Test Type', 'Active Questions', 'Inactive Questions', 'Status', 'Actions'].map((t) => h('th', {}, t)))),
+      h('tbody', {}, rows.map((c) => h('tr', {},
+        h('td', {}, h('a', { href: '#/categories/' + c.id }, h('strong', {}, c.name))),
+        h('td', { lang: 'lo', class: 'lao-text' }, c.name_lo || '-'),
+        h('td', {}, SECTION_LABEL[c.section]), h('td', {}, c.active_questions), h('td', {}, c.inactive_questions),
+        h('td', {}, h('span', { class: 'badge ' + (c.active ? 'pass' : 'neutral') }, c.active ? 'Active' : 'Inactive')),
+        h('td', { class: 'nowrap' },
+          h('button', { type: 'button', class: 'secondary small', onclick: () => editCategory(c, load) }, 'Edit'), ' ',
+          c.active
+            ? h('button', { type: 'button', class: 'danger small', onclick: () => removeCategory(c, load) }, c.questions ? 'Deactivate' : 'Remove')
+            : h('button', { type: 'button', class: 'secondary small', onclick: async () => { await api('POST', `/categories/${c.id}/activate`); load(); } }, 'Reactivate')))))));
+    const active = list.filter((c) => c.active);
+    const inactive = list.filter((c) => !c.active);
+    body.replaceChildren(
+      active.length ? table(active) : h('p', { class: 'muted' }, 'No active categories.'),
+      inactive.length ? h('div', {}, h('h2', { class: 'section-gap' }, 'Inactive Categories'), table(inactive)) : null);
+  };
+  let timer;
+  search.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 250); });
+  view().replaceChildren(
+    h('p', {}, h('a', { href: '#/questions' }, '< Questions')),
+    h('div', { class: 'row between' }, h('h1', {}, 'Question Categories'), h('button', { type: 'button', onclick: () => editCategory(null, load) }, '+ Add Category')),
+    h('p', { class: 'muted small' }, 'A category is a topic inside one test (e.g. IQ → Number Patterns). It is separate from the IQ level (1–5), is not shown to candidates, and does not change marks, scoring or the random draw.'),
+    card);
+  await load();
+}
+
+function editCategory(c, onSaved) {
+  const form = h('form', { class: 'grid' },
+    field('Test Type', c ? h('input', { value: SECTION_LABEL[c.section], disabled: true }) : select('section', Object.entries(SECTION_LABEL), categorySection || 'IQ')),
+    field('Category Name', h('input', { name: 'name', value: c ? c.name : '', required: true, maxlength: 100 })),
+    field('Lao name (optional)', h('input', { name: 'name_lo', lang: 'lo', value: c ? c.name_lo : '', maxlength: 100 })),
+    c && c.questions ? h('p', { class: 'muted small wide' }, `Renaming changes the category name of its ${c.questions} question(s). Past candidate results are not affected.`) : null,
+    h('div', { class: 'wide' }, h('button', { type: 'submit' }, 'Save Category')));
+  const close = modal(c ? 'Edit category' : 'Add category', form);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      if (c) await api('PUT', '/categories/' + c.id, formValues(form));
+      else await api('POST', '/categories', formValues(form));
+      close();
+      onSaved();
+    } catch (ex) { flash(form.parentElement, ex.message); }
+  });
+}
+
+function removeCategory(c, onDone) {
+  const text = c.questions
+    ? `This category is currently used by ${c.questions} question${c.questions === 1 ? '' : 's'}. It will be deactivated, not permanently deleted. The questions keep it, but it can no longer be chosen for new questions.`
+    : 'This category has no questions. It will be removed.';
+  const box = h('div', {}, h('p', {}, text),
+    h('div', { class: 'row section-gap' }, h('button', { type: 'button', class: 'secondary', onclick: () => close() }, 'Cancel'),
+      h('button', { type: 'button', class: 'danger', onclick: async () => { try { await api('DELETE', '/categories/' + c.id); close(); onDone(); } catch (ex) { flash(box, ex.message); } } },
+        c.questions ? 'Deactivate' : 'Remove')));
+  const close = modal(`${c.questions ? 'Deactivate' : 'Remove'} "${c.name}"?`, box);
+}
+
+async function renderCategory(id) {
+  const { category: c, questions } = await api('GET', '/categories/' + id);
+  view().replaceChildren(
+    h('p', {}, h('a', { href: '#/categories' }, '< Question Categories')),
+    h('div', { class: 'row between' }, h('h1', {}, `${SECTION_LABEL[c.section]} → ${c.name}`, ' ', h('span', { class: 'badge ' + (c.active ? 'pass' : 'neutral') }, c.active ? 'Active' : 'Inactive')),
+      h('button', { type: 'button', class: 'secondary', onclick: () => editCategory(c, () => renderCategory(id)) }, 'Edit')),
+    h('div', { class: 'card' },
+      h('p', {}, h('strong', {}, 'Lao name: '), h('span', { lang: 'lo', class: 'lao-text' }, c.name_lo || '-'), ' · ', h('strong', {}, 'Active: '), c.active_questions, ' · ', h('strong', {}, 'Inactive: '), c.inactive_questions),
+      questions.length ? h('div', { class: 'table-wrap' }, h('table', {},
+        h('thead', {}, h('tr', {}, ['#', 'Question', 'Level', 'Status'].map((t) => h('th', {}, t)))),
+        h('tbody', {}, questions.map((q) => h('tr', {}, h('td', {}, 'Q' + q.id), h('td', { class: 'question-cell' }, h('div', { class: 'pre' }, q.question_text)),
+          h('td', { class: 'nowrap' }, LEVEL_NAMES[q.difficulty] || fmt(q.difficulty)), h('td', {}, h('span', { class: 'badge ' + (q.status === 'Active' ? 'pass' : 'neutral') }, q.status)))))))
+        : h('p', { class: 'muted' }, 'No questions in this category yet.')));
 }
 
 // QUESTION BANK: one row per test area with its count, Upload and Delete All Questions.
@@ -693,10 +832,21 @@ function showPreview(container, p, onDone) {
   const valid = p.rows.filter((r) => r.errors.length === 0).map((r) => r.question);
   const invalid = p.rows.filter((r) => r.errors.length > 0);
   const importBtn = h('button', { type: 'button', disabled: valid.length === 0 }, `Import ${valid.length} questions`);
+  // One choice per category name that is not in the list: create it, or use an existing one.
+  const decisionSelects = (p.category_decisions || []).map((d) => ({ d, el: h('select', { class: 'inline-input' },
+    h('option', { value: '' }, 'Choose…'), d.inactive ? null : h('option', { value: 'create' }, `Create category "${d.name}"`),
+    (p.categories || []).filter((c) => c.section === d.section).map((c) => h('option', { value: 'use:' + c.id }, `Use existing: ${c.name}`))) }));
+  const decisionBox = decisionSelects.length ? h('div', { class: 'message error' }, h('strong', {}, 'Categories to decide before importing'), h('br'),
+    decisionSelects.map(({ d, el }) => h('div', { class: 'row small section-gap-sm' }, `Category "${d.name}" ${d.inactive ? 'is inactive' : 'does not exist'} for ${SECTION_LABEL[d.section]} (${d.count} question${d.count === 1 ? '' : 's'}):`, el))) : null;
   importBtn.addEventListener('click', async () => {
     importBtn.disabled = true;
     try {
-      const r = await api('POST', '/questions/import', { questions: valid });
+      const category_decisions = {};
+      for (const { d, el } of decisionSelects) {
+        if (!el.value) { importBtn.disabled = false; return flash(container, `Please choose what to do with the category "${d.name}" (or press Cancel).`); }
+        category_decisions[d.key] = el.value === 'create' ? { create: true } : { category_id: Number(el.value.slice(4)) };
+      }
+      const r = await api('POST', '/questions/import', { questions: valid, category_decisions });
       container.replaceChildren(message(`Imported ${r.imported} questions.` + (r.skipped ? ` Skipped ${r.skipped}.` : ''), 'ok'));
       onDone();
     } catch (ex) { flash(container, ex.message); importBtn.disabled = false; }
@@ -709,15 +859,20 @@ function showPreview(container, p, onDone) {
     h('div', { class: 'stats' },
       ...[['Found', p.found], ['Valid', p.valid], ['Invalid', p.invalid], ['Duplicates', p.duplicates ?? 0], ['Answer Conflicts', p.conflicts ?? 0]].map(([l, v]) => h('div', { class: 'stat' }, h('div', { class: 'label' }, l), h('div', { class: 'value' }, v))),
       ...Object.entries(p.by_section).filter(([, n]) => n > 0).map(([s, n]) => h('div', { class: 'stat' }, h('div', { class: 'label' }, SECTION_LABEL[s] + ' questions'), h('div', { class: 'value' }, n)))),
+    decisionBox,
+    p.missing_category ? h('p', { class: 'muted small' }, `${p.missing_category} question(s) have no category (IQ ones are listed under "Needs category" after importing; set it with Set category).`) : null,
     invalid.length ? h('div', {}, h('h2', {}, 'Rows that will be skipped'), h('div', { class: 'table-wrap' }, h('table', {},
       h('thead', {}, h('tr', {}, h('th', {}, 'Question'), h('th', {}, 'Text'), h('th', {}, 'Problem'))),
       h('tbody', {}, invalid.slice(0, 100).map((r) => h('tr', {}, h('td', {}, r.number != null ? r.number : 'Row ' + r.row), h('td', { class: 'question-cell' }, fmt(r.question.question_text).slice(0, 160)), h('td', {}, r.errors.join(' ')))))))) : null,
     valid.length ? h('div', {}, h('h2', { class: 'section-gap' }, validRows.length > 100 ? 'First 100 questions to import' : 'Questions to import'), h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, ['#', 'Question', 'Type', 'Level', 'Options', 'Correct Answer', 'Marks'].map((t) => h('th', {}, t)))),
+      h('thead', {}, h('tr', {}, ['#', 'Question', 'Type', 'Category', 'Level', 'Options', 'Correct Answer', 'Marks'].map((t) => h('th', {}, t)))),
       h('tbody', {}, validRows.slice(0, 100).map((r) => [r, r.question]).map(([r, q]) => h('tr', {},
         h('td', {}, r.number != null ? r.number : r.row),
         h('td', { class: 'question-cell' }, h('div', { class: 'pre' }, q.question_text), q.image_id ? h('div', { class: 'thumb-row' }, thumb(q.image_id)) : null),
-        h('td', {}, SECTION_LABEL[q.section]), h('td', { class: 'nowrap' }, LEVEL_NAMES[q.difficulty] || fmt(q.difficulty)),
+        h('td', {}, SECTION_LABEL[q.section]),
+        h('td', {}, q.category || null, r.category_state === 'missing' ? h('span', { class: 'badge pending' }, q.section === 'IQ' ? 'Missing — Review Required' : 'None')
+          : r.category_state === 'unknown' ? h('div', {}, h('span', { class: 'badge pending' }, 'Not in the list')) : r.category_state === 'inactive' ? h('div', {}, h('span', { class: 'badge pending' }, 'Inactive')) : null),
+        h('td', { class: 'nowrap' }, LEVEL_NAMES[q.difficulty] || fmt(q.difficulty)),
         h('td', { class: 'small' }, h('div', { class: 'thumb-row' }, LETTERS.filter((l) => q['option_' + l] || q['option_' + l + '_image'])
           .map((l) => optionContent(q, l.toUpperCase())))),
         h('td', {}, q.correct_answer), h('td', {}, q.marks))))))) : null,
@@ -730,6 +885,15 @@ function editQuestion(q, onSaved) {
   const known = ['Easy', 'Basic', 'Moderate', 'Difficult', 'Very Difficult'];
   const levelSelect = select('difficulty', [['', '-'], ...known.map((k) => [k, LEVEL_NAMES[k]]), ...(q.difficulty && !known.includes(q.difficulty) ? [[q.difficulty, q.difficulty]] : [])], q.difficulty || '');
   const marksInput = h('input', { name: 'marks', type: 'number', min: 0.5, max: 100, step: 0.5, value: q.marks });
+  // Only ACTIVE categories of the chosen test type (plus this question's own, even if now inactive).
+  const categorySelect = h('select', { name: 'category_id' });
+  let allCategories = [];
+  const fillCategories = () => {
+    const sec = form.elements.section.value;
+    const keep = categorySelect.value || (q.section === sec && q.category_id ? String(q.category_id) : '');
+    const opts = allCategories.filter((c) => c.section === sec && (c.active || c.id === q.category_id));
+    categorySelect.replaceChildren(h('option', { value: '' }, sec === 'IQ' ? 'Choose a category…' : 'No category'), ...opts.map((c) => h('option', { value: c.id, selected: String(c.id) === keep }, c.name + (c.active ? '' : ' (inactive)'))));
+  };
   // IQ questions: marks come from the level (1-5) and cannot be typed.
   const syncMarks = () => {
     const isIq = form.elements.section.value === 'IQ';
@@ -738,7 +902,7 @@ function editQuestion(q, onSaved) {
   };
   const form = h('form', { class: 'grid' },
     field('Type', select('section', Object.entries(SECTION_LABEL), q.section)),
-    field('Area', h('input', { name: 'category', value: q.category || '', placeholder: 'e.g. Number Patterns' })),
+    field('Category', categorySelect),
     field('Level', levelSelect),
     field('Marks', marksInput),
     field('Question', h('textarea', { name: 'question_text', required: true }, q.question_text || ''), 'wide'),
@@ -753,11 +917,13 @@ function editQuestion(q, onSaved) {
     h('div', { class: 'wide' }, h('button', { type: 'submit' }, 'Save question')));
   const close = modal(q.id ? 'Edit question' : 'Add question', form);
   showError = (m) => flash(form.parentElement, m);
-  form.elements.section.addEventListener('change', syncMarks);
+  form.elements.section.addEventListener('change', () => { syncMarks(); fillCategories(); });
+  api('GET', '/categories').then((list) => { allCategories = list; fillCategories(); }).catch(() => {});
   levelSelect.addEventListener('change', syncMarks);
   syncMarks();
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (form.elements.section.value === 'IQ' && !categorySelect.value) return flash(form.parentElement, 'Please choose a category (every IQ question needs one). Add new categories on the Question Categories page.');
     try {
       if (q.id) await api('PUT', '/questions/' + q.id, formValues(form));
       else await api('POST', '/questions', formValues(form));

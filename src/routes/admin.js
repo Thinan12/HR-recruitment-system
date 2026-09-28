@@ -8,6 +8,7 @@ const reports = require('../reports');
 const { parseFile, validateQuestion, ImportError, IMAGE_KEYS } = require('../importer');
 const images = require('../images');
 const lao = require('../lao');
+const categories = require('../categories');
 const { LAO_COLUMNS } = require('../db');
 
 const router = express.Router();
@@ -129,6 +130,9 @@ router.get('/questions', (req, res) => {
   // Lao filter: none (English only) / ready / reviewed / needs_review / failed.
   const LO_FILTER = { none: "lo_status = ''", ready: lao.LAO_READY_SQL, reviewed: "lo_status = 'reviewed'", needs_review: "lo_status = 'needs_review'", failed: "lo_status = 'failed'" };
   if (LO_FILTER[req.query.lao]) where.push(LO_FILTER[req.query.lao]);
+  // Category filter: a category id, or 'none' = questions without a category.
+  if (req.query.category === 'none') where.push('category_id IS NULL');
+  else if (/^\d+$/.test(String(req.query.category || ''))) { where.push('category_id = ?'); args.push(Number(req.query.category)); }
   const sql = 'SELECT * FROM questions' + (where.length ? ' WHERE ' + where.join(' AND ') : '') + ' ORDER BY id DESC';
   // Every row of each area (active + inactive), and the IQ bank per level.
   const totals = Object.fromEntries(A.SECTIONS.map((s) => [s, 0]));
@@ -139,22 +143,29 @@ router.get('/questions', (req, res) => {
     if (level in iqLevels) iqLevels[level] += r.n;
   }
   res.json({ questions: db.prepare(sql).all(...args), counts: A.activeCounts(), inactive_counts: A.inactiveCounts(), total_counts: totals, iq_levels: iqLevels,
-    lao_counts: lao.laoCounts(), lao_ready_counts: A.activeCounts('lo'), translator: lao.hasProvider(), translate_job: lao.job });
+    lao_counts: lao.laoCounts(), lao_ready_counts: A.activeCounts('lo'), translator: lao.hasProvider(), translate_job: lao.job,
+    categories: categories.list(), no_category: Object.fromEntries(A.SECTIONS.map((sec) => [sec, db.prepare('SELECT COUNT(*) AS n FROM questions WHERE section = ? AND category_id IS NULL').get(sec).n])) });
 });
 
-const QUESTION_COLS = ['section', 'category', 'difficulty', 'question_text', 'option_a', 'option_b', 'option_c', 'option_d', 'option_e',
+const QUESTION_COLS = ['section', 'category', 'category_id', 'difficulty', 'question_text', 'option_a', 'option_b', 'option_c', 'option_d', 'option_e',
   'correct_answer', 'marks', ...IMAGE_KEYS];
 // New questions may already carry a Lao translation (Lao columns in an import file).
 const INSERT_COLS = [...QUESTION_COLS, ...LAO_COLUMNS, 'lo_status', 'lo_note', 'lo_translated_at'];
 const insertRow = db.prepare(`INSERT INTO questions (${INSERT_COLS.join(', ')}, status, created_at)
   VALUES (${INSERT_COLS.map((c) => '@' + c).join(', ')}, 'Active', @created_at)`);
 const insertQuestion = { run: (q) => insertRow.run({ ...Object.fromEntries([...LAO_COLUMNS, 'lo_status', 'lo_note'].map((c) => [c, ''])), ...q,
-  lo_translated_at: q.lo_status ? q.created_at : null }) };
+  category_id: q.category_id ?? null, lo_translated_at: q.lo_status ? q.created_at : null }) };
 
-function checkedQuestion(body) {
+function checkedQuestion(body, current) {
   const { question, errors } = validateQuestion(body);
   for (const key of IMAGE_KEYS) if (question[key] && !images.imageExists(question[key])) errors.push('A picture could not be found. Please upload it again.');
   if (errors.length) throw new A.InputError(errors.join(' '));
+  // The category is chosen from the managed list of that test type (by id,
+  // or by name for API clients); an unknown name is never created silently.
+  const cat = categories.resolveForQuestion(question.section, { category_id: body?.category_id, category: question.category, create_category: body?.create_category === true },
+    current && current.section === question.section ? current.category_id : null);
+  question.category_id = cat.id;
+  question.category = cat.name;
   return question;
 }
 
@@ -169,7 +180,7 @@ router.put('/questions/:id', (req, res) => {
   const id = Number(req.params.id);
   const before = db.prepare('SELECT * FROM questions WHERE id = ?').get(id);
   if (!before) return notFound(res);
-  const q = checkedQuestion(req.body);
+  const q = checkedQuestion(req.body, before);
   const status = req.body?.status === 'Inactive' ? 'Inactive' : 'Active';
   // English only: the Lao translation is edited separately (Edit Lao).
   db.prepare(`UPDATE questions SET ${QUESTION_COLS.map((c) => `${c} = @${c}`).join(', ')}, status = @status WHERE id = @id`).run({ ...q, status, id });
@@ -222,6 +233,49 @@ router.get('/images/:id', (req, res) => images.sendImage(res, Number(req.params.
 
 router.get('/questions/counts', (req, res) => res.json(A.activeCounts(req.query.language === 'lo' ? 'lo' : 'en')));
 
+// ---- question categories -----------------------------------------------------
+
+const catError = (res, e) => (e instanceof categories.CategoryError ? bad(res, e.message) : null);
+
+router.get('/categories', (req, res) => res.json(categories.list({ section: req.query.section, status: req.query.status, q: String(req.query.q || '').trim() })));
+
+router.post('/categories', (req, res) => {
+  try { res.status(201).json(categories.create(req.body || {}, req.admin.username)); } catch (e) { if (!catError(res, e)) throw e; }
+});
+
+// One category with the questions in it.
+router.get('/categories/:id', (req, res) => {
+  const c = categories.list().find((x) => x.id === Number(req.params.id));
+  if (!c) return notFound(res);
+  res.json({ category: c, questions: db.prepare('SELECT id, section, difficulty, question_text, status FROM questions WHERE category_id = ? ORDER BY id').all(c.id) });
+});
+
+router.put('/categories/:id', (req, res) => {
+  try {
+    const c = categories.update(Number(req.params.id), { name: req.body?.name, name_lo: req.body?.name_lo }, req.admin.username);
+    if (!c) return notFound(res);
+    res.json(c);
+  } catch (e) { if (!catError(res, e)) throw e; }
+});
+
+router.post('/categories/:id/:action(activate|deactivate)', (req, res) => {
+  const c = categories.setActive(Number(req.params.id), req.params.action === 'activate', req.admin.username);
+  if (!c) return notFound(res);
+  res.json(c);
+});
+
+// Remove: deactivated if questions use it (they keep it), deleted if unused.
+router.delete('/categories/:id', (req, res) => {
+  const r = categories.remove(Number(req.params.id), req.admin.username);
+  if (!r) return notFound(res);
+  res.json(r);
+});
+
+// Set (or clear) the category of many questions at once; nothing else changes.
+router.post('/questions/bulk-category', (req, res) => {
+  try { res.json(categories.bulkAssign(req.body?.ids, req.body?.category_id ?? null, req.admin.username)); } catch (e) { if (!catError(res, e)) throw e; }
+});
+
 // ---- Lao translations -------------------------------------------------------
 
 // Saves only the Lao text (never the English) of one question.
@@ -273,11 +327,27 @@ router.post('/questions/import/preview', (req, res, next) => {
         seen.add(key);
       }
       const valid = rows.filter((r) => r.errors.length === 0);
+      // Category of each row: ok / missing / unknown (not in the list) / inactive.
+      // Unknown and inactive names need HR's decision before importing.
+      const decisions = new Map();
+      for (const r of valid) {
+        const name = String(r.question.category || '').trim();
+        if (!name) { r.category_state = 'missing'; continue; }
+        const c = categories.byName(r.question.section, name);
+        r.category_state = !c ? 'unknown' : c.active ? 'ok' : 'inactive';
+        if (c && c.active) { r.question.category = c.name; continue; }
+        const key = r.question.section + '|' + categories.normalize(name);
+        const d = decisions.get(key) || { key, section: r.question.section, name, count: 0, inactive: !!c };
+        d.count++;
+        decisions.set(key, d);
+      }
       const bySection = Object.fromEntries(A.SECTIONS.map((s) => [s, valid.filter((r) => r.question.section === s).length]));
       const duplicates = rows.filter((r) => r.errors.some((e) => /already in the question bank/.test(e))).length;
       const conflicts = rows.filter((r) => r.errors.some((e) => /conflict/i.test(e))).length;
       res.json({ found: rows.length, valid: valid.length, invalid: rows.length - valid.length, duplicates, conflicts,
-        format: rows.format, answer_key: rows.keyCount, test_type: defaultSection, file: req.file.originalname, by_section: bySection, rows });
+        format: rows.format, answer_key: rows.keyCount, test_type: defaultSection, file: req.file.originalname, by_section: bySection,
+        category_decisions: [...decisions.values()], missing_category: valid.filter((r) => r.category_state === 'missing').length,
+        categories: categories.list({ status: 'active' }), rows });
     } catch (e) {
       if (e instanceof ImportError) return bad(res, e.message);
       next(e);
@@ -294,12 +364,34 @@ router.post('/questions/import', (req, res) => {
   let imported = 0;
   const newIds = [];
   let skipped = 0;
+  // Category names not in the list (or inactive) need a decision per name:
+  // { "IQ|verbal reasoning": { "create": true } } or { ...: { "category_id": 5 } }.
+  // create_missing_categories: true = create every unknown name.
+  const decided = req.body?.category_decisions && typeof req.body.category_decisions === 'object' ? req.body.category_decisions : {};
+  const undecided = new Map();
+  for (const row of rows) {
+    const { question, errors } = validateQuestion(row);
+    const name = String(question.category || '').trim();
+    if (errors.length || !name) continue;
+    const c = categories.byName(question.section, name);
+    const key = question.section + '|' + categories.normalize(name);
+    if ((!c || !c.active) && !decided[key] && !(req.body?.create_missing_categories === true && !c) && !undecided.has(key)) undecided.set(key, `${name} (${question.section})`);
+  }
+  if (undecided.size) return bad(res, `Please decide what to do with these categories before importing: ${[...undecided.values()].join(', ')}. Create them, or choose an existing category.`);
   db.transaction(() => {
     const seen = existingQuestionKeys();
     for (const row of rows) {
       const { question, errors } = validateQuestion(row);
       const key = A.questionKey(question);
       if (errors.length || seen.has(key)) { skipped++; continue; }
+      const name = String(question.category || '').trim();
+      if (name) {
+        const d = decided[question.section + '|' + categories.normalize(name)];
+        const choice = d && d.category_id ? { category_id: d.category_id } : { category: name, create_category: !!(d && d.create) || req.body?.create_missing_categories === true };
+        const cat = categories.resolveForQuestion(question.section, choice, null);
+        question.category_id = cat.id;
+        question.category = cat.name;
+      }
       seen.add(key);
       newIds.push(Number(insertQuestion.run({ ...question, created_at: created }).lastInsertRowid));
       imported++;

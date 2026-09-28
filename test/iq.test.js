@@ -16,7 +16,7 @@ test.before(async () => {
   // 19 questions per level = 95 active IQ questions, correct answer always A.
   // Added through the API so the level -> marks rule applies as for HR (marks: 9 is ignored).
   for (const level of LEVELS) for (let i = 1; i <= 19; i++) {
-    const r = await admin.post('/api/admin/questions', { section: 'IQ', difficulty: level, category: 'Number Patterns', question_text: `Puzzle ${level} ${i}`, option_a: '1', option_b: '2', option_c: '3', option_d: '4', correct_answer: 'A', marks: 9 });
+    const r = await admin.post('/api/admin/questions', { section: 'IQ', difficulty: level, category: 'Number Patterns', create_category: true, question_text: `Puzzle ${level} ${i}`, option_a: '1', option_b: '2', option_c: '3', option_d: '4', correct_answer: 'A', marks: 9 });
     assert.equal(r.status, 201, JSON.stringify(r.data));
   }
   seedQuestions('GENERAL', 10);

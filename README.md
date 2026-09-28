@@ -51,6 +51,15 @@ Options may also be on one line (`A. Red  B. Blue  C. Green  D. Chair`).
 - **Essay** questions need no options. HR enters the marks on the assessment review page.
 - **Calculation** questions can have options, or just one exact answer (e.g. `Answer: 1250`). Spaces and commas are ignored when marking.
 
+### Question categories
+
+- A **category** is a topic inside one test type (e.g. IQ → Number Pattern, General → Geography). It is separate from the IQ **level** (1–5): a question can be Level 1 or Level 5 in the same category. Categories are for HR only — they are never shown to candidates and do not change marks, scoring, the random draw or any result.
+- **Questions → Question Categories** lists the categories per test (tabs All / IQ / General / Calculation / Essay, search), with their active and inactive question counts. **+ Add Category** (test type, name, optional Lao name), **Edit** (renaming also renames it on its questions), **Deactivate** / **Remove**, **Reactivate**. A category that questions use is only deactivated — the questions keep it, but it can no longer be chosen for new questions; an unused one is removed. Click a category to see its questions.
+- The same name cannot exist twice in one test type (spaces and capitals are ignored: "Sequences", " sequences ", "SEQUENCES" are the same); the same name in two test types is fine.
+- **Add / Edit question:** the Category list shows only the active categories of the chosen test type (IQ questions must have one). **Questions list:** Category filter (with counts, and "No category"), and tick questions to **Set category** / **Remove category** for all of them at once — nothing else about the questions changes.
+- **Import:** a Category / Topic column is matched to the managed categories (spaces and capitals ignored). A name that does not exist is never created silently: the preview asks, per name, to **create it** or **use an existing category** (or Cancel). Rows without a category are marked "Missing — Review Required" (IQ) and can be given one afterwards with Set category.
+- When this feature was first started, every category name already used by questions became a managed category, keeping its name; names that differed only in capitals or spaces were merged into one.
+
 ### Lao questions
 
 - Every question keeps its **English** text as the source; its **Lao** text is stored next to it on the same question (same id, options, correct letter, level and marks). There is one question bank, not two.
@@ -99,7 +108,7 @@ Node.js 24 LTS, Express, SQLite (`better-sqlite3`), plain HTML/JS frontend (no b
 ```
 npm install
 ADMIN_PASSWORD=choose-a-password npm start    # http://localhost:3000
-npm test                                       # 140 tests, uses temporary databases
+npm test                                       # 148 tests, uses temporary databases
 ```
 
 ```
@@ -118,7 +127,7 @@ public/
 test/              node:test suites and Word-generated fixtures
 ```
 
-**Database tables:** `admins`, `settings`, `candidates` (incl. interview and final decision), `questions`, `assessment_links` (a shared link: token, tests, counts, timers, pass marks, expiry, enabled), `assessments` (one candidate's attempt and scores; `link_id` + `session_hash` tie it to the shared link and the SHA-256 of that browser's session cookie; older one-person links have no `link_id` and use their own token), `assessment_stages` (the tests inside one attempt: order, timer, score, result), `assessment_questions` (each candidate's questions, copied from the bank so later edits never change a past result), `images` (question and option pictures), `audit_log` (Delete All Questions and candidate session steps, without personal data).
+**Database tables:** `admins`, `settings`, `candidates` (incl. interview and final decision), `questions` (with `category_id`), `question_categories` (test type, name, Lao name, active), `assessment_links` (a shared link: token, tests, counts, timers, pass marks, expiry, enabled), `assessments` (one candidate's attempt and scores; `link_id` + `session_hash` tie it to the shared link and the SHA-256 of that browser's session cookie; older one-person links have no `link_id` and use their own token), `assessment_stages` (the tests inside one attempt: order, timer, score, result), `assessment_questions` (each candidate's questions, copied from the bank so later edits never change a past result), `images` (question and option pictures), `audit_log` (Delete All Questions and candidate session steps, without personal data).
 
 **Candidate sessions:** opening a shared link gives the browser a random 256-bit secret in an HttpOnly, SameSite=Lax cookie (Secure in production) scoped to that link's API path; no record is created until the candidate presses Start. Every candidate request is resolved from link + cookie on the server — ids sent by the browser never decide whose attempt is used — and starting is one transaction with a unique (link, session) index, so a double-click or second tab never creates a second attempt.
 

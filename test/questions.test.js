@@ -156,7 +156,7 @@ test('invalid files are handled safely', async () => {
 test('confirmed import saves only valid rows', async () => {
   const p = await preview(workbook(TABLE, 'xlsx'), 'questions.xlsx');
   const valid = p.data.rows.filter((r) => r.errors.length === 0).map((r) => r.question);
-  const r = await admin.post('/api/admin/questions/import', { questions: [...valid, { section: 'IQ', question_text: '' }] });
+  const r = await admin.post('/api/admin/questions/import', { questions: [...valid, { section: 'IQ', question_text: '' }], create_missing_categories: true });
   assert.equal(r.status, 200);
   assert.deepEqual(r.data, { imported: 4, skipped: 1 });
   const counts = await admin.get('/api/admin/questions/counts');
@@ -164,6 +164,11 @@ test('confirmed import saves only valid rows', async () => {
 });
 
 test('questions can be added, edited, searched and deleted', async () => {
+  // A question's category must be a managed category of its test type.
+  const unknown = await admin.post('/api/admin/questions', { section: 'IQ', category: 'Sequence', difficulty: 'Medium', question_text: 'Q?', option_a: '1', option_b: '2', correct_answer: 'A' });
+  assert.equal(unknown.status, 400);
+  assert.match(unknown.data.error, /Category "Sequence" does not exist for IQ/);
+  assert.equal((await admin.post('/api/admin/categories', { section: 'IQ', name: 'Sequence' })).status, 201);
   const add = await admin.post('/api/admin/questions', {
     section: 'IQ', category: 'Sequence', difficulty: 'Medium', question_text: 'Unique zebra question?',
     option_a: '1', option_b: '2', option_c: '3', option_d: '4', correct_answer: 'd', marks: 2,
@@ -211,7 +216,7 @@ test('re-uploading the same questions does not create duplicates', async () => {
   assert.match(p2.data.rows[1].errors[0], /already in the question bank/);
 
   // The import step checks again, even if a client skips the preview.
-  const r = await admin.post('/api/admin/questions/import', { questions: [p2.data.rows[0].question, p2.data.rows[0].question] });
+  const r = await admin.post('/api/admin/questions/import', { questions: [p2.data.rows[0].question, p2.data.rows[0].question], create_missing_categories: true });
   assert.deepEqual(r.data, { imported: 1, skipped: 1 });
 });
 
@@ -256,7 +261,7 @@ test('scanned (picture-only) PDF imports through OCR', { timeout: 180000 }, asyn
   assert.ok(['a', 'b', 'c', 'd', 'e'].every((l) => q8[`option_${l}_image`]), 'five picture options');
   assert.equal(q8.correct_answer, 'A');
 
-  const imported = await admin.post('/api/admin/questions/import', { questions: [q1, q8] });
+  const imported = await admin.post('/api/admin/questions/import', { questions: [q1, q8], create_missing_categories: true });
   assert.deepEqual(imported.data, { imported: 2, skipped: 0 });
   const again = await preview(fs.readFileSync(path.join(__dirname, 'fixtures', 'scanned-iq-sample.pdf')), 'scanned.pdf', 'IQ');
   assert.equal(again.data.valid, 0, 'uploading it again finds only duplicates');

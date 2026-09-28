@@ -3,6 +3,10 @@ const express = require('express');
 const helmet = require('helmet');
 const { db } = require('./db');
 const { InputError } = require('./assessments');
+const categories = require('./categories');
+
+// Existing category names become managed categories (safe to run on every start).
+categories.migrate();
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const PUBLIC = path.join(__dirname, '..', 'public');
@@ -56,7 +60,7 @@ app.get(['/', '/admin', '/admin/*'], (req, res) => res.sendFile(path.join(PUBLIC
 // Never show raw errors to users.
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
-  if (err instanceof InputError) return res.status(400).json({ error: err.message });
+  if (err instanceof InputError || err instanceof categories.CategoryError) return res.status(400).json({ error: err.message });
   if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Invalid request.' });
   if (err.type === 'entity.too.large') return res.status(413).json({ error: 'The request is too large.' });
   console.error(err);

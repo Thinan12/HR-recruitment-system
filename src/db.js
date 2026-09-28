@@ -168,6 +168,21 @@ CREATE TABLE IF NOT EXISTS assessment_links (
   created_at TEXT NOT NULL
 );
 
+-- Question categories: a topic inside one test type. The name is unique per
+-- test type ignoring case and spaces (normalized). Inactive = kept by the
+-- questions that have it, but not given to new questions.
+CREATE TABLE IF NOT EXISTS question_categories (
+  id INTEGER PRIMARY KEY,
+  section TEXT NOT NULL,
+  name TEXT NOT NULL,
+  name_lo TEXT NOT NULL DEFAULT '',
+  normalized TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (section, normalized)
+);
+
 -- Record of high-risk admin actions (e.g. DELETE_ALL_QUESTIONS) and of
 -- candidate session steps (no personal data).
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -212,6 +227,8 @@ addMissingColumns('assessments', [['iq_correct', 'INTEGER'], ['iq_total', 'INTEG
 const LAO_COLUMNS = ['question_text_lo', 'option_a_lo', 'option_b_lo', 'option_c_lo', 'option_d_lo', 'option_e_lo'];
 addMissingColumns('questions', [...LAO_COLUMNS.map((c) => [c, "TEXT NOT NULL DEFAULT ''"]),
   ['lo_status', "TEXT NOT NULL DEFAULT ''"], ['lo_note', "TEXT NOT NULL DEFAULT ''"], ['lo_translated_at', 'TEXT'], ['lo_reviewed_at', 'TEXT']]);
+// The managed category of each question (see categories.js); questions.category keeps its name.
+addMissingColumns('questions', [['category_id', 'INTEGER REFERENCES question_categories(id)']]);
 // Each candidate's copy keeps the Lao text it was given and the language it
 // was shown in ('' on copies made before Lao questions = English).
 addMissingColumns('assessment_questions', [...LAO_COLUMNS.map((c) => [c, "TEXT NOT NULL DEFAULT ''"]), ['display_language', "TEXT NOT NULL DEFAULT ''"]]);
