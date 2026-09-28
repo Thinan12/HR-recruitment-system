@@ -71,51 +71,56 @@ function rows(candidates) {
   return out;
 }
 
-async function xlsx(candidates) {
+// ---- writers (shared with the Internal Office Staff reports) --------------------
+
+// One row per record. opts: sheet, fields, rows [{ values, numbers, duplicate_phone, phone_count }],
+// statusCol / pctCols / phoneCol (0-based column indexes), who (for the duplicate-phone note).
+async function tableXlsx({ sheet: sheetName, fields, rows: list, statusCol, pctCols = [], phoneCol = null, who = 'candidates', wide = [] }) {
   const book = new ExcelJS.Workbook();
   book.creator = 'LALCO HR';
-  const sheet = book.addWorksheet('Candidates', { views: [{ state: 'frozen', ySplit: 1 }] });
-  sheet.columns = FIELDS.map((f, i) => ({ header: f, key: 'c' + i, width: Math.max(14, f.length + 3, [0, 9, 10].includes(i) ? 22 : 0) }));
+  const sheet = book.addWorksheet(sheetName, { views: [{ state: 'frozen', ySplit: 1 }] });
+  sheet.columns = fields.map((f, i) => ({ header: f, key: 'c' + i, width: Math.max(14, f.length + 3, wide.includes(i) ? 22 : 0) }));
   const head = sheet.getRow(1);
   head.font = { bold: true };
   head.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } };
-  for (const r of rows(candidates)) {
-    const cells = r.values.map((v, i) => (r.numbers[i] != null ? r.numbers[i] : v));
+  for (const r of list) {
+    const cells = r.values.map((v, i) => (r.numbers && r.numbers[i] != null ? r.numbers[i] : v));
     const x = sheet.addRow(cells);
-    for (const i of [11, 12]) if (r.numbers[i] != null) x.getCell(i + 1).numFmt = '0.0%';
-    const status = x.getCell(15);
-    status.font = { bold: true, color: { argb: r.values[14] === 'PASS' ? 'FF1E7B34' : r.values[14] === 'NOT PASS' ? 'FFC00000' : 'FF7F6000' } };
-    if (r.duplicate_phone) {
-      const phone = x.getCell(2);
+    for (const i of pctCols) if (r.numbers && r.numbers[i] != null) x.getCell(i + 1).numFmt = '0.0%';
+    const status = x.getCell(statusCol + 1);
+    const v = r.values[statusCol];
+    status.font = { bold: true, color: { argb: v === 'PASS' ? 'FF1E7B34' : v === 'NOT PASS' ? 'FFC00000' : 'FF7F6000' } };
+    if (phoneCol != null && r.duplicate_phone) {
+      const phone = x.getCell(phoneCol + 1);
       phone.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE699' } };
-      phone.note = `Duplicate phone number: used by ${r.phone_count} candidates.`;
+      phone.note = `Duplicate phone number: used by ${r.phone_count} ${who}.`;
     }
   }
   // Filter on every column of the header row (phone, date, scores, status …).
-  sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: Math.max(1, sheet.rowCount), column: FIELDS.length } };
+  sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: Math.max(1, sheet.rowCount), column: fields.length } };
   return Buffer.from(await book.xlsx.writeBuffer());
 }
 
-function pdf(c) {
-  const r = rows([c])[0];
+// One record as "field: value" lines; the status value in bold.
+function recordPdf({ title, subtitle, fields, values, statusCol }) {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: 'A4', margin: 50, info: { Title: `Candidate report - ${c.name}` } });
+    const doc = new PDFDocument({ size: 'A4', margin: 50, info: { Title: title } });
     const chunks = [];
     doc.on('data', (d) => chunks.push(d));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
     doc.registerFont('main', FONT);
     doc.font('main').fontSize(20).text('LALCO', { align: 'center' });
-    doc.fontSize(13).fillColor('#555').text('Candidate Report', { align: 'center' });
+    doc.fontSize(13).fillColor('#555').text(subtitle, { align: 'center' });
     doc.moveDown(1).fillColor('#000').fontSize(10.5);
-    FIELDS.forEach((f, i) => {
+    fields.forEach((f, i) => {
       const y = doc.y;
       doc.font('main').fillColor('#555').text(f, 50, y, { width: 190 });
       const bottom = doc.y;
       // PASS / NOT PASS in bold (a standard bold font: the words are Latin).
-      if (i === 14) doc.font('Helvetica-Bold').fillColor(r.values[i] === 'NOT PASS' ? '#c00000' : r.values[i] === 'PASS' ? '#1e7b34' : '#000');
+      if (i === statusCol) doc.font('Helvetica-Bold').fillColor(values[i] === 'NOT PASS' ? '#c00000' : values[i] === 'PASS' ? '#1e7b34' : '#000');
       else doc.font('main').fillColor('#000');
-      doc.text(r.values[i], 250, y, { width: 295 });
+      doc.text(values[i], 250, y, { width: 295 });
       doc.y = Math.max(doc.y, bottom) + 4;
       doc.moveTo(50, doc.y - 2).lineTo(545, doc.y - 2).strokeColor('#e5e5e5').stroke();
     });
@@ -124,8 +129,7 @@ function pdf(c) {
   });
 }
 
-async function word(c) {
-  const r = rows([c])[0];
+async function recordWord({ title, subtitle, fields, values, statusCol }) {
   const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle } = docx;
   const font = 'Leelawadee UI';
   const border = { style: BorderStyle.SINGLE, size: 4, color: 'CCCCCC' };
@@ -133,11 +137,17 @@ async function word(c) {
   const cell = (text, opts = {}, width = 40) => new TableCell({ borders, width: { size: width, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text, font, ...opts })] })] });
   const children = [
     new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'LALCO', bold: true, size: 40, font })] }),
-    new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 300 }, children: [new TextRun({ text: 'Candidate Report', size: 26, color: '555555', font })] }),
+    new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 300 }, children: [new TextRun({ text: subtitle, size: 26, color: '555555', font })] }),
     new Table({ width: { size: 100, type: WidthType.PERCENTAGE },
-      rows: FIELDS.map((f, i) => new TableRow({ children: [cell(f, { color: '555555' }), cell(r.values[i], i === 14 ? { bold: true, color: r.values[i] === 'NOT PASS' ? 'C00000' : r.values[i] === 'PASS' ? '1E7B34' : undefined } : {}, 60)] })) }),
+      rows: fields.map((f, i) => new TableRow({ children: [cell(f, { color: '555555' }), cell(values[i], i === statusCol ? { bold: true, color: values[i] === 'NOT PASS' ? 'C00000' : values[i] === 'PASS' ? '1E7B34' : undefined } : {}, 60)] })) }),
   ];
-  return Packer.toBuffer(new Document({ creator: 'LALCO HR', title: `Candidate report - ${c.name}`, sections: [{ children }] }));
+  return Packer.toBuffer(new Document({ creator: 'LALCO HR', title, sections: [{ children }] }));
 }
 
-module.exports = { FIELDS, rows, xlsx, pdf, word, phoneKey };
+// ---- the recruitment standard report ----------------------------------------------
+
+const xlsx = (candidates) => tableXlsx({ sheet: 'Candidates', fields: FIELDS, rows: rows(candidates), statusCol: 14, pctCols: [11, 12], phoneCol: 1, who: 'candidates', wide: [0, 9, 10] });
+const pdf = (c) => recordPdf({ title: `Candidate report - ${c.name}`, subtitle: 'Candidate Report', fields: FIELDS, values: rows([c])[0].values, statusCol: 14 });
+const word = (c) => recordWord({ title: `Candidate report - ${c.name}`, subtitle: 'Candidate Report', fields: FIELDS, values: rows([c])[0].values, statusCol: 14 });
+
+module.exports = { FIELDS, rows, xlsx, pdf, word, phoneKey, tableXlsx, recordPdf, recordWord, score, stamp, testOf, STATUS, NONE };

@@ -50,11 +50,14 @@ app.get('/api/health', (req, res) => {
 
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/exam', require('./routes/exam'));
+// Internal Office Staff links: the same engine, their own links, cookies and records.
+app.use('/api/internal-exam', require('./routes/exam').internal);
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found.' }));
 
 // Pages
 app.use('/static', express.static(path.join(PUBLIC, 'static'), { maxAge: IS_PRODUCTION ? '1h' : 0 }));
 app.get('/exam/:token', (req, res) => res.sendFile(path.join(PUBLIC, 'exam.html')));
+app.get('/internal-assessment/:token', (req, res) => res.sendFile(path.join(PUBLIC, 'exam.html')));
 app.get(['/', '/admin', '/admin/*'], (req, res) => res.sendFile(path.join(PUBLIC, 'admin.html')));
 
 // Never show raw errors to users.

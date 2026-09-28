@@ -22,6 +22,9 @@ router.use(auth.requireAdmin);
 router.get('/auth/me', (req, res) => res.json({ username: req.admin.username }));
 router.post('/auth/password', auth.changePassword);
 
+// Internal Office Staff (its own records, links, results and reports).
+router.use('/internal', require('./internal'));
+
 const bad = (res, message) => res.status(400).json({ error: message });
 const notFound = (res) => res.status(404).json({ error: 'Not found.' });
 const fileName = (name) => String(name || 'candidate').replace(/[^\p{L}\p{N}\- ]+/gu, '').trim().replace(/\s+/g, '_') || 'candidate';
@@ -30,6 +33,10 @@ const sendFile = (res, buffer, name, type) => {
   res.set('Content-Disposition', `attachment; filename="${encodeURIComponent(name)}"; filename*=UTF-8''${encodeURIComponent(name)}`);
   res.send(buffer);
 };
+// Recruitment routes only see recruitment links and attempts; Internal Office
+// Staff ones are handled by routes/internal.js (a 404 here, never a leak).
+const recruitmentLink = (id) => { const l = A.getLink(Number(id)); return l && l.business_area === 'RECRUITMENT' ? l : null; };
+const recruitmentAttempt = (id) => { const a = A.getAssessment(Number(id)); return a && a.business_area === 'RECRUITMENT' ? a : null; };
 const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
@@ -119,7 +126,7 @@ router.get('/results/iq', (req, res) => {
   const rows = db.prepare(`SELECT a.id, a.candidate_id, c.name AS candidate_name, a.iq_correct, a.iq_total, a.iq_points, a.iq_max,
       a.iq_breakdown, a.submitted_at, a.assessment_type
     FROM assessments a LEFT JOIN candidates c ON c.id = a.candidate_id
-    WHERE a.status = 'SUBMITTED' AND a.iq_max IS NOT NULL ORDER BY a.submitted_at DESC`).all();
+    WHERE a.status = 'SUBMITTED' AND a.iq_max IS NOT NULL AND a.business_area = 'RECRUITMENT' ORDER BY a.submitted_at DESC`).all();
   res.json(rows.map((r) => ({ id: r.id, candidate_id: r.candidate_id, candidate_name: r.candidate_name, ...reports.iqResult(r) })));
 });
 
@@ -139,7 +146,13 @@ router.get('/report/standard', (req, res) => {
 
 // ---- questions ---------------------------------------------------------
 
-const NEEDS_ANSWER_SQL = "section = 'CALCULATION' AND TRIM(correct_answer) = '' AND option_a = '' AND option_b = '' AND option_a_image IS NULL AND option_b_image IS NULL";
+// Short-answer questions waiting for their correct answer: every test type with the
+// Calculation format (the core one and any HR added), not one hard-coded key.
+// Keys are generated upper-case slugs, checked before they go into the SQL.
+const needsAnswerSql = () => {
+  const keys = T.all().filter((t) => t.behavior === 'calculation').map((t) => t.key).filter((k) => /^[A-Z0-9_]+$/.test(k));
+  return `section IN (${keys.map((k) => `'${k}'`).join(', ') || "''"}) AND TRIM(correct_answer) = '' AND option_a = '' AND option_b = '' AND option_a_image IS NULL AND option_b_image IS NULL`;
+};
 
 router.get('/questions', (req, res) => {
   const where = [];
@@ -148,7 +161,7 @@ router.get('/questions', (req, res) => {
   if (T.get(req.query.section)) { where.push('section = ?'); args.push(String(req.query.section).toUpperCase()); }
   if (req.query.status === 'Active' || req.query.status === 'Inactive') { where.push('status = ?'); args.push(req.query.status); }
   // Short-answer questions still waiting for their correct answer.
-  if (req.query.status === 'needs_answer') where.push(NEEDS_ANSWER_SQL);
+  if (req.query.status === 'needs_answer') where.push(needsAnswerSql());
   if (req.query.q) {
     where.push('(question_text LIKE ? OR category LIKE ? OR question_text_lo LIKE ?)');
     args.push(`%${req.query.q}%`, `%${req.query.q}%`, `%${req.query.q}%`);
@@ -170,7 +183,7 @@ router.get('/questions', (req, res) => {
   }
   res.json({ questions: db.prepare(sql).all(...args), counts: A.activeCounts(), inactive_counts: A.inactiveCounts(), total_counts: totals, iq_levels: iqLevels,
     lao_counts: lao.laoCounts(), lao_ready_counts: A.activeCounts('lo'), translator: lao.hasProvider(), translate_job: lao.job,
-    needs_answer: db.prepare(`SELECT COUNT(*) AS n FROM questions WHERE ${NEEDS_ANSWER_SQL}`).get().n,
+    needs_answer: db.prepare(`SELECT COUNT(*) AS n FROM questions WHERE ${needsAnswerSql()}`).get().n,
     test_types: T.list(), categories: categories.list(), no_category: Object.fromEntries(T.keys().map((sec) => [sec, db.prepare('SELECT COUNT(*) AS n FROM questions WHERE section = ? AND category_id IS NULL').get(sec).n])) });
 });
 
@@ -491,7 +504,7 @@ router.post('/questions/import', (req, res) => {
   })();
   // New questions without Lao are translated in the background when a service is set up.
   if (lao.hasProvider() && newIds.length) lao.translateMissing(newIds, req.admin.username);
-  const waiting = newIds.length ? db.prepare(`SELECT COUNT(*) AS n FROM questions WHERE id IN (${newIds.join(',')}) AND ${NEEDS_ANSWER_SQL}`).get().n : 0;
+  const waiting = newIds.length ? db.prepare(`SELECT COUNT(*) AS n FROM questions WHERE id IN (${newIds.join(',')}) AND ${needsAnswerSql()}`).get().n : 0;
   res.json({ imported, skipped, ...(waiting ? { answer_required: waiting } : {}), ...(lao.hasProvider() && newIds.length ? { translating: true } : {}) });
 });
 
@@ -501,13 +514,13 @@ router.post('/questions/import', (req, res) => {
 // one-person links (kind "assessment"), newest first. Candidates' attempts on
 // shared links are listed on the link's own page, not here.
 router.get('/assessments', (req, res) => {
-  const links = db.prepare('SELECT * FROM assessment_links').all().map((l) => ({
+  const links = db.prepare("SELECT * FROM assessment_links WHERE business_area = 'RECRUITMENT'").all().map((l) => ({
     ...A.linkView(l),
     candidate_names: db.prepare(`SELECT c.name FROM assessments a JOIN candidates c ON c.id = a.candidate_id WHERE a.link_id = ? ORDER BY a.id DESC LIMIT 5`)
       .all(l.id).map((r) => r.name),
   }));
   const single = db.prepare(`SELECT a.*, c.name AS candidate_name FROM assessments a
-    LEFT JOIN candidates c ON c.id = a.candidate_id WHERE a.link_id IS NULL`).all()
+    LEFT JOIN candidates c ON c.id = a.candidate_id WHERE a.link_id IS NULL AND a.business_area = 'RECRUITMENT'`).all()
     .map((a) => ({ ...a, kind: 'assessment', state: A.linkState(a), stages: A.stagesOf(a), current_stage: A.currentStage(a) }));
   res.json([...links, ...single].sort((x, y) => y.created_at.localeCompare(x.created_at) || y.id - x.id));
 });
@@ -518,7 +531,7 @@ router.post('/assessments', (req, res) => {
 
 // One shared link and every candidate who used it (one row per attempt).
 router.get('/links/:id', (req, res) => {
-  const link = A.getLink(Number(req.params.id));
+  const link = recruitmentLink(req.params.id);
   if (!link) return notFound(res);
   const attempts = db.prepare(`SELECT a.*, c.name AS candidate_name, c.phone AS candidate_phone, c.final_result FROM assessments a
     LEFT JOIN candidates c ON c.id = a.candidate_id WHERE a.link_id = ? ORDER BY a.started_at DESC, a.id DESC`).all(link.id)
@@ -538,14 +551,14 @@ router.get('/links/:id', (req, res) => {
 // Disable = no NEW candidate can start. Candidates already in a test carry on
 // with their own timer (HR can stop one candidate from their own row).
 router.post('/links/:id/:action(enable|disable)', (req, res) => {
-  const info = db.prepare('UPDATE assessment_links SET enabled = ? WHERE id = ?').run(req.params.action === 'enable' ? 1 : 0, Number(req.params.id));
+  const info = db.prepare("UPDATE assessment_links SET enabled = ? WHERE id = ? AND business_area = 'RECRUITMENT'").run(req.params.action === 'enable' ? 1 : 0, Number(req.params.id));
   if (!info.changes) return notFound(res);
   res.json(A.linkView(A.getLink(Number(req.params.id))));
 });
 
 // A new URL, only while nobody has used the link (candidates resume through it).
 router.post('/links/:id/regenerate', (req, res) => {
-  const link = A.getLink(Number(req.params.id));
+  const link = recruitmentLink(req.params.id);
   if (!link) return notFound(res);
   if (A.linkView(link).candidates > 0) return bad(res, 'Candidates have already used this link, so its address cannot change. Disable it and create a new link instead.');
   db.prepare('UPDATE assessment_links SET token = ?, link_expires_at = ?, enabled = 1 WHERE id = ?')
@@ -555,7 +568,7 @@ router.post('/links/:id/regenerate', (req, res) => {
 
 // Only an unused link can be deleted; one with candidates keeps their history.
 router.delete('/links/:id', (req, res) => {
-  const link = A.getLink(Number(req.params.id));
+  const link = recruitmentLink(req.params.id);
   if (!link) return notFound(res);
   if (A.linkView(link).candidates > 0) return bad(res, 'Candidates have used this link, so it is kept with their results. Disable it instead.');
   db.prepare('DELETE FROM assessment_links WHERE id = ?').run(link.id);
@@ -563,7 +576,7 @@ router.delete('/links/:id', (req, res) => {
 });
 
 router.get('/assessments/:id', (req, res) => {
-  const a = A.getAssessment(Number(req.params.id));
+  const a = recruitmentAttempt(req.params.id);
   if (!a) return notFound(res);
   const candidate = a.candidate_id ? db.prepare('SELECT id, name, phone FROM candidates WHERE id = ?').get(a.candidate_id) : null;
   const questions = db.prepare('SELECT * FROM assessment_questions WHERE assessment_id = ? ORDER BY position').all(a.id);
@@ -575,24 +588,28 @@ router.get('/assessments/:id', (req, res) => {
 });
 
 router.post('/assessments/:id/:action(enable|disable)', (req, res) => {
-  const info = db.prepare('UPDATE assessments SET enabled = ? WHERE id = ?').run(req.params.action === 'enable' ? 1 : 0, Number(req.params.id));
+  const info = db.prepare("UPDATE assessments SET enabled = ? WHERE id = ? AND business_area = 'RECRUITMENT'").run(req.params.action === 'enable' ? 1 : 0, Number(req.params.id));
   if (!info.changes) return notFound(res);
   const a = A.getAssessment(Number(req.params.id));
   res.json({ ...a, state: A.linkState(a) });
 });
 
 router.post('/assessments/:id/regenerate', (req, res) => {
+  const found = A.getAssessment(Number(req.params.id));
+  if (found && found.business_area !== 'RECRUITMENT') return notFound(res);
   const a = A.regenerateLink(Number(req.params.id));
   res.json({ ...a, state: A.linkState(a) });
 });
 
 router.put('/assessments/:id/essay-marks', (req, res) => {
+  const found = A.getAssessment(Number(req.params.id));
+  if (found && found.business_area !== 'RECRUITMENT') return notFound(res);
   const a = A.setEssayMarks(Number(req.params.id), req.body?.marks);
   res.json({ ...a, state: A.linkState(a) });
 });
 
 router.delete('/assessments/:id', (req, res) => {
-  const info = db.prepare('DELETE FROM assessments WHERE id = ?').run(Number(req.params.id));
+  const info = db.prepare("DELETE FROM assessments WHERE id = ? AND business_area = 'RECRUITMENT'").run(Number(req.params.id));
   if (!info.changes) return notFound(res);
   res.json({ ok: true });
 });

@@ -95,6 +95,27 @@ const TEXT = {
   },
 };
 
+// Internal Office Staff links (/internal-assessment/<token>) use their own API,
+// wording and details form; the test engine is the same.
+const INTERNAL = location.pathname.startsWith('/internal-assessment/');
+const API_BASE = INTERNAL ? '/api/internal-exam/' : '/api/exam/';
+Object.assign(TEXT.en, {
+  staff_title: 'LALCO Internal Staff Assessment',
+  staff_intro: 'Please enter your staff details, then press Start.',
+  staff_name: 'Staff Name', employee_id: 'Employee ID', department: 'Department', position: 'Position', email: 'Email',
+  employee_id_required: 'Please enter your Employee ID.',
+  email_invalid: 'Please enter a valid email address.',
+  used: 'This single-use assessment link has already been used.\nPlease contact HR.',
+});
+Object.assign(TEXT.lo, {
+  staff_title: 'ການປະເມີນພະນັກງານພາຍໃນ LALCO',
+  staff_intro: 'ກະລຸນາປ້ອນຂໍ້ມູນພະນັກງານຂອງທ່ານ, ຈາກນັ້ນກົດປຸ່ມເລີ່ມ.',
+  staff_name: 'ຊື່ພະນັກງານ', employee_id: 'ລະຫັດພະນັກງານ', department: 'ພະແນກ', position: 'ຕຳແໜ່ງ', email: 'ອີເມວ',
+  employee_id_required: 'ກະລຸນາປ້ອນລະຫັດພະນັກງານຂອງທ່ານ.',
+  email_invalid: 'ກະລຸນາປ້ອນອີເມວທີ່ຖືກຕ້ອງ.',
+  used: 'ລິ້ງການປະເມີນນີ້ໃຊ້ໄດ້ຄັ້ງດຽວ ແລະ ໄດ້ຖືກໃຊ້ແລ້ວ.\nກະລຸນາຕິດຕໍ່ຝ່າຍບຸກຄະລາກອນ (HR).',
+});
+
 const token = decodeURIComponent(location.pathname.split('/').pop());
 const root = document.getElementById('exam');
 // Puts the page content in place; optional parts that are null are skipped (replaceChildren would print "null").
@@ -125,7 +146,7 @@ const fill = (s, vars) => s.replace(/\{(\w+)\}/g, (_, k) => vars[k]);
 const fillCount = (str, vars) => fill(str, vars).replace(/\b1 questions\b/g, '1 question');
 
 async function call(method, path, body) {
-  const res = await fetch('/api/exam/' + encodeURIComponent(token) + path, {
+  const res = await fetch(API_BASE + encodeURIComponent(token) + path, {
     method,
     headers: body ? { 'Content-Type': 'application/json' } : {},
     body: body ? JSON.stringify(body) : undefined,
@@ -138,7 +159,7 @@ async function call(method, path, body) {
 function setLanguage(lang) {
   T = TEXT[lang] || TEXT.en;
   document.documentElement.lang = lang === 'lo' ? 'lo' : 'en';
-  document.title = 'LALCO - ' + T.title;
+  document.title = INTERNAL ? T.staff_title : 'LALCO - ' + T.title;
 }
 
 function bigMessage(text, tests) {
@@ -236,6 +257,7 @@ function show(data) {
       return bigMessage(!exam ? T.already_submitted : data.auto_submitted ? T.auto_submitted : T.submitted, data.tests);
     case 'expired': return bigMessage(T.expired);
     case 'disabled': return bigMessage(T.disabled);
+    case 'used': return bigMessage(T.used);
     case 'not_found': return bigMessage(T.not_found);
     default: return bigMessage(T.error);
   }
@@ -243,7 +265,42 @@ function show(data) {
 
 // ---- start form -----------------------------------------------------------
 
+// The internal staff details form (entered once, then the first test starts).
+function renderStaffStart(data) {
+  const err = h('div', { class: 'message error hidden' });
+  const input = (name, label, attrs) => h('div', { class: 'field' }, h('label', { for: name }, label), h('input', { id: name, name, ...attrs }));
+  const button = h('button', { type: 'submit' }, T.start);
+  const form = h('form', {},
+    h('h1', {}, T.staff_title),
+    h('p', {}, T.staff_intro),
+    err,
+    h('div', { class: 'grid' },
+      input('name', T.staff_name, { required: true, autocomplete: 'name' }),
+      input('employee_id', T.employee_id, { required: true }),
+      input('department', T.department), input('position', T.position),
+      input('phone', T.phone, { type: 'tel', autocomplete: 'tel' }), input('email', T.email, { type: 'email', autocomplete: 'email' })),
+    (data.tests || []).length > 1 ? h('div', { class: 'message ok section-gap' }, fill(T.tests_intro, { n: data.tests.length }),
+      h('ol', {}, data.tests.map((t) => h('li', {}, fillCount(T.test_line, { name: testName(t.section), q: t.question_count, m: t.minutes }))))) : null,
+    h('p', { class: 'message ok section-gap' }, fillCount(T.rules, { m: data.time_limit_minutes, n: data.question_count })),
+    button);
+  const showErr = (text) => { err.textContent = text; err.classList.remove('hidden'); };
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = Object.fromEntries([...form.elements].filter((el) => el.name).map((el) => [el.name, el.value.trim()]));
+    if (!body.name) return showErr(T.name_required);
+    if (!body.employee_id) return showErr(T.employee_id_required);
+    button.disabled = true;
+    try {
+      const r = await call('POST', '/start', body);
+      if (r.status === 400) { button.disabled = false; return showErr(T[r.data.error] || T.error); }
+      show(r.data);
+    } catch { button.disabled = false; showErr(T.error); }
+  });
+  render(h('div', { class: 'card' }, form));
+}
+
 function renderStart(data) {
+  if (INTERNAL) return renderStaffStart(data);
   const c = data.candidate || {};
   const err = h('div', { class: 'message error hidden' });
   const input = (name, attrs) => h('div', { class: 'field' }, h('label', { for: name }, T[name]), h('input', { id: name, name, value: c[name] || '', ...attrs }));

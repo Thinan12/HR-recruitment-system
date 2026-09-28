@@ -7,14 +7,14 @@
 //   - url.raw agrees with url.host / url.path / url.query
 //   - every request has a description, a test script and a status-code test
 //   - request names are unique inside their folder
-//   - every route in the source (src/app.js, src/routes/*.js) is called at least once
+//   - every route in the source (src/app.js, src/routes/*.js; exam.js at both mount points) is called at least once
 const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 const REPO = path.join(ROOT, '..');
 const collection = JSON.parse(fs.readFileSync(path.join(ROOT, 'LALCO-HR-Recruitment-System.postman_collection.json'), 'utf8'));
-const envs = ['LALCO-HR-Local', 'LALCO-HR-Production'].map((n) => JSON.parse(fs.readFileSync(path.join(ROOT, 'environments', n + '.postman_environment.json'), 'utf8')));
+const envs = ['LALCO-HR-Local', 'LALCO-HR-Production'].map((n) => JSON.parse(fs.readFileSync(path.join(ROOT, 'env', n + '.postman_environment.json'), 'utf8')));
 const errors = [];
 const warnings = [];
 
@@ -65,7 +65,8 @@ walk(collection.item, '');
 
 // 6. route coverage
 const routes = [];
-for (const [file, prefix] of [['src/app.js', ''], ['src/routes/admin.js', '/api/admin'], ['src/routes/exam.js', '/api/exam']]) {
+// exam.js is mounted twice: recruitment (/api/exam) and internal staff (/api/internal-exam).
+for (const [file, prefix] of [['src/app.js', ''], ['src/routes/admin.js', '/api/admin'], ['src/routes/internal.js', '/api/admin/internal'], ['src/routes/exam.js', '/api/exam'], ['src/routes/exam.js', '/api/internal-exam']]) {
   const src = fs.readFileSync(path.join(REPO, file), 'utf8');
   for (const m of src.matchAll(/(?:router|app)\.(get|post|put|patch|delete)\(\s*'([^']+)'/g)) {
     if (file === 'src/app.js' && !m[2].startsWith('/api')) continue; // pages, not API

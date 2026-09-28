@@ -124,6 +124,17 @@ Options may also be on one line (`A. Red  B. Blue  C. Green  D. Chair`).
 - The **Dashboard** shows summary counts (eligible / not eligible / pending, passed / not passed per test, essays pending marking, IQ levels; click a card to filter) and one row per candidate with every test's score, %, level and result, the final %, final level, eligibility and HR Final Result, with filters. The candidate page, the review page and the PDF / Word / Excel exports show the same.
 - **Test Score** (still shown and exported) is the percentage over all marks of the latest assessment.
 
+### Internal Office Staff
+
+A separate area for **existing employees**, next to Recruitment (menu: *Internal Office Staff → Dashboard, Staff, Assessment Links, Results, Reports*). It uses the same question bank, test engine, timers, randomization and scoring as Recruitment, but its records, links, results and reports are separate.
+
+- **Staff:** name, Employee ID (unique, compared ignoring case and spaces), department, position, phone, email, status (Active / Inactive). Search and filter by department and status; view, edit, delete. Staff are never recruitment candidates.
+- **Assessment Links → Create Assessment Link:** assessment name, optional description, the tests (question count, time, pass mark each), language, expiry **date and time**, and **reusable** (one link for many employees) or single use. The link is `/internal-assessment/<token>` and is labelled *INTERNAL STAFF LINK*. The table shows tests, created, expires, status, started, completed, with View / Copy / Disable / Enable / Regenerate (regenerate only before anyone used it). Disabling or expiring a link stops new sessions; results are kept, and employees already in a test carry on.
+- **The employee's page** says *LALCO Internal Staff Assessment* and asks for Staff Name, Employee ID, Department, Position, Phone and Email once. An Employee ID HR already entered links the attempt to that staff record (HR's details are not overwritten; what the employee typed is kept with the attempt); a new Employee ID creates a staff record. Each employee on a reusable link gets their own session cookie (`lalco_staff_session`), own random questions, answers, timer and result; refreshing never reshuffles.
+- **Dashboard:** total staff, total assessments, active links, completed, in progress, pending HR marking, passed, not passed (all counted on the server), recent assessments and results, active links, links expiring within 7 days.
+- **Results / Reports:** Staff Name, Employee ID, Department, Position, Assessment, IQ Test Score (LALCO / 150), Behavioral Assessment Score (the General test, or an interview-format test), Calculation, Essay, Pass / Not Pass / Pending, Date and Time. Click a result for the full review (answers, essay marking). Reports add a per-department summary and an Excel report of the filtered results; each result has its own PDF / Word / Excel. Internal results never appear in Recruitment screens or reports, and the reverse.
+- **Separation (server side):** every link and attempt has `business_area` = `RECRUITMENT` or `INTERNAL_STAFF`. Recruitment routes and `/api/exam` only find recruitment links and attempts; `/api/admin/internal/…` and `/api/internal-exam` only internal ones (the other area's ids and tokens give 404). A session cookie belongs to one link, so a candidate's session opens nothing on an internal link and the reverse.
+
 ## For developers
 
 Node.js 24 LTS, Express, SQLite (`better-sqlite3`), plain HTML/JS frontend (no build step).
@@ -131,7 +142,7 @@ Node.js 24 LTS, Express, SQLite (`better-sqlite3`), plain HTML/JS frontend (no b
 ```
 npm install
 ADMIN_PASSWORD=choose-a-password npm start    # http://localhost:3000
-npm test                                       # 200 tests, uses temporary databases (set LALCO_SAMPLE_DOCX / LALCO_BEHAVIOURAL_PDF / LALCO_REAL_IMPORT_FILES to also test real documents)
+npm test                                       # 207 tests, uses temporary databases (set LALCO_SAMPLE_DOCX / LALCO_BEHAVIOURAL_PDF / LALCO_REAL_IMPORT_FILES to also test real documents)
 ```
 
 ```
@@ -144,14 +155,17 @@ src/
   importer.js      question file parsing and validation
   reports.js       dashboard, candidate summaries, detailed PDF / Word / Excel exports
   standardReport.js the standard 15-field report (web, Excel, PDF, Word)
-  routes/admin.js  admin API
-  routes/exam.js   candidate API
+  internalStaff.js internal office staff records
+  internalReports.js internal staff dashboard, results and exports
+  routes/admin.js  admin API (recruitment)
+  routes/internal.js admin API for Internal Office Staff (/api/admin/internal)
+  routes/exam.js   candidate API (/api/exam) and internal staff API (/api/internal-exam)
 public/
   admin.html, exam.html, static/   the two pages, their scripts and CSS
 test/              node:test suites and Word-generated fixtures
 ```
 
-**Database tables:** `admins`, `settings`, `candidates` (incl. interview and final decision), `test_types` (key, name, Lao title, format, active, in assessments, order, pass mark, core), `questions` (with `category_id`), `question_categories` (test type, name, Lao name, active), `assessment_links` (a shared link: token, tests, counts, timers, pass marks, expiry, enabled), `assessments` (one candidate's attempt and scores; `link_id` + `session_hash` tie it to the shared link and the SHA-256 of that browser's session cookie; older one-person links have no `link_id` and use their own token), `assessment_stages` (the tests inside one attempt: order, timer, score, result), `assessment_questions` (each candidate's questions, copied from the bank so later edits never change a past result), `images` (question and option pictures), `audit_log` (Delete All Questions and candidate session steps, without personal data).
+**Database tables:** `admins`, `settings`, `candidates` (incl. interview and final decision), `test_types` (key, name, Lao title, format, active, in assessments, order, pass mark, core), `questions` (with `category_id`), `question_categories` (test type, name, Lao name, active), `assessment_links` (a shared link: token, tests, counts, timers, pass marks, expiry, enabled), `assessments` (one candidate's attempt and scores; `link_id` + `session_hash` tie it to the shared link and the SHA-256 of that browser's session cookie; older one-person links have no `link_id` and use their own token), `assessment_stages` (the tests inside one attempt: order, timer, score, result), `assessment_questions` (each candidate's questions, copied from the bank so later edits never change a past result), `images` (question and option pictures), `internal_staff` (employees: name, employee ID, department, position, phone, email, status); links and attempts carry `business_area` (RECRUITMENT / INTERNAL_STAFF), links also `description` and `reusable`, attempts `staff_id` and `staff_details`, `audit_log` (Delete All Questions and candidate session steps, without personal data).
 
 **Candidate sessions:** opening a shared link gives the browser a random 256-bit secret in an HttpOnly, SameSite=Lax cookie (Secure in production) scoped to that link's API path; no record is created until the candidate presses Start. Every candidate request is resolved from link + cookie on the server — ids sent by the browser never decide whose attempt is used — and starting is one transaction with a unique (link, session) index, so a double-click or second tab never creates a second attempt.
 

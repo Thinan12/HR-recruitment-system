@@ -288,12 +288,14 @@ const ROUTES = {
 };
 
 async function route() {
-  const [, page = 'dashboard', id] = location.hash.split('/');
+  const [, page = 'dashboard', id, sub] = location.hash.split('/');
   const render = ROUTES[page] || ROUTES.dashboard;
-  document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.page === (page === 'links' ? 'assessments' : page === 'categories' || page === 'test-types' ? 'questions' : ROUTES[page] ? page : 'dashboard')));
+  // Internal Office Staff pages: #/internal/<section>/<id>.
+  const active = page === 'internal' ? 'internal-' + (id || 'dashboard') : page === 'links' ? 'assessments' : page === 'categories' || page === 'test-types' ? 'questions' : ROUTES[page] ? page : 'dashboard';
+  document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.page === active));
   loading();
   await loadTestTypes();
-  try { await render(id); } catch (e) { view().replaceChildren(message(e.message)); }
+  try { await render(id, sub); } catch (e) { view().replaceChildren(message(e.message)); }
 }
 window.addEventListener('hashchange', () => { if (!$('app').classList.contains('hidden')) route(); });
 
@@ -1483,8 +1485,11 @@ async function renderLink(id) {
         : h('p', { class: 'muted' }, 'Nobody has started yet. Share the link above; every person who opens it gets their own session.')));
 }
 
-async function renderAssessment(id) {
-  const { assessment: a, stages, tests, final, iq, candidate, questions, link } = await api('GET', '/assessments/' + id);
+// o (Internal Office Staff results): { apiBase, back: [href, text], title, linkHref, person(data) -> [label, content] }
+async function renderAssessment(id, o = {}) {
+  const apiBase = o.apiBase || '/assessments/';
+  const data = await api('GET', apiBase + id);
+  const { assessment: a, stages, tests, final, iq, candidate, questions, link } = data;
   const essayInputs = [];
   const count = { correct: 0, wrong: 0, missed: 0 };
   const submitted = a.status === 'SUBMITTED';
@@ -1529,14 +1534,15 @@ async function renderAssessment(id) {
   const saveEssays = essayInputs.length && a.status === 'SUBMITTED'
     ? h('button', { type: 'button', onclick: async () => {
       const marks = Object.fromEntries(essayInputs.map((i) => [i.dataset.id, i.value]));
-      try { await api('PUT', `/assessments/${a.id}/essay-marks`, { marks }); route(); } catch (ex) { flash(card, ex.message); }
+      try { await api('PUT', `${apiBase}${a.id}/essay-marks`, { marks }); route(); } catch (ex) { flash(card, ex.message); }
     } }, 'Save essay marks') : null;
 
   const pct = (p, m) => (m ? `${Math.round((p / m) * 1000) / 10}% (${p}/${m})` : '-');
   card.append(
     h('div', { class: 'table-wrap' }, h('table', { class: 'kv' }, h('tbody', {},
-      h('tr', {}, h('th', {}, 'Candidate'), h('td', {}, candidate ? h('a', { href: '#/candidates/' + candidate.id }, candidate.name) : '-')),
-      link ? h('tr', {}, h('th', {}, 'Shared link'), h('td', {}, h('a', { href: '#/links/' + link.id }, link.title || 'Shared link'), h('div', { class: 'muted small' }, 'This candidate’s own session on the shared link'))) : null,
+      o.person ? h('tr', {}, h('th', {}, o.person(data)[0]), h('td', {}, o.person(data)[1]))
+        : h('tr', {}, h('th', {}, 'Candidate'), h('td', {}, candidate ? h('a', { href: '#/candidates/' + candidate.id }, candidate.name) : '-')),
+      link ? h('tr', {}, h('th', {}, 'Shared link'), h('td', {}, h('a', { href: (o.linkHref || '#/links/') + link.id }, link.title || 'Shared link'), h('div', { class: 'muted small' }, o.person ? 'This employee’s own session on the link' : 'This candidate’s own session on the shared link'))) : null,
       h('tr', {}, h('th', {}, 'Type'), h('td', {}, TYPE_LABEL[a.assessment_type], ' - ', LANG_LABEL[a.language])),
       h('tr', {}, h('th', {}, 'Status'), h('td', {}, stateBadge(a.state), a.auto_submitted ? ' (time ran out on a test)' : '')),
       h('tr', {}, h('th', {}, 'Current Stage'), h('td', {}, a.current_stage ? a.current_stage.label : '-')),
@@ -1567,13 +1573,13 @@ async function renderAssessment(id) {
     finalBox(final));
 
   view().replaceChildren(
-    h('p', {}, h('a', { href: '#/assessments' }, '< All assessments')),
-    h('h1', {}, 'Assessment review'),
+    h('p', {}, h('a', { href: (o.back || [])[0] || '#/assessments' }, (o.back || [])[1] || '< All assessments')),
+    h('div', { class: 'row between' }, h('h1', {}, o.title || 'Assessment review'), o.actions || null),
     card,
     stagesCard,
     h('div', { class: 'card' }, h('div', { class: 'row between' }, h('h2', {}, 'Answers'), submitted ? summary : null, saveEssays),
       h('div', { class: 'table-wrap' }, h('table', {},
-        h('thead', {}, h('tr', {}, ['#', 'Type', 'Question', 'Candidate answer', 'Correct answer', 'Status'].map((t) => h('th', {}, t)))),
+        h('thead', {}, h('tr', {}, ['#', 'Type', 'Question', o.person ? 'Answer' : 'Candidate answer', 'Correct answer', 'Status'].map((t) => h('th', {}, t)))),
         h('tbody', {}, rows)))));
 }
 

@@ -64,7 +64,10 @@ function req(name, method, apiPath, o = {}) {
     bodySpec = { mode: 'formdata', formdata: o.form.map((f) => (f.src !== undefined ? { key: f.key, type: 'file', src: f.src } : { key: f.key, value: f.value, type: 'text' })) };
   }
   for (const [key, value] of Object.entries(o.headers || {})) headers.push({ key, value });
-  const cookieOff = !!(o.cand || o.noAuth || o.cookie);
+  const cookieOff = !!(o.cand || o.staff || o.noAuth || o.cookie);
+  // Internal staff session: own cookie name; staff A uses internalStaffSession, others internalStaffSession<X>.
+  const staffVar = o.staff ? 'internalStaffSession' + (o.staff === 'A' ? '' : o.staff) : null;
+  if (o.staff) headers.push({ key: 'Cookie', value: `lalco_staff_session={{${staffVar}}}` });
   if (o.cand) headers.push({ key: 'Cookie', value: `lalco_candidate_session={{candidateSession${o.cand}}}` });
   if (o.cookie) headers.push({ key: 'Cookie', value: o.cookie });
 
@@ -91,6 +94,15 @@ function req(name, method, apiPath, o = {}) {
     if (type !== 'png') t.push(`pm.test('Sent as a download with a .${type} file name', () => pm.expect(pm.response.headers.get('Content-Disposition') || '').to.match(/attachment; filename=".+\\.${type}"/));`);
   }
   if (o.error) t.push(`pm.test('Error message says: ${o.error.replace(/'/g, '')}', () => pm.expect(String((body && (body.error || body.message)) || '')).to.include(${JSON.stringify(o.error)}));`);
+  if (o.staff) {
+    t.push(...body(() => {
+      // Keep this employee's own session cookie (the cookie jar is off for staff requests).
+      for (const h of pm.response.headers.all()) {
+        const m = h.key.toLowerCase() === 'set-cookie' && /lalco_staff_session=([^;]+)/.exec(h.value);
+        if (m) pm.environment.set(STAFFVAR, m[1]);
+      }
+    }).map((l) => l.replace('STAFFVAR', JSON.stringify(staffVar))));
+  }
   if (o.cand) {
     t.push(...body(() => {
       // Keep this candidate's own session cookie (the cookie jar is off for candidate requests).
@@ -103,7 +115,7 @@ function req(name, method, apiPath, o = {}) {
   for (const f of [].concat(o.test || [])) t.push(...body(f));
 
   inventory.push(`${method} ${apiPath}`);
-  const auth = o.cand ? `Candidate session cookie \`lalco_candidate_session\` of candidate ${o.cand} (cookie jar off)`
+  const auth = o.staff ? `Internal staff session cookie \`lalco_staff_session\` of staff member ${o.staff} (cookie jar off)` : o.cand ? `Candidate session cookie \`lalco_candidate_session\` of candidate ${o.cand} (cookie jar off)`
     : o.noAuth ? 'None — sent without any cookie on purpose' : o.cookie ? `Explicit cookie: \`${o.cookie}\` (cookie jar off)`
       : apiPath.startsWith('/api/admin') && !/auth\/login$/.test(apiPath) ? 'Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)' : 'None';
   const input = [o.q && `query: ${Object.keys(o.q).join(', ')}`, o.json !== undefined && 'JSON body', o.form && `multipart form: ${o.form.map((f) => f.key + (f.src ? ` (file ${f.src})` : '')).join(', ')}`].filter(Boolean).join('; ') || 'none';
@@ -138,6 +150,7 @@ const health = folder('01 Health', 'The health endpoint Railway uses. No login.'
       pm.test('database = connected', () => pm.expect(body.database).to.equal('connected'));
       const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15);
       set('runTag', 'POSTMAN TEST ' + stamp);
+      set('runStamp', 'PM' + stamp);
       console.log('Run tag:', env('runTag'), '| mode:', env('mode') || 'PRODUCTION (default)');
     },
   }),
@@ -542,7 +555,7 @@ const imports = folder('08 Question Import', 'Real multipart uploads of the file
       set('importRowsCalc', usable.map((r) => r.question));
     }],
   }),
-  importReq('POST Import Questions — Calculation into the temporary Calculation type', 'importRowsCalc', 'calcTypeKey', { imported: 3 }),
+  importReq('POST Import Questions — Calculation into the temporary Calculation type', 'importRowsCalc', 'calcTypeKey', { imported: 3, answer_required: 1 }),
   verifyBank('GET Questions — verify the Calculation import', 'calcTypeKey', 'importRowsCalc', () => {
     pm.test('2 Active with answers, 1 Inactive without', () => {
       pm.expect(body.questions.filter((q) => q.status === 'Active' && q.correct_answer).length).to.equal(2);
@@ -992,17 +1005,219 @@ const settings = folder('16 Settings', 'Settings are read, then saved with EXACT
 // ================================================================================
 // 17 Internal Office Staff — not implemented
 // ================================================================================
-const NOT_IMPLEMENTED = 'No Internal Office Staff routes exist in the source code (src/app.js, src/routes/admin.js, src/routes/exam.js — no staff, internal or employee endpoints). Requests will be added here when the feature is built; nothing is invented.';
-const internal = folder('17 Internal Office Staff (not implemented)', NOT_IMPLEMENTED, [
-  folder('Internal Staff Assessments', NOT_IMPLEMENTED, []),
-  folder('Internal Staff Results', NOT_IMPLEMENTED, []),
+const STAFF_A = { name: '{{runTag}} STAFF A', employee_id: '{{runStamp}}-A', department: 'Postman Department', position: 'Tester', phone: '020 0000 0301', email: 'postman.a@example.com' };
+const staffStart = (who, extra = {}) => ({ name: `{{runTag}} STAFF ${who}`, employee_id: `{{runStamp}}-${who}`, department: 'Postman Department', position: 'Tester', ...extra });
+const internalStaff = folder('17 Internal Office Staff', 'Internal Office Staff records (existing employees): their own table, never recruitment candidates. The dashboard counts only the internal area.', [
+  req('GET Internal Dashboard — before', 'GET', '/api/admin/internal/dashboard', {
+    test: () => {
+      pm.test('All counters are numbers', () => ['totalStaff', 'totalAssessments', 'activeLinks', 'completed', 'inProgress', 'pending', 'passed', 'notPassed'].forEach((k) => pm.expect(body[k], k).to.be.a('number')));
+      pm.test('Recent data and link lists are arrays', () => ['recentAssessments', 'recentResults', 'activeLinksList', 'expiringLinks'].forEach((k) => pm.expect(body[k], k).to.be.an('array')));
+      set('internalBaseline', body);
+    },
+  }),
+  req('GET Recruitment Dashboard — before the internal tests', 'GET', '/api/admin/dashboard', { desc: 'Records the recruitment counts; the internal tests must not change them.', test: () => { set('recruitmentCompletedBefore', String(body.completed_assessments)); set('recruitmentTotalBefore', String(body.total_candidates)); } }),
+  req('POST Create Staff — missing name', 'POST', '/api/admin/internal/staff', { json: { employee_id: '{{runStamp}}-X' }, status: 400, error: 'Staff name is required.' }),
+  req('POST Create Staff — missing employee ID', 'POST', '/api/admin/internal/staff', { json: { name: '{{runTag}} STAFF X' }, status: 400, error: 'Employee ID is required.' }),
+  req('POST Create Staff — invalid email', 'POST', '/api/admin/internal/staff', { json: { name: '{{runTag}} STAFF X', employee_id: '{{runStamp}}-X', email: 'not-an-email' }, status: 400, error: 'valid email' }),
+  req('POST Create Staff', 'POST', '/api/admin/internal/staff', {
+    json: STAFF_A, status: 201,
+    test: () => {
+      pm.test('Created: id, fields, Active, no assessments', () => { pm.expect(body.id).to.be.a('number'); pm.expect(body.employee_id).to.equal(env('runStamp') + '-A'); pm.expect(body.department).to.equal('Postman Department'); pm.expect(body.status).to.equal('Active'); pm.expect(body.assessments).to.equal(0); });
+      set('internalStaffId', String(body.id));
+    },
+  }),
+  req('POST Create Staff — duplicate employee ID (other case)', 'POST', '/api/admin/internal/staff', { json: '{ "name": "{{runTag}} STAFF DUP", "employee_id": " {{runStamp}}-a " }', status: 400, error: 'already used by another staff member' }),
+  req('GET Staff — search', 'GET', '/api/admin/internal/staff', {
+    q: { q: '{{runStamp}}-A' },
+    test: () => { pm.test('Found; departments and positions listed', () => { pm.expect(body.staff.map((s) => s.id)).to.eql([Number(env('internalStaffId'))]); pm.expect(body.departments).to.include('Postman Department'); pm.expect(body.positions).to.be.an('array'); }); },
+  }),
+  req('GET Staff — filter by department and status', 'GET', '/api/admin/internal/staff', { q: { department: 'Postman Department', status: 'Active' }, test: () => { pm.test('Only that department', () => { pm.expect(body.staff.length).to.be.at.least(1); body.staff.forEach((s) => { pm.expect(s.department).to.equal('Postman Department'); pm.expect(s.status).to.equal('Active'); }); }); } }),
+  req('GET Staff Member', 'GET', '/api/admin/internal/staff/{{internalStaffId}}', { test: () => { pm.test('staff + results (none yet)', () => { pm.expect(body.staff.email).to.equal('postman.a@example.com'); pm.expect(body.results).to.eql([]); }); } }),
+  req('PUT Update Staff', 'PUT', '/api/admin/internal/staff/{{internalStaffId}}', { json: { ...STAFF_A, position: 'Senior Tester' }, test: () => { pm.test('Position updated', () => pm.expect(body.position).to.equal('Senior Tester')); } }),
+  req('GET Staff Member — nonexistent', 'GET', '/api/admin/internal/staff/999999999', { status: 404 }),
+  req('PUT Update Staff — nonexistent', 'PUT', '/api/admin/internal/staff/999999999', { json: STAFF_A, status: 404 }),
+  req('POST Create Staff — to delete', 'POST', '/api/admin/internal/staff', { json: { name: '{{runTag}} STAFF DELETE ME', employee_id: '{{runStamp}}-DEL' }, status: 201, test: () => { set('internalStaffDeleteId', String(body.id)); } }),
+  req('DELETE Staff', 'DELETE', '/api/admin/internal/staff/{{internalStaffDeleteId}}', { desc: 'Deletes a staff record (and, like a recruitment candidate, their attempts). Only this run\'s temporary record.', test: () => { pm.test('ok', () => pm.expect(body.ok).to.equal(true)); } }),
+  req('DELETE Staff — already deleted', 'DELETE', '/api/admin/internal/staff/{{internalStaffDeleteId}}', { status: 404 }),
+  req('GET Candidates — staff are not candidates', 'GET', '/api/admin/candidates', { q: { q: '{{runStamp}}' }, test: () => { pm.test('No recruitment candidate for the staff member', () => pm.expect(body.length).to.equal(0)); } }),
+]);
+
+const INTERNAL_LINK = '{\n  "title": "{{runTag}} STAFF LINK",\n  "description": "Temporary Postman internal assessment",\n  "tests": ["IQ", "{{testTypeKey}}"],\n  "counts": { "IQ": {{internalIqCount}}, "{{testTypeKey}}": 3 },\n  "minutes": { "IQ": 10, "{{testTypeKey}}": 10 },\n  "pass_marks": { "IQ": 0, "{{testTypeKey}}": 0 },\n  "language": "en",\n  "reusable": REUSABLE,\n  "expires_at": "{{internalExpiresAt}}"\n}';
+const internalLinks = folder('18 Internal Staff Assessments', 'Internal Staff assessment links: own area (business_area = INTERNAL_STAFF), own URL (/internal-assessment/<token>), description, reusable or single-use, expiry as a date and time. Uses the real IQ bank (read only) and the temporary MCQ type.', [
+  req('POST Create Internal Link — missing name', 'POST', '/api/admin/internal/links', { json: '{ "tests": ["{{testTypeKey}}"], "counts": { "{{testTypeKey}}": 1 }, "link_expiry_minutes": 60 }', status: 400, error: 'Please enter the assessment name.' }),
+  req('POST Create Internal Link — expiry in the past', 'POST', '/api/admin/internal/links', { json: '{ "title": "{{runTag}} PAST", "tests": ["{{testTypeKey}}"], "counts": { "{{testTypeKey}}": 1 }, "expires_at": "2020-01-01T00:00:00Z" }', status: 400, error: 'must be in the future' }),
+  req('POST Create Internal Link', 'POST', '/api/admin/internal/links', {
+    status: 201, json: INTERNAL_LINK.replace('REUSABLE', 'true'),
+    pre: () => { pm.environment.set('internalExpiresAt', new Date(Date.now() + 2 * 86400000).toISOString()); pm.environment.set('internalIqCount', String(Math.min(3, Number(env('iqCount')) || 1))); },
+    test: () => {
+      pm.test('Internal area, internal URL, reusable, open', () => { pm.expect(body.business_area).to.equal('INTERNAL_STAFF'); pm.expect(body.url_path).to.equal('/internal-assessment/' + body.token); pm.expect(body.reusable).to.equal(1); pm.expect(body.share_state).to.equal('open'); });
+      pm.test('Name, description, expiry date/time', () => { pm.expect(body.title).to.equal(env('runTag') + ' STAFF LINK'); pm.expect(body.description).to.equal('Temporary Postman internal assessment'); pm.expect(body.link_expires_at).to.equal(env('internalExpiresAt')); });
+      pm.test('Tests in order: IQ, then the MCQ test', () => pm.expect(body.stages.map((s) => [s.section, s.question_count])).to.eql([['IQ', Number(env('internalIqCount'))], [env('testTypeKey'), 3]]));
+      set('internalLinkId', String(body.id)); set('internalLinkToken', body.token);
+    },
+  }),
+  req('POST Create Internal Link — single use', 'POST', '/api/admin/internal/links', {
+    status: 201, json: INTERNAL_LINK.replace('REUSABLE', 'false').replace('STAFF LINK', 'STAFF SINGLE LINK'),
+    test: () => { pm.test('reusable = 0', () => pm.expect(body.reusable).to.equal(0)); set('internalSingleLinkId', String(body.id)); set('internalSingleLinkToken', body.token); },
+  }),
+  req('GET Internal Links', 'GET', '/api/admin/internal/links', {
+    test: () => {
+      pm.test('Only internal links; ours included with 0 started', () => {
+        body.forEach((l) => pm.expect(l.business_area).to.equal('INTERNAL_STAFF'));
+        const mine = body.find((l) => l.id === Number(env('internalLinkId')));
+        pm.expect(mine.candidates).to.equal(0); pm.expect(mine.url_path).to.match(/^\/internal-assessment\//);
+      });
+      pm.test('No recruitment link in the list', () => pm.expect(body.map((l) => l.id)).to.not.include(Number(env('linkId'))));
+    },
+  }),
+  req('GET Internal Link', 'GET', '/api/admin/internal/links/{{internalLinkId}}', { test: () => { pm.test('link + results (none yet)', () => { pm.expect(body.link.id).to.equal(Number(env('internalLinkId'))); pm.expect(body.results).to.eql([]); }); } }),
+  req('GET Internal Link — nonexistent', 'GET', '/api/admin/internal/links/999999999', { status: 404 }),
+  req('GET Internal Link — a recruitment link id', 'GET', '/api/admin/internal/links/{{linkId}}', { status: 404, desc: 'Isolation: the internal API never shows a recruitment link.' }),
+  req('GET Recruitment Link — an internal link id', 'GET', '/api/admin/links/{{internalLinkId}}', { status: 404, desc: 'Isolation: the recruitment API never shows an internal link.' }),
+  req('POST Disable Recruitment Link — an internal link id', 'POST', '/api/admin/links/{{internalLinkId}}/disable', { status: 404 }),
+  req('POST Disable Internal Link', 'POST', '/api/admin/internal/links/{{internalSingleLinkId}}/disable', { test: () => { pm.test('Disabled', () => { pm.expect(!!body.enabled).to.equal(false); pm.expect(body.share_state).to.equal('disabled'); }); } }),
+  req('GET Internal Exam — disabled link', 'GET', '/api/internal-exam/{{internalSingleLinkToken}}', { staff: 'X', test: () => { pm.test('state = disabled', () => pm.expect(body.state).to.equal('disabled')); } }),
+  req('POST Enable Internal Link', 'POST', '/api/admin/internal/links/{{internalSingleLinkId}}/enable', { test: () => { pm.test('Open', () => pm.expect(body.share_state).to.equal('open')); } }),
+  req('POST Regenerate Internal Link — unused', 'POST', '/api/admin/internal/links/{{internalSingleLinkId}}/regenerate', {
+    test: () => { pm.test('New token', () => pm.expect(body.token).to.not.equal(env('internalSingleLinkToken'))); set('oldInternalToken', env('internalSingleLinkToken')); set('internalSingleLinkToken', body.token); },
+  }),
+  req('GET Internal Exam — old token after regenerate', 'GET', '/api/internal-exam/{{oldInternalToken}}', { noAuth: true, status: 404 }),
+  req('POST Regenerate Internal Link — nonexistent', 'POST', '/api/admin/internal/links/999999999/regenerate', { status: 404 }),
+  req('POST Create Internal Link — spare (to delete)', 'POST', '/api/admin/internal/links', { status: 201, json: '{ "title": "{{runTag}} STAFF SPARE", "tests": ["{{testTypeKey}}"], "counts": { "{{testTypeKey}}": 1 }, "link_expiry_minutes": 60 }', test: () => { set('internalSpareLinkId', String(body.id)); } }),
+  req('DELETE Internal Link — unused', 'DELETE', '/api/admin/internal/links/{{internalSpareLinkId}}', { test: () => { pm.test('ok', () => pm.expect(body.ok).to.equal(true)); } }),
+  req('DELETE Internal Link — already deleted', 'DELETE', '/api/admin/internal/links/{{internalSpareLinkId}}', { status: 404 }),
+]);
+
+const snapshotAnswers = () => {
+  // The running test's questions of this attempt (its own snapshot): answer every one correctly.
+  const running = body.stages.find((s) => s.status === 'IN_PROGRESS');
+  const answers = {};
+  body.questions.filter((q) => q.section === running.section).forEach((q) => { answers[q.id] = q.correct_answer; });
+  pm.test('Snapshot of the running test found', () => pm.expect(Object.keys(answers).length).to.be.above(0));
+  set(P.var, answers);
+};
+const internalExam = folder('19 Internal Staff Exam', 'The public internal staff API (/api/internal-exam/<token>): the same engine as recruitment with its own links, cookie (lalco_staff_session) and records. Staff A and B share one reusable link; C uses the single-use link.', [
+  req('GET Internal Exam — invalid token', 'GET', '/api/internal-exam/postman-invalid-token', { noAuth: true, status: 404 }),
+  req('GET Internal Exam — a recruitment token', 'GET', '/api/internal-exam/{{linkToken}}', { noAuth: true, status: 404, desc: 'A recruitment link never opens through the internal API.' }),
+  req('GET Recruitment Exam — an internal token', 'GET', '/api/exam/{{internalLinkToken}}', { noAuth: true, status: 404, desc: 'An internal link never opens through the recruitment API.' }),
+  req('GET Internal Exam — Staff A opens the link', 'GET', '/api/internal-exam/{{internalLinkToken}}', {
+    staff: 'A', pre: () => { pm.environment.set('internalStaffSession', ''); },
+    test: () => {
+      pm.test('ready, internal area, 2 tests', () => { pm.expect(body.state).to.equal('ready'); pm.expect(body.business_area).to.equal('INTERNAL_STAFF'); pm.expect(body.tests.length).to.equal(2); });
+      const c = pm.response.headers.all().find((h) => h.key.toLowerCase() === 'set-cookie');
+      pm.test('Own staff session cookie, scoped to /api/internal-exam/<token>', () => { pm.expect(c.value).to.match(/^lalco_staff_session=/); pm.expect(c.value).to.match(/HttpOnly/i); pm.expect(c.value).to.include('Path=/api/internal-exam/' + env('internalLinkToken')); });
+    },
+  }),
+  req('POST Start — missing employee ID', 'POST', '/api/internal-exam/{{internalLinkToken}}/start', { staff: 'A', json: { name: 'x' }, status: 400, error: 'employee_id_required' }),
+  req('POST Start — missing name', 'POST', '/api/internal-exam/{{internalLinkToken}}/start', { staff: 'A', json: { employee_id: 'x' }, status: 400, error: 'name_required' }),
+  req('POST Start — Staff A', 'POST', '/api/internal-exam/{{internalLinkToken}}/start', {
+    staff: 'A', json: '{ "name": "{{runTag}} STAFF A (typed)", "employee_id": "{{runStamp}}-a", "department": "typed", "phone": "020 0000 0302" }',
+    desc: 'Staff A enters the Employee ID HR created (other case): the attempt joins that staff record and HR\'s details are kept.',
+    test: () => {
+      pm.test('IQ running, own questions, no answers sent', () => { pm.expect(body.state).to.equal('in_progress'); pm.expect(body.section).to.equal('IQ'); pm.expect(body.questions.length).to.equal(Number(env('internalIqCount'))); body.questions.forEach((q) => pm.expect(q).to.not.have.any.keys('correct_answer', 'max_marks')); });
+      set('internalQuestionsA', body.questions.map((q) => q.id));
+    },
+  }),
+  req('GET Internal Exam — Staff A refreshes', 'GET', '/api/internal-exam/{{internalLinkToken}}', { staff: 'A', test: () => { pm.test('Same questions, same order', () => pm.expect(body.questions.map((q) => q.id)).to.eql(getJSON('internalQuestionsA'))); } }),
+  req('GET Internal Exam — Staff B opens the same link', 'GET', '/api/internal-exam/{{internalLinkToken}}', { staff: 'B', pre: () => { pm.environment.set('internalStaffSessionB', ''); }, test: () => { pm.test('B starts fresh', () => { pm.expect(body.state).to.equal('ready'); pm.expect(env('internalStaffSessionB')).to.not.equal(env('internalStaffSession')); }); } }),
+  req('POST Start — Staff B (new employee)', 'POST', '/api/internal-exam/{{internalLinkToken}}/start', {
+    staff: 'B', json: staffStart('B'),
+    test: () => { pm.test('B has own snapshot', () => { pm.expect(body.state).to.equal('in_progress'); pm.expect(body.questions.map((q) => q.id).filter((id) => getJSON('internalQuestionsA').includes(id))).to.eql([]); }); set('internalQuestionsB', body.questions.map((q) => q.id)); },
+  }),
+  req('PUT Answer — Staff A tries to answer B\'s question', 'PUT', '/api/internal-exam/{{internalLinkToken}}/answer', { staff: 'A', json: '{ "question_id": {{questionOfStaffB}}, "answer": "A" }', pre: () => { pm.variables.set('questionOfStaffB', getJSON('internalQuestionsB')[0]); }, status: 400, error: 'unknown_question' }),
+  req('POST Focus Lost — Staff A', 'POST', '/api/internal-exam/{{internalLinkToken}}/focus-lost', { staff: 'A', test: () => { pm.test('ok', () => pm.expect(body.ok).to.equal(true)); } }),
+  req('GET Internal Link — find the attempts', 'GET', '/api/admin/internal/links/{{internalLinkId}}', {
+    test: () => {
+      const a = body.results.find((r) => r.staff && r.staff.employee_id === env('runStamp') + '-A');
+      const b = body.results.find((r) => r.staff && r.staff.employee_id === env('runStamp') + '-B');
+      pm.test('A joined HR\'s record (HR name kept), B got a new staff record', () => { pm.expect(a.staff.id).to.equal(Number(env('internalStaffId'))); pm.expect(a.staff.name).to.equal(env('runTag') + ' STAFF A'); pm.expect(b.staff.id).to.not.equal(a.staff.id); });
+      set('internalAssessmentId', String(a.id)); set('internalResultB', String(b.id));
+    },
+  }),
+  req('GET Internal Result — Staff A snapshot (IQ answers)', 'GET', '/api/admin/internal/results/{{internalAssessmentId}}', { P: { var: 'internalAnswersA1' }, test: [snapshotAnswers] }),
+  req('POST Submit — Staff A, IQ', 'POST', '/api/internal-exam/{{internalLinkToken}}/submit', {
+    staff: 'A', json: '{ "answers": {{internalAnswersA1}} }',
+    test: () => { pm.test('All correct -> LALCO IQ 150; next test waiting; no IQ % for the employee', () => { pm.expect(body.state).to.equal('next_test'); pm.expect(body.last_result.lalco_iq_score).to.equal(150); pm.expect(body.last_result).to.not.have.property('percent'); }); },
+  }),
+  req('POST Continue — Staff A', 'POST', '/api/internal-exam/{{internalLinkToken}}/continue', { staff: 'A', test: () => { pm.test('Second test running', () => { pm.expect(body.state).to.equal('in_progress'); pm.expect(body.section).to.equal(env('testTypeKey')); pm.expect(body.questions.length).to.equal(3); }); } }),
+  req('GET Internal Result — Staff A snapshot (second test)', 'GET', '/api/admin/internal/results/{{internalAssessmentId}}', { P: { var: 'internalAnswersA2' }, test: [snapshotAnswers] }),
+  req('POST Submit — Staff A, second test', 'POST', '/api/internal-exam/{{internalLinkToken}}/submit', { staff: 'A', json: '{ "answers": {{internalAnswersA2}} }', test: () => { pm.test('Submitted, Pass', () => { pm.expect(body.state).to.equal('submitted'); pm.expect(body.last_result.result).to.equal('Pass'); }); } }),
+  req('POST Submit — Staff A again', 'POST', '/api/internal-exam/{{internalLinkToken}}/submit', { staff: 'A', json: { answers: {} }, status: 409 }),
+  req('GET Internal Exam Image — after submitting (not served)', 'GET', '/api/internal-exam/{{internalLinkToken}}/images/{{imageId}}', { staff: 'A', status: 404, desc: 'Pictures are only served to an employee while the test that contains them is running.' }),
+  req('GET Internal Exam — Staff C opens the single-use link', 'GET', '/api/internal-exam/{{internalSingleLinkToken}}', { staff: 'C', pre: () => { pm.environment.set('internalStaffSessionC', ''); }, test: () => { pm.test('ready', () => pm.expect(body.state).to.equal('ready')); } }),
+  req('POST Start — Staff C', 'POST', '/api/internal-exam/{{internalSingleLinkToken}}/start', { staff: 'C', json: staffStart('C'), test: () => { pm.test('in_progress', () => pm.expect(body.state).to.equal('in_progress')); } }),
+  req('GET Internal Exam — Staff D on the used single-use link', 'GET', '/api/internal-exam/{{internalSingleLinkToken}}', { staff: 'D', pre: () => { pm.environment.set('internalStaffSessionD', ''); }, test: () => { pm.test('state = used', () => pm.expect(body.state).to.equal('used')); } }),
+  req('POST Start — Staff D refused', 'POST', '/api/internal-exam/{{internalSingleLinkToken}}/start', { staff: 'D', json: staffStart('D'), status: 409, test: () => { pm.test('Refused: used', () => pm.expect(body.state).to.equal('used')); } }),
+  req('GET Internal Exam — a candidate session is a stranger here', 'GET', '/api/internal-exam/{{internalLinkToken}}', {
+    cookie: 'lalco_staff_session={{candidateSessionA}}; lalco_candidate_session={{candidateSessionA}}',
+    desc: 'Candidate A\'s secret (recruitment) sent to the internal link: it opens nothing.',
+    test: () => { pm.test('New visitor, no data', () => { pm.expect(body.state).to.equal('ready'); pm.expect(body).to.not.have.property('questions'); }); },
+  }),
+  req('GET Recruitment Exam — a staff session is a stranger there', 'GET', '/api/exam/{{iqLinkToken}}', {
+    cookie: 'lalco_candidate_session={{internalStaffSession}}; lalco_staff_session={{internalStaffSession}}',
+    desc: 'Staff A\'s secret sent to a recruitment link: it opens nothing.',
+    test: () => { pm.test('New visitor, no data', () => { pm.expect(body.state).to.equal('ready'); pm.expect(body).to.not.have.property('questions'); }); },
+  }),
+  req('GET Internal Staff Page — public HTML', 'GET', '/internal-assessment/{{internalLinkToken}}', {
+    noAuth: true, type: 'any', desc: 'The internal staff page (/internal-assessment/<token>) is served.',
+    test: () => { pm.test('HTML page', () => { pm.expect(pm.response.code).to.equal(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('text/html'); pm.expect(pm.response.text()).to.include('/static/exam.js'); }); },
+  }),
+]);
+
+const internalResults = folder('20 Internal Staff Results', 'Results, detail, reports, exports and dashboard of the internal area only. Checks that recruitment data and screens are not affected.', [
+  req('GET Internal Results', 'GET', '/api/admin/internal/results', {
+    P: { fields: ['Staff Name', 'Employee ID', 'Department', 'Position', 'Assessment', 'IQ Test Score', 'Behavioral Assessment Score', 'Calculation Score', 'Essay Score', 'Pass / Not Pass Status', 'Date and Time'] },
+    test: () => {
+      pm.test('The 11 result fields', () => pm.expect(body.fields).to.eql(P.fields));
+      const a = body.results.find((r) => r.id === Number(env('internalAssessmentId')));
+      pm.test('Staff A: HR record, assessment, IQ 150 / 150, PASS', () => pm.expect([a.values[0], a.values[1], a.values[2], a.values[3], a.values[4], a.values[5], a.values[9]]).to.eql(
+        [env('runTag') + ' STAFF A', env('runStamp') + '-A', 'Postman Department', 'Senior Tester', env('runTag') + ' STAFF LINK', '150 / 150', 'PASS']));
+      pm.test('Staff B: IN PROGRESS', () => pm.expect(body.results.find((r) => r.id === Number(env('internalResultB'))).values[9]).to.equal('IN PROGRESS'));
+    },
+  }),
+  req('GET Internal Results — filter PASS in the department', 'GET', '/api/admin/internal/results', { q: { status: 'Pass', department: 'Postman Department' }, test: () => { pm.test('Only passed results of that department', () => { pm.expect(body.results.map((r) => r.id)).to.include(Number(env('internalAssessmentId'))); body.results.forEach((r) => { pm.expect(r.values[9]).to.equal('PASS'); pm.expect(r.values[2]).to.equal('Postman Department'); }); }); } }),
+  req('GET Internal Result — detail', 'GET', '/api/admin/internal/results/{{internalAssessmentId}}', {
+    test: () => {
+      pm.test('Staff, entered details, 2 tests, snapshot', () => { pm.expect(body.staff.id).to.equal(Number(env('internalStaffId'))); pm.expect(body.entered_details.name).to.equal(env('runTag') + ' STAFF A (typed)'); pm.expect(body.tests.length).to.equal(2); pm.expect(body.questions.length).to.equal(Number(env('internalIqCount')) + 3); });
+      pm.test('Same scoring engine: LALCO 150, question count = snapshot, no mismatch', () => { pm.expect(body.tests[0].lalco_iq_score).to.equal(150); pm.expect(body.tests[0].questions_assigned).to.equal(body.tests[0].question_count); pm.expect(body.tests[0].review_required).to.equal(null); });
+    },
+  }),
+  req('GET Internal Result — a recruitment attempt', 'GET', '/api/admin/internal/results/{{assessmentId}}', { status: 404, desc: 'Isolation: a recruitment candidate\'s attempt is not an internal result.' }),
+  req('GET Recruitment Assessment — an internal result', 'GET', '/api/admin/assessments/{{internalAssessmentId}}', { status: 404, desc: 'Isolation: the recruitment review cannot open an internal staff result.' }),
+  req('PUT Essay Marks (recruitment route) — an internal result', 'PUT', '/api/admin/assessments/{{internalAssessmentId}}/essay-marks', { json: { marks: {} }, status: 404 }),
+  req('PUT Essay Marks (internal) — attempt not submitted', 'PUT', '/api/admin/internal/results/{{internalResultB}}/essay-marks', { json: { marks: {} }, status: 400, error: 'after the assessment is submitted' }),
+  req('GET Export Internal Result PDF', 'GET', '/api/admin/internal/results/{{internalAssessmentId}}/export.pdf', { type: 'pdf', maxMs: 5000 }),
+  req('GET Export Internal Result Word', 'GET', '/api/admin/internal/results/{{internalAssessmentId}}/export.docx', { type: 'docx', maxMs: 5000 }),
+  req('GET Export Internal Result Excel', 'GET', '/api/admin/internal/results/{{internalAssessmentId}}/export.xlsx', { type: 'xlsx', maxMs: 5000 }),
+  req('GET Export Internal Result — unknown format', 'GET', '/api/admin/internal/results/{{internalAssessmentId}}/export.txt', { status: 404 }),
+  req('GET Export Internal Staff Report (Excel)', 'GET', '/api/admin/internal/export/results.xlsx', { type: 'xlsx', maxMs: 8000 }),
+  req('GET Staff Member — with the result', 'GET', '/api/admin/internal/staff/{{internalStaffId}}', { test: () => { pm.test('1 result, completed, PASS', () => { pm.expect(body.results.length).to.equal(1); pm.expect(body.staff.completed).to.equal(1); pm.expect(body.staff.last_result).to.equal('Pass'); }); } }),
+  req('GET Internal Dashboard — after', 'GET', '/api/admin/internal/dashboard', {
+    desc: 'After this run: 2 more staff (A was created by HR; B and C by starting — D was refused), 3 more assessments (A completed, B and C in progress), 1 more PASS, 2 more active links.',
+    test: () => {
+      const b = getJSON('internalBaseline');
+      pm.test('Counters moved as expected', () => {
+        pm.expect(body.totalStaff - b.totalStaff).to.equal(3);
+        pm.expect(body.totalAssessments - b.totalAssessments).to.equal(3);
+        pm.expect(body.completed - b.completed).to.equal(1);
+        pm.expect(body.inProgress - b.inProgress).to.equal(2);
+        pm.expect(body.passed - b.passed).to.equal(1);
+        pm.expect(body.activeLinks - b.activeLinks).to.equal(1);
+      });
+      pm.test('Recent results include Staff A', () => pm.expect(body.recentResults.map((r) => r.id)).to.include(Number(env('internalAssessmentId'))));
+      pm.test('The new link is in the expiring-within-7-days list', () => pm.expect(body.expiringLinks.map((l) => l.id)).to.include(Number(env('internalLinkId'))));
+    },
+  }),
+  req('GET Recruitment Dashboard — unchanged by the internal tests', 'GET', '/api/admin/dashboard', { test: () => { pm.test('Recruitment completed assessments and candidates unchanged', () => { pm.expect(body.completed_assessments).to.equal(Number(env('recruitmentCompletedBefore'))); pm.expect(body.total_candidates).to.equal(Number(env('recruitmentTotalBefore'))); }); } }),
+  req('GET Standard Report — no staff in the recruitment report', 'GET', '/api/admin/report/standard', { test: () => { pm.test('No internal staff row', () => pm.expect(body.rows.filter((r) => r.values[0].includes(' STAFF ')).length).to.equal(0)); } }),
+  req('GET IQ Results — recruitment only', 'GET', '/api/admin/results/iq', { test: () => { pm.test('The internal IQ result is not listed', () => pm.expect(body.map((r) => r.id)).to.not.include(Number(env('internalAssessmentId')))); } }),
 ]);
 
 // ================================================================================
-// 18 Security / Negative Tests
+// 21 Security / Negative Tests
 // ================================================================================
 const unauth = (name, method, p, extra = {}) => req(`${name} — no session`, method, p, { noAuth: true, status: 401, error: 'Please log in.', ...extra });
-const security = folder('18 Security / Negative Tests', 'Admin endpoints without a session, with a bad session and with a candidate cookie; malformed input; invalid ids; unknown routes. Every response is checked for stack traces (collection-level test).', [
+const security = folder('21 Security / Negative Tests', 'Admin endpoints without a session, with a bad session and with a candidate cookie; malformed input; invalid ids; unknown routes. Every response is checked for stack traces (collection-level test).', [
   unauth('GET Dashboard', 'GET', '/api/admin/dashboard'),
   unauth('GET Candidates', 'GET', '/api/admin/candidates'),
   unauth('GET Export Candidate PDF', 'GET', '/api/admin/candidates/{{iqCandidateS1}}/export.pdf'),
@@ -1016,6 +1231,15 @@ const security = folder('18 Security / Negative Tests', 'Admin endpoints without
   unauth('DELETE Candidate', 'DELETE', '/api/admin/candidates/999999999'),
   unauth('GET Link', 'GET', '/api/admin/links/{{iqLinkId}}'),
   unauth('PUT Essay Marks', 'PUT', '/api/admin/assessments/{{assessmentId}}/essay-marks', { json: { marks: {} } }),
+  unauth('GET Internal Dashboard', 'GET', '/api/admin/internal/dashboard'),
+  unauth('GET Internal Staff', 'GET', '/api/admin/internal/staff'),
+  unauth('POST Create Staff', 'POST', '/api/admin/internal/staff', { json: { name: 'x', employee_id: 'y' } }),
+  unauth('GET Internal Links', 'GET', '/api/admin/internal/links'),
+  unauth('POST Create Internal Link', 'POST', '/api/admin/internal/links', { json: { title: 'x' } }),
+  unauth('GET Internal Results', 'GET', '/api/admin/internal/results'),
+  unauth('GET Export Internal Staff Report', 'GET', '/api/admin/internal/export/results.xlsx'),
+  req('GET Internal Staff — a staff session cannot use the admin API', 'GET', '/api/admin/internal/staff', { staff: 'A', status: 401, error: 'Please log in.' }),
+  req('GET Internal Staff — a candidate session cannot use the admin API', 'GET', '/api/admin/internal/staff', { cand: 'S1', status: 401, error: 'Please log in.' }),
   req('GET Candidates — forged session token', 'GET', '/api/admin/candidates', { cookie: 'hr_session=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOjF9.forged', status: 401, error: 'Your session has ended' }),
   req('GET Candidates — candidate cookie cannot use the admin API', 'GET', '/api/admin/candidates', { cand: 'S1', status: 401, error: 'Please log in.' }),
   req('POST Create Candidate — malformed JSON', 'POST', '/api/admin/candidates', { json: '{ "name": "broken", ', status: 400, error: 'Invalid request.' }),
@@ -1050,6 +1274,12 @@ const cleanup = folder('99 Cleanup', 'Removes ONLY temporary data: candidates, l
   sweep('DELETE Temporary Links', '/api/admin/assessments', 'links', () => {
     const mine = body.filter((x) => x.kind === 'link' && String(x.title).startsWith('POSTMAN TEST ')).map((l) => ({ url: '/api/admin/links/' + l.id, label: l.title }));
   }),
+  sweep('DELETE Temporary Internal Staff', '/api/admin/internal/staff', 'staff', () => {
+    const mine = body.staff.filter((x) => String(x.name).startsWith('POSTMAN TEST ')).map((x) => ({ url: '/api/admin/internal/staff/' + x.id, label: x.name }));
+  }, 'Internal staff named "POSTMAN TEST …" and (by cascade) their attempts.'),
+  sweep('DELETE Temporary Internal Links', '/api/admin/internal/links', 'internal links', () => {
+    const mine = body.filter((l) => String(l.title).startsWith('POSTMAN TEST ')).map((l) => ({ url: '/api/admin/internal/links/' + l.id, label: l.title }));
+  }),
   sweep('DELETE Temporary Questions', '/api/admin/questions', 'questions', () => {
     const temp = body.test_types.filter((t) => String(t.name).startsWith('POSTMAN TEST ')).map((t) => t.key);
     const mine = body.questions.filter((q) => temp.includes(q.section) || String(q.question_text).startsWith('POSTMAN TEST ')).map((q) => ({ url: '/api/admin/questions/' + q.id, label: q.question_text }));
@@ -1068,6 +1298,12 @@ const cleanup = folder('99 Cleanup', 'Removes ONLY temporary data: candidates, l
       pm.test('Question counts per test type = baseline', () => Object.keys(counts).forEach((k) => pm.expect(body.total_counts[k], k).to.equal(counts[k])));
       pm.test('Test types = baseline', () => pm.expect(body.test_types.map((t) => t.key)).to.eql(getJSON('baselineTypes')));
       pm.test('Categories = baseline', () => pm.expect(body.categories.length).to.equal(Number(env('baselineCategories'))));
+    },
+  }),
+  req('GET Internal Dashboard — back to the baseline', 'GET', '/api/admin/internal/dashboard', {
+    test: () => {
+      const b = getJSON('internalBaseline');
+      pm.test('Internal staff, assessments and links = baseline', () => { pm.expect(body.totalStaff).to.equal(b.totalStaff); pm.expect(body.totalAssessments).to.equal(b.totalAssessments); pm.expect(body.activeLinks).to.equal(b.activeLinks); });
     },
   }),
   req('POST Logout — end of run', 'POST', '/api/admin/auth/logout', { test: () => { pm.test('ok', () => pm.expect(body.ok).to.equal(true)); } }),
@@ -1102,13 +1338,13 @@ const collection = {
       pm.test(`Response time under ${maxMs} ms`, () => pm.expect(pm.response.responseTime).to.be.below(maxMs));
       pm.test('No server error (5xx)', () => pm.expect(pm.response.code, pm.response.text().slice(0, 200)).to.be.below(500));
       const ct = pm.response.headers.get('Content-Type') || '';
-      pm.test('API did not answer with an HTML page', () => pm.expect(ct).to.not.include('text/html'));
+      if (pm.request.url.getPath().startsWith('/api/')) pm.test('API did not answer with an HTML page', () => pm.expect(ct).to.not.include('text/html'));
       if (ct.includes('json')) {
         pm.test('No stack trace or internal error details in the response', () => pm.expect(pm.response.text()).to.not.match(/\bat [\w.<>]+ \(.*:\d+:\d+\)|SqliteError|TypeError:|ReferenceError:|node_modules/));
       }
     }) } },
   ],
-  item: [health, authFolder, dashboard, candidates, testTypes, cats, questions, imports, imagesFolder, assessments, links, exam, iq, timer, results, settings, internal, security, cleanup],
+  item: [health, authFolder, dashboard, candidates, testTypes, cats, questions, imports, imagesFolder, assessments, links, exam, iq, timer, results, settings, internalStaff, internalLinks, internalExam, internalResults, security, cleanup],
 };
 
 // Import tests use the collection-provided helper (eval of libUsable); replace the placeholder.
@@ -1120,6 +1356,9 @@ const VARS = ['runTag', 'candidateId', 'questionId', 'pictureQuestionId', 'image
   'candidateSessionA', 'candidateSessionB', 'candidateSessionC', 'candidateSessionD', 'candidateSessionX', 'candidateSessionS1', 'candidateSessionS2', 'candidateSessionS3',
   'questionsA', 'questionsB', 'questionsC', 'remainingA', 'essayQuestionA', 'essayMax', 'iqCount', 'iqBankSize', 'mcqActiveCount', 'translator',
   'iqIdsS1', 'iqIdsS2', 'iqIdsS3', 'iqAttemptS1', 'iqAttemptS2', 'iqAttemptS3', 'iqCandidateS1', 'iqCandidateS2', 'iqCandidateS3',
+  'runStamp', 'internalStaffId', 'internalAssessmentId', 'internalLinkId', 'internalLinkToken', 'internalStaffSession', 'internalStaffSessionB', 'internalStaffSessionC',
+  'internalStaffSessionD', 'internalStaffSessionX', 'internalStaffDeleteId', 'internalSingleLinkId', 'internalSingleLinkToken', 'oldInternalToken', 'internalSpareLinkId', 'internalResultB', 'internalQuestionsA',
+  'internalQuestionsB', 'internalAnswersA1', 'internalAnswersA2', 'internalBaseline', 'internalExpiresAt', 'internalIqCount', 'recruitmentCompletedBefore', 'recruitmentTotalBefore',
   'iqAnswersS1', 'iqAnswersS2', 'iqAnswersS3', 'iqExpectedS1', 'iqExpectedS2', 'iqExpectedS3', 'iqBands',
   'importRowsTxt', 'importRowsXlsx', 'importRowsBehavioral', 'importRowsCalc', 'baselineCounts', 'baselineTypes', 'baselineCategories', 'baselineCompleted', 'settingsBefore'];
 const environment = (label, baseUrl, mode) => ({
@@ -1135,10 +1374,10 @@ const environment = (label, baseUrl, mode) => ({
   _postman_variable_scope: 'environment',
 });
 
-fs.mkdirSync(path.join(ROOT, 'environments'), { recursive: true });
+fs.mkdirSync(path.join(ROOT, 'env'), { recursive: true });
 fs.writeFileSync(path.join(ROOT, 'LALCO-HR-Recruitment-System.postman_collection.json'), JSON.stringify(collection, null, 2) + '\n');
-fs.writeFileSync(path.join(ROOT, 'environments', 'LALCO-HR-Local.postman_environment.json'), JSON.stringify(environment('Local', 'http://localhost:3000', 'LOCAL'), null, 2) + '\n');
-fs.writeFileSync(path.join(ROOT, 'environments', 'LALCO-HR-Production.postman_environment.json'), JSON.stringify(environment('Production', 'https://hr-recruitment-system-production.up.railway.app', 'PRODUCTION'), null, 2) + '\n');
+fs.writeFileSync(path.join(ROOT, 'env', 'LALCO-HR-Local.postman_environment.json'), JSON.stringify(environment('Local', 'http://localhost:3000', 'LOCAL'), null, 2) + '\n');
+fs.writeFileSync(path.join(ROOT, 'env', 'LALCO-HR-Production.postman_environment.json'), JSON.stringify(environment('Production', 'https://hr-recruitment-system-production.up.railway.app', 'PRODUCTION'), null, 2) + '\n');
 fs.writeFileSync(path.join(ROOT, 'tools', 'inventory.json'), JSON.stringify([...new Set(inventory)].sort(), null, 2) + '\n');
 let requests = 0; let tests = 0;
 const count = (items) => items.forEach((it) => { if (it.item) count(it.item); else { requests++; tests += it.event.find((e) => e.listen === 'test').script.exec.filter((l) => l.includes('pm.test(')).length; } });

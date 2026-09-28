@@ -257,9 +257,9 @@ function dashboard() {
     average_test_score: scored.length ? Math.round((scored.reduce((s, p) => s + p.test_score, 0) / scored.length) * 10) / 10 : null,
     highest_iq: withIq[0] ? { id: withIq[0].id, name: withIq[0].name, iq_score: withIq[0].iq_score, iq_text: withIq[0].iq_text, iq_correct_text: withIq[0].iq_correct_text,
       lalco_iq_score: withIq[0].lalco_iq_score, iq_category: withIq[0].iq_category } : null,
-    completed_assessments: count("SELECT COUNT(*) AS n FROM assessments WHERE status = 'SUBMITTED'"),
-    pending_assessments: count(`SELECT COUNT(*) AS n FROM assessments WHERE status = 'IN_PROGRESS'
-      OR (status = 'NOT_STARTED' AND enabled = 1 AND link_expires_at > ?)`, nowIso),
+    completed_assessments: count("SELECT COUNT(*) AS n FROM assessments WHERE status = 'SUBMITTED' AND business_area = 'RECRUITMENT'"),
+    pending_assessments: count(`SELECT COUNT(*) AS n FROM assessments WHERE business_area = 'RECRUITMENT' AND (status = 'IN_PROGRESS'
+      OR (status = 'NOT_STARTED' AND enabled = 1 AND link_expires_at > ?))`, nowIso),
     recent: people.filter((p) => p.last_test_date).sort((a, b) => b.last_test_date.localeCompare(a.last_test_date)).slice(0, 8),
     summary: {
       total: people.length,

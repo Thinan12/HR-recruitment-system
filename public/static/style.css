@@ -265,3 +265,18 @@ td.failed { font-weight: 700; }
 /* Import preview: long HR-only guidance stays short until hovered */
 .clamp { max-height: 6.5em; overflow: hidden; }
 .clamp:hover { max-height: none; }
+
+/* Nav groups: Recruitment | Internal Office Staff */
+.nav-group { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: #9fbad6; align-self: center; padding: 0 2px 0 10px; border-left: 1px solid rgba(255,255,255,.2); margin-left: 4px; white-space: nowrap; }
+.nav-group:first-child { border-left: 0; margin-left: 0; padding-left: 0; }
+.nav-group:empty { padding: 0; }
+.internal-banner { display: inline-block; background: #e8f1ea; color: #1e5b34; border: 1px solid #b8d6c1; border-radius: 4px; padding: 2px 8px; font-size: 12px; font-weight: 600; letter-spacing: .03em; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 0 16px; }
+@media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } }
+a.stat { color: inherit; text-decoration: none; display: block; }
+a.stat:hover { border-color: #9fbad6; }
+/* Two nav sections: keep them on one line on normal screens */
+.nav { gap: 2px; }
+.nav a { padding: 8px 9px; font-size: 14.5px; white-space: nowrap; }
+.nav-group { padding-left: 8px; margin-left: 2px; }
+.link-box .internal-banner { align-self: center; white-space: nowrap; }

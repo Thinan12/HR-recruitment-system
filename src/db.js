@@ -244,6 +244,31 @@ addMissingColumns('assessments', [['link_id', 'INTEGER REFERENCES assessment_lin
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_attempt_session ON assessments(link_id, session_hash) WHERE link_id IS NOT NULL');
 db.exec('CREATE INDEX IF NOT EXISTS idx_assessments_link ON assessments(link_id)');
 
+// Two business areas share the assessment engine but never their records:
+// RECRUITMENT (external candidates, the candidates table) and INTERNAL_STAFF
+// (existing employees, the internal_staff table). Every link and every attempt
+// says which area it belongs to; existing rows are RECRUITMENT.
+db.exec(`CREATE TABLE IF NOT EXISTS internal_staff (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  employee_id TEXT NOT NULL,
+  employee_key TEXT NOT NULL,
+  phone TEXT NOT NULL DEFAULT '',
+  email TEXT NOT NULL DEFAULT '',
+  department TEXT NOT NULL DEFAULT '',
+  position TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'Active',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+)`);
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_staff_employee ON internal_staff(employee_key)');
+addMissingColumns('assessment_links', [['business_area', "TEXT NOT NULL DEFAULT 'RECRUITMENT'"], ['description', "TEXT NOT NULL DEFAULT ''"],
+  ['reusable', 'INTEGER NOT NULL DEFAULT 1']]);
+addMissingColumns('assessments', [['business_area', "TEXT NOT NULL DEFAULT 'RECRUITMENT'"],
+  ['staff_id', 'INTEGER REFERENCES internal_staff(id) ON DELETE CASCADE'], ['staff_details', 'TEXT']]);
+db.exec('CREATE INDEX IF NOT EXISTS idx_assessments_area ON assessments(business_area, status)');
+db.exec('CREATE INDEX IF NOT EXISTS idx_assessments_staff ON assessments(staff_id)');
+
 const DEFAULT_SETTINGS = {
   default_time_minutes: '30',
   default_link_expiry_minutes: '1440',

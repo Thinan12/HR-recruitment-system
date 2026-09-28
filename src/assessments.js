@@ -125,7 +125,9 @@ class InputError extends Error {}
 
 // One link can hold several tests. They always run in the order
 // IQ -> General -> Calculation -> Essay; only the ones chosen are included.
-function createAssessment(input) {
+// opts.area: 'RECRUITMENT' (default) or 'INTERNAL_STAFF'. Internal links may also
+// have a description, be single-use (reusable = false) and expire at a date/time.
+function createAssessment(input, { area = 'RECRUITMENT' } = {}) {
   const settings = getSettings();
   let tests;
   if (Array.isArray(input.tests)) {
@@ -180,18 +182,33 @@ function createAssessment(input) {
   const included = Object.keys(sections);
   if (included.length === 0) throw new InputError('Please choose at least one test with at least 1 question.');
 
-  const expiry = Number(input.link_expiry_minutes || settings.default_link_expiry_minutes);
-  if (!Number.isInteger(expiry) || expiry < 1 || expiry > 60 * 24 * 90) throw new InputError('Link expiry must be between 1 minute and 90 days.');
+  const created = now();
+  let expiry;
+  let expiresAt;
+  if (input.expires_at != null && input.expires_at !== '') {
+    // A date and time (ISO 8601, e.g. 2026-10-01T17:00:00+07:00).
+    const t = Date.parse(input.expires_at);
+    if (!Number.isFinite(t)) throw new InputError('Please enter the link expiry as a date and time.');
+    expiry = Math.ceil((t - Date.parse(created)) / 60000);
+    if (expiry < 1 || expiry > 60 * 24 * 90) throw new InputError('The link expiry must be in the future and at most 90 days away.');
+    expiresAt = new Date(t).toISOString();
+  } else {
+    expiry = Number(input.link_expiry_minutes || settings.default_link_expiry_minutes);
+    if (!Number.isInteger(expiry) || expiry < 1 || expiry > 60 * 24 * 90) throw new InputError('Link expiry must be between 1 minute and 90 days.');
+    expiresAt = addMinutes(created, expiry);
+  }
+  const description = area === 'INTERNAL_STAFF' ? String(input.description ?? '').trim().slice(0, 1000) : '';
+  const reusable = area === 'INTERNAL_STAFF' && (input.reusable === false || input.reusable === 0 || input.reusable === '0' || input.reusable === 'false') ? 0 : 1;
 
   const title = String(input.title ?? '').trim().slice(0, 200);
-  const created = now();
+  if (area === 'INTERNAL_STAFF' && !title) throw new InputError('Please enter the assessment name.');
   const type = included.length === 1 ? included[0] : 'COMBINED';
   const total = included.reduce((sum, sec) => sum + minutes[sec], 0);
   const stages = included.map((sec) => ({ section: sec, question_count: sections[sec], time_limit_minutes: minutes[sec], pass_mark: passMarks[sec] }));
   const id = db.prepare(`INSERT INTO assessment_links
-    (token, title, assessment_type, sections, stages, time_limit_minutes, link_expiry_minutes, link_expires_at, language, eligibility_mark, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(newToken(), title, type, JSON.stringify(sections), JSON.stringify(stages), total, expiry, addMinutes(created, expiry), language, eligibility, created).lastInsertRowid;
+    (token, title, assessment_type, sections, stages, time_limit_minutes, link_expiry_minutes, link_expires_at, language, eligibility_mark, created_at, business_area, description, reusable)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(newToken(), title, type, JSON.stringify(sections), JSON.stringify(stages), total, expiry, expiresAt, language, eligibility, created, area, description, reusable).lastInsertRowid;
   return getLink(id);
 }
 
@@ -201,14 +218,18 @@ function createAssessment(input) {
 // row) with their own questions, timers, answers and results.
 
 const getLink = (id) => db.prepare('SELECT * FROM assessment_links WHERE id = ?').get(id);
-const linkByToken = (token) => db.prepare('SELECT * FROM assessment_links WHERE token = ?').get(token);
+// A link is found only in its own business area: a recruitment token never opens
+// an internal staff assessment, and the reverse.
+const linkByToken = (token, area = 'RECRUITMENT') => db.prepare('SELECT * FROM assessment_links WHERE token = ? AND business_area = ?').get(token, area);
 
 // open / disabled / expired: whether NEW candidates may start. Candidates who
 // already started keep their own attempt and timer whatever happens here.
+// A single-use link (reusable = 0) is 'used' once somebody started it.
 function linkShareState(link) {
   if (!link) return 'not_found';
   if (!link.enabled) return 'disabled';
   if (Date.now() > Date.parse(link.link_expires_at)) return 'expired';
+  if (link.reusable === 0 && db.prepare('SELECT 1 FROM assessments WHERE link_id = ? LIMIT 1').get(link.id)) return 'used';
   return 'open';
 }
 
@@ -239,20 +260,21 @@ const startFromLinkTx = db.transaction((linkId, info, secret) => {
   if (existing) return existing.id;
   if (linkShareState(link) !== 'open') throw new InputError('link_closed');
   const created = now();
+  // The attempt belongs to the link's business area (recruitment candidate or internal staff).
   const aid = db.prepare(`INSERT INTO assessments
-    (token, assessment_type, sections, time_limit_minutes, link_expiry_minutes, link_expires_at, language, eligibility_mark, created_at, link_id, session_hash)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    (token, assessment_type, sections, time_limit_minutes, link_expiry_minutes, link_expires_at, language, eligibility_mark, created_at, link_id, session_hash, business_area)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(newToken(), link.assessment_type, link.sections, link.time_limit_minutes, link.link_expiry_minutes, link.link_expires_at, link.language,
-      link.eligibility_mark, created, link.id, hashSecret(secret)).lastInsertRowid;
+      link.eligibility_mark, created, link.id, hashSecret(secret), link.business_area || 'RECRUITMENT').lastInsertRowid;
   const addStage = db.prepare('INSERT INTO assessment_stages (assessment_id, position, section, question_count, time_limit_minutes, pass_mark) VALUES (?, ?, ?, ?, ?, ?)');
   JSON.parse(link.stages).forEach((st, i) => addStage.run(aid, i + 1, st.section, st.question_count, st.time_limit_minutes, st.pass_mark));
   startTx(getAssessment(aid), info);
-  audit('SESSION_STARTED', 'candidate', { link_id: link.id, assessment_id: aid });
+  audit('SESSION_STARTED', link.business_area === 'INTERNAL_STAFF' ? 'staff' : 'candidate', { link_id: link.id, assessment_id: aid });
   return aid;
 });
 
 function startFromLink(link, body, secret) {
-  const info = cleanCandidateInfo(body);
+  const info = link.business_area === 'INTERNAL_STAFF' ? require('./internalStaff').cleanStartInfo(body) : cleanCandidateInfo(body);
   return getAssessment(startFromLinkTx(link.id, info, secret));
 }
 
@@ -405,6 +427,15 @@ function openStage(a, stage) {
 
 const startTx = db.transaction((a, info) => {
   const stamp = now();
+  if (a.business_area === 'INTERNAL_STAFF') {
+    // An employee: their internal staff record (never a recruitment candidate).
+    const staffId = require('./internalStaff').forStart(info);
+    const res = db.prepare(`UPDATE assessments SET status = 'IN_PROGRESS', staff_id = ?, staff_details = ?, started_at = ?
+      WHERE id = ? AND status = 'NOT_STARTED'`).run(staffId, JSON.stringify(info), stamp, a.id);
+    if (res.changes !== 1) throw new InputError('already_started');
+    openStage(a, stagesOf(a)[0]);
+    return;
+  }
   let candidateId = a.candidate_id;
   if (candidateId) {
     const sets = CANDIDATE_FIELDS.map((f) => `${f} = @${f}`).join(', ');

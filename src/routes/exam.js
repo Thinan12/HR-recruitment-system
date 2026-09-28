@@ -13,10 +13,15 @@ const A = require('../assessments');
 const reports = require('../reports');
 const images = require('../images');
 
+// One router per business area: /api/exam (recruitment candidates) and
+// /api/internal-exam (internal office staff). Same engine, separate links,
+// cookies and records.
+function examRouter({ area, cookieName, apiBase }) {
 const router = express.Router();
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
-const COOKIE = 'lalco_candidate_session';
+const COOKIE = cookieName;
+const STAFF = area === 'INTERNAL_STAFF';
 const SESSION_DAYS = 30;
 const PREFILL = ['name', 'phone', 'graduate_from', 'high_school', 'college', 'university', 'school_name', 'subject', 'gpa'];
 
@@ -33,15 +38,17 @@ function readSecret(req) {
 // The cookie is only sent back to this link's API, so two links open in one
 // browser never share a session.
 function setSecret(res, token, secret) {
-  res.cookie(COOKIE, secret, { httpOnly: true, sameSite: 'lax', secure: IS_PRODUCTION, maxAge: SESSION_DAYS * 86400 * 1000, path: '/api/exam/' + token });
+  res.cookie(COOKIE, secret, { httpOnly: true, sameSite: 'lax', secure: IS_PRODUCTION, maxAge: SESSION_DAYS * 86400 * 1000, path: apiBase + '/' + token });
 }
 
 // { link, a, secret }: the shared link (if the token is one) and the attempt
 // of this browser's session; or { a } for an older one-person link.
 function resolve(req) {
   const token = String(req.params.token || '');
-  const link = A.linkByToken(token);
-  if (!link) return { a: db.prepare('SELECT * FROM assessments WHERE token = ? AND link_id IS NULL').get(token) };
+  // Only links of this router's business area are found here.
+  const link = A.linkByToken(token, area);
+  // Older one-person links exist only in recruitment.
+  if (!link) return { a: STAFF ? undefined : db.prepare("SELECT * FROM assessments WHERE token = ? AND link_id IS NULL AND business_area = 'RECRUITMENT'").get(token) };
   const secret = readSecret(req);
   return { link, secret, a: A.attemptFor(link, secret) };
 }
@@ -95,7 +102,7 @@ function lastResult(a, stages) {
 function linkResponse(link) {
   const share = A.linkShareState(link);
   const view = A.linkView(link);
-  const base = { state: share === 'open' ? 'ready' : share, shared: true, language: link.language, assessment_type: link.assessment_type,
+  const base = { state: share === 'open' ? 'ready' : share, shared: true, business_area: area, language: link.language, assessment_type: link.assessment_type,
     time_limit_minutes: link.time_limit_minutes };
   if (share !== 'open') return base;
   base.tests = progress(view.stages.map((st) => ({ ...st, status: 'NOT_STARTED' })), 'ready');
@@ -107,7 +114,7 @@ function linkResponse(link) {
 
 function stateResponse(a) {
   const state = A.linkState(a);
-  const base = { state, shared: !!a?.link_id, language: a?.language, assessment_type: a?.assessment_type, time_limit_minutes: a?.time_limit_minutes };
+  const base = { state, shared: !!a?.link_id, business_area: area, language: a?.language, assessment_type: a?.assessment_type, time_limit_minutes: a?.time_limit_minutes };
   if (state === 'not_found') return base;
   const stages = A.stagesOf(a);
   base.tests = progress(stages, state);
@@ -116,7 +123,7 @@ function stateResponse(a) {
   if (state === 'ready') {
     base.question_count = stages[0].question_count;
     base.time_limit_minutes = stages[0].time_limit_minutes;
-    if (a.candidate_id) {
+    if (!STAFF && a.candidate_id) {
       const c = db.prepare(`SELECT ${PREFILL.join(', ')} FROM candidates WHERE id = ?`).get(a.candidate_id);
       if (c) base.candidate = c;
     }
@@ -134,13 +141,13 @@ function stateResponse(a) {
   }
   if (state === 'in_progress') {
     const current = stages.filter((st) => st.status === 'IN_PROGRESS').map((st) => st.section);
-    const c = db.prepare('SELECT name FROM candidates WHERE id = ?').get(a.candidate_id);
+    const c = STAFF ? db.prepare('SELECT name FROM internal_staff WHERE id = ?').get(a.staff_id) : db.prepare('SELECT name FROM candidates WHERE id = ?').get(a.candidate_id);
     base.candidate = { name: c ? c.name : '' };
     base.section = current[0];
     base.remaining_seconds = Math.max(0, Math.floor((Date.parse(a.deadline_at) - Date.now()) / 1000));
     // Pictures are fetched through the URL the candidate is using.
     const token = a.link_id ? A.getLink(a.link_id).token : a.token;
-    const img = (id) => (id ? `/api/exam/${encodeURIComponent(token)}/images/${id}` : null);
+    const img = (id) => (id ? `${apiBase}/${encodeURIComponent(token)}/images/${id}` : null);
     // Only the questions of the test that is running now.
     base.questions = db.prepare('SELECT * FROM assessment_questions WHERE assessment_id = ? ORDER BY position').all(a.id)
       .filter((q) => current.includes(q.section)).map((q) => {
@@ -273,4 +280,8 @@ router.post('/:token/submit', (req, res) => {
   res.json(stateResponse(A.getAssessment(a.id)));
 });
 
-module.exports = router;
+return router;
+}
+
+module.exports = examRouter({ area: 'RECRUITMENT', cookieName: 'lalco_candidate_session', apiBase: '/api/exam' });
+module.exports.internal = examRouter({ area: 'INTERNAL_STAFF', cookieName: 'lalco_staff_session', apiBase: '/api/internal-exam' });
