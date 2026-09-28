@@ -141,15 +141,34 @@ function lalcoIqScore(points, max) {
   return Math.min(150, Math.max(50, Math.round(50 + (p / m) * 100)));
 }
 
-const IQ_CATEGORIES = [[130, 'Exceptional'], [115, 'Very High'], [100, 'High'], [85, 'Average'], [70, 'Low'], [50, 'Very Low']];
-function iqCategory(score) {
-  if (score == null) return null;
-  return (IQ_CATEGORIES.find(([from]) => score >= from) || IQ_CATEGORIES[IQ_CATEGORIES.length - 1])[1];
+// LALCO IQ SCORE CLASSIFICATION — the ONE place the bands are defined.
+// Every whole score 50-150 falls in exactly one row. The population
+// percentages are reference values from the classification table only:
+// they are never used to calculate, change or rank a candidate's score.
+const IQ_CLASSIFICATION = [
+  { min: 130, max: 150, range: '130–150', description: 'Very superior', description_lo: 'ສູງເດັ່ນຫຼາຍ', populationReference: '2.2%' },
+  { min: 120, max: 129, range: '120–129', description: 'Superior', description_lo: 'ສູງເດັ່ນ', populationReference: '6.7%' },
+  { min: 110, max: 119, range: '110–119', description: 'High average', description_lo: 'ປານກາງຄ່ອນຂ້າງສູງ', populationReference: '16.1%' },
+  { min: 90, max: 109, range: '90–109', description: 'Average', description_lo: 'ປານກາງ', populationReference: '50%' },
+  { min: 80, max: 89, range: '80–89', description: 'Low average', description_lo: 'ປານກາງຄ່ອນຂ້າງຕ່ຳ', populationReference: '16.1%' },
+  { min: 70, max: 79, range: '70–79', description: 'Borderline', description_lo: 'ກ້ຳເກິ່ງ', populationReference: '6.7%' },
+  { min: 50, max: 69, range: '50–69', description: 'Extremely low', description_lo: 'ຕ່ຳຫຼາຍ', populationReference: '2.2%' },
+];
+// The classification of a LALCO IQ Score (a whole number 50-150), or null
+// for no score / a value outside the scale.
+function getIQClassification(score) {
+  if (score == null || score === '') return null;
+  const s = Number(score);
+  if (!Number.isInteger(s) || s < 50 || s > 150) return null;
+  const row = IQ_CLASSIFICATION.find((c) => s >= c.min && s <= c.max);
+  return { range: row.range, description: row.description, description_lo: row.description_lo, populationReference: row.populationReference };
 }
+// The classification name only (used by every screen and export).
+const iqCategory = (score) => getIQClassification(score)?.description ?? null;
 const LALCO_NOTE = 'Calculated from the LALCO weighted IQ assessment score on a 50–150 scale.';
 
 function iqResult(a) {
-  if (!a || a.iq_max == null) return { iq_score: null, iq_text: null, iq_correct_text: null, iq_levels: [], iq_date: null, lalco_iq_score: null, iq_category: null };
+  if (!a || a.iq_max == null) return { iq_score: null, iq_text: null, iq_correct_text: null, iq_levels: [], iq_date: null, lalco_iq_score: null, iq_category: null, iq_classification: null };
   let breakdown = {};
   try { breakdown = JSON.parse(a.iq_breakdown || '{}') || {}; } catch { breakdown = {}; }
   const levels = LEVELS.map(([key, number, label]) => {
@@ -169,6 +188,7 @@ function iqResult(a) {
     iq_date: a.submitted_at,
     lalco_iq_score: lalcoIqScore(a.iq_points, a.iq_max),
     iq_category: iqCategory(lalcoIqScore(a.iq_points, a.iq_max)),
+    iq_classification: getIQClassification(lalcoIqScore(a.iq_points, a.iq_max)),
   };
 }
 const levelText = (c, n) => { const l = (c.iq_levels || []).find((x) => x.level === n); return l ? l : null; };
@@ -211,7 +231,7 @@ function candidateSummary(id) {
 
 // Summary counts and dashboard filters use each candidate's latest link.
 const testOf = (c, sec) => (c.tests || []).find((t) => t.section === sec);
-const LEVEL_NAMES = ['Exceptional', 'Very High', 'High', 'Average', 'Low', 'Very Low'];
+const IQ_CLASS_NAMES = IQ_CLASSIFICATION.map((c) => c.description);
 
 function dashboard() {
   const people = allCandidateSummaries();
@@ -237,12 +257,14 @@ function dashboard() {
       general_passed: withResult('GENERAL', 'Pass'), general_not_passed: withResult('GENERAL', 'Not Pass'),
       calculation_passed: withResult('CALCULATION', 'Pass'), calculation_not_passed: withResult('CALCULATION', 'Not Pass'),
       essay_pending: people.filter((p) => testOf(p, 'ESSAY')?.state === 'PENDING HR MARKING').length,
-      iq_levels: Object.fromEntries(LEVEL_NAMES.map((l) => [l, people.filter((p) => testOf(p, 'IQ')?.level === l).length])),
+      // Candidates per IQ classification (from their latest IQ test).
+      iq_levels: Object.fromEntries(IQ_CLASS_NAMES.map((l) => [l, people.filter((p) => testOf(p, 'IQ')?.level === l).length])),
       eligible: people.filter((p) => p.eligibility === 'Eligible').length,
       not_eligible: people.filter((p) => p.eligibility === 'Not Eligible').length,
       pending: people.filter((p) => p.eligibility === 'Pending').length,
     },
     candidates: people,
+    iq_classification: IQ_CLASSIFICATION,
   };
 }
 
@@ -277,6 +299,8 @@ const COLUMNS = [
   ['IQ %', (c) => c.iq_score],
   ['LALCO IQ Score', (c) => c.lalco_iq_score],
   ['IQ Category', (c) => c.iq_category],
+  ['IQ Classification', (c) => c.iq_category],
+  ['IQ Classification Range', (c) => c.iq_classification?.range],
   ['IQ Correct Answers', (c) => c.iq_correct_text],
   ...[1, 2, 3, 4, 5].flatMap((n) => [[`Level ${n} Correct`, (c) => levelText(c, n)?.correct_text], [`Level ${n} Marks`, (c) => levelText(c, n)?.marks_text],
     [`Level ${n} Max Marks`, (c) => levelText(c, n)?.max]]),
@@ -330,7 +354,9 @@ function reportSections(c) {
     ['Assessment Results', [
       ['Reference Results', show(c.reference_results)],
       ['IQ Weighted Score', c.iq_text ? `${c.iq_text} marks (${c.iq_score}%)` : '-'],
-      ['LALCO IQ Score', c.lalco_iq_score != null ? `${c.lalco_iq_score} / 150 — ${c.iq_category}` : '-'],
+      ['LALCO IQ Score', c.lalco_iq_score != null ? `${c.lalco_iq_score} / 150` : '-'],
+      ['IQ Classification', c.iq_classification ? `${c.iq_classification.description} (${c.iq_classification.range})` : '-'],
+      ['IQ Percentage', c.iq_score != null ? Number(c.iq_score).toFixed(1) + '%' : '-'],
       ['IQ Correct Answers', show(c.iq_correct_text)],
       ...(c.iq_levels || []).map((l) => [l.label, `${l.correct_text} correct, ${l.marks_text} marks`]),
       ...(c.tests || []).map((t) => [t.name, `${testLine(t)} — ${t.text}`]),
@@ -357,7 +383,7 @@ function reportSections(c) {
 }
 
 const NOTE = 'Scores are percentages of available marks. IQ Test Score = marks earned (Level 1 = 1 up to Level 5 = 5 per correct answer) out of the maximum; it is not a clinical IQ measurement. LALCO IQ Score: ' + LALCO_NOTE
-  + ' Level: 90%+ Exceptional, 80%+ Very High, 70%+ High, 60%+ Average, 50%+ Low, below 50% Very Low (the IQ Level comes from the LALCO IQ Score). PASS / NOT PASS uses each test\'s own pass mark. Final Overall Score = the average of the included tests\' percentages. Company Eligibility = every test passed and the final score reaches the eligibility mark. HR Final Result is HR\'s own decision.';
+  + ' Level: 90%+ Exceptional, 80%+ Very High, 70%+ High, 60%+ Average, 50%+ Low, below 50% Very Low for General, Calculation, Essay and the final score. IQ Classification (from the LALCO IQ Score): 130–150 Very superior, 120–129 Superior, 110–119 High average, 90–109 Average, 80–89 Low average, 70–79 Borderline, 50–69 Extremely low. PASS / NOT PASS uses each test\'s own pass mark. Final Overall Score = the average of the included tests\' percentages. Company Eligibility = every test passed and the final score reaches the eligibility mark. HR Final Result is HR\'s own decision.';
 
 function candidatePdf(c) {
   return new Promise((resolve, reject) => {
@@ -451,4 +477,4 @@ function questionTemplateXlsx() {
   return XLSX.write(book, { type: 'buffer', bookType: 'xlsx' });
 }
 
-module.exports = { testResults, percentLevel, finalAssessment, stageView, iqResult, lalcoIqScore, iqCategory, allCandidateSummaries, candidateSummary, dashboard, candidatePdf, candidateDocx, candidatesXlsx, questionTemplateXlsx };
+module.exports = { IQ_CLASSIFICATION, getIQClassification, testResults, percentLevel, finalAssessment, stageView, iqResult, lalcoIqScore, iqCategory, allCandidateSummaries, candidateSummary, dashboard, candidatePdf, candidateDocx, candidatesXlsx, questionTemplateXlsx };

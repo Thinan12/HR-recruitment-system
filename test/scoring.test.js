@@ -69,14 +69,14 @@ test('levels: 90 Exceptional, 80 Very High, 70 High, 60 Average, 50 Low, below 5
   assert.equal(percentLevel(null), null);
 });
 
-test('IQ: weighted score, percentage, LALCO IQ Score and IQ Level are separate from PASS / NOT PASS', () => {
-  // 27 / 36 = 75.0% -> LALCO 125 -> Very High; passes a 70% IQ pass mark.
+test('IQ: weighted score, percentage, LALCO IQ Score and IQ Classification are separate from PASS / NOT PASS', () => {
+  // 27 / 36 = 75.0% -> LALCO 125 -> Superior; passes a 70% IQ pass mark.
   assert.equal(lalcoIqScore(27, 36), 125);
-  assert.equal(iqCategory(125), 'Very High');
+  assert.equal(iqCategory(125), 'Superior');
   assert.ok((27 / 36) * 100 >= 70);
-  // 21 / 36 = 58.3% -> LALCO 108 -> High, and still NOT PASS at 70%.
+  // 21 / 36 = 58.3% -> LALCO 108 -> Average, and still NOT PASS at 70%.
   assert.equal(lalcoIqScore(21, 36), 108);
-  assert.equal(iqCategory(108), 'High');
+  assert.equal(iqCategory(108), 'Average');
   assert.ok((21 / 36) * 100 < 70);
 });
 
@@ -101,7 +101,7 @@ test('all four PASS and final >= 70% -> ELIGIBLE; the same URL is used from star
   const { a, c: browser, seen, candidateId } = await run('Full Pass', ALL, { IQ: 8, GENERAL: 7, CALCULATION: 9 });
   // After each passed test the candidate sees the result and the next test.
   assert.deepEqual(seen.map((s) => [s.state, s.last_result.section, s.last_result.result, s.last_result.percent, s.last_result.level]), [
-    ['next_test', 'IQ', 'Pass', 80, 'Exceptional'],
+    ['next_test', 'IQ', 'Pass', 80, 'Very superior'],
     ['next_test', 'GENERAL', 'Pass', 70, 'High'],
     ['next_test', 'CALCULATION', 'Pass', 90, 'Exceptional'],
     ['submitted', 'ESSAY', 'Pending', null, null],
@@ -121,7 +121,7 @@ test('all four PASS and final >= 70% -> ELIGIBLE; the same URL is used from star
   await markEssay(attemptOf(a), 6);
   c = await profile(candidateId);
   assert.deepEqual(c.tests.map(brief), [
-    ['IQ', '8 / 10', 80, 'Exceptional', 'Pass', 'PASS'],
+    ['IQ', '8 / 10', 80, 'Very superior', 'Pass', 'PASS'],
     ['GENERAL', '7 / 10', 70, 'High', 'Pass', 'PASS'],
     ['CALCULATION', '9 / 10', 90, 'Exceptional', 'Pass', 'PASS'],
     ['ESSAY', '6 / 10', 60, 'Average', 'Pass', 'PASS'],
@@ -174,14 +174,14 @@ test('final score uses only the selected tests (IQ + General = average of 2, not
 });
 
 test('a mark exactly at the pass mark passes; the IQ Level does not decide PASS', async () => {
-  // 7 / 10 = 70% = IQ pass mark -> PASS. LALCO 120 = Very High.
+  // 7 / 10 = 70% = IQ pass mark -> PASS. LALCO 120 = Superior.
   const pass = await run('At Mark', ['IQ'], { IQ: 7 });
   assert.equal(pass.s.last_result.result, 'Pass');
-  assert.equal(pass.s.last_result.level, 'Very High');
-  // 6 / 10 = 60% -> NOT PASS at 70%, although LALCO 110 is "High".
+  assert.equal(pass.s.last_result.level, 'Superior');
+  // 6 / 10 = 60% -> NOT PASS at 70%, although LALCO 110 is "High average".
   const fail = await run('Below Mark', ['IQ'], { IQ: 6 });
   assert.equal(fail.s.last_result.result, 'Not Pass');
-  assert.equal(fail.s.last_result.level, 'High');
+  assert.equal(fail.s.last_result.level, 'High average');
   // With the IQ pass mark set to 60% on the link, the same score passes.
   const custom = await run('Custom Mark', ['IQ'], { IQ: 6 }, { pass_marks: { IQ: 60 } });
   assert.equal(custom.s.last_result.result, 'Pass');
@@ -193,7 +193,7 @@ test('IQ FAIL -> General, Calculation and Essay stay locked; refresh or changing
   const { a, s, c, candidateId } = await run('IQ Fail', ALL, { IQ: 5 });
   assert.equal(s.state, 'submitted');
   assert.equal(s.outcome, 'stopped');
-  assert.deepEqual(s.last_result, { section: 'IQ', result: 'Not Pass', points: 5, max: 10, percent: 50, level: 'High', lalco_iq_score: 100, pass_mark: 70 });
+  assert.deepEqual(s.last_result, { section: 'IQ', result: 'Not Pass', points: 5, max: 10, percent: 50, level: 'Average', lalco_iq_score: 100, pass_mark: 70, level_lo: 'ປານກາງ' });
   assert.deepEqual(s.tests.map((t) => t.status), ['failed', 'locked', 'locked', 'locked']);
 
   for (const [method, path, body] of [['post', '/continue'], ['post', '/start', CANDIDATE], ['post', '/submit', { answers: {} }], ['put', '/answer', { question_id: 1, answer: 'A' }]]) {
@@ -314,7 +314,7 @@ test('dashboard: summary counts and one row per candidate with every test and th
   assert.equal(Object.values(s.iq_levels).reduce((x, y) => x + y, 0), d.candidates.filter((c) => c.tests.find((t) => t.section === 'IQ')?.level).length);
   const full = d.candidates.find((c) => c.name === 'Full Pass');
   assert.deepEqual([full.final_percent, full.final_level, full.eligibility], [75, 'High', 'Eligible']);
-  assert.deepEqual(full.tests.map((t) => t.level), ['Exceptional', 'High', 'Exceptional', 'Average']);
+  assert.deepEqual(full.tests.map((t) => t.level), ['Very superior', 'High', 'Exceptional', 'Average']);
 });
 
 test('exports: Excel, PDF and Word show each test, the final score, level and company eligibility', async () => {
@@ -322,7 +322,9 @@ test('exports: Excel, PDF and Word show each test, the final score, level and co
   const sheet = XLSX.read((await admin.get(`/api/admin/candidates/${c.id}/export.xlsx`, { raw: true })).buffer).Sheets.Candidates;
   const x = XLSX.utils.sheet_to_json(sheet)[0];
   const header = XLSX.utils.sheet_to_json(sheet, { header: 1 })[0];
-  assert.equal(x['IQ Level'], 'Exceptional');
+  assert.equal(x['IQ Level'], 'Very superior');
+  assert.equal(x['IQ Classification'], 'Very superior');
+  assert.equal(x['IQ Classification Range'], '130–150');
   assert.equal(x['LALCO IQ Score'], 130);
   assert.equal(x['IQ PASS / NOT PASS'], 'PASS');
   assert.equal(x['General %'], 70);
@@ -352,6 +354,6 @@ test('the review page shows each test with level and pass mark, and the final re
   const aid = db.prepare("SELECT a.id FROM assessments a JOIN candidates c ON c.id = a.candidate_id WHERE c.name = 'Low Final'").get().id;
   const r = (await admin.get('/api/admin/assessments/' + aid)).data;
   assert.deepEqual(r.tests.map((t) => [t.section, t.percent, t.level, t.pass_mark, t.state]),
-    [['IQ', 70, 'Very High', 70, 'PASS'], ['GENERAL', 60, 'Average', 60, 'PASS'], ['CALCULATION', 60, 'Average', 60, 'PASS'], ['ESSAY', 60, 'Average', 60, 'PASS']]);
+    [['IQ', 70, 'Superior', 70, 'PASS'], ['GENERAL', 60, 'Average', 60, 'PASS'], ['CALCULATION', 60, 'Average', 60, 'PASS'], ['ESSAY', 60, 'Average', 60, 'PASS']]);
   assert.deepEqual([r.final.final_percent, r.final.final_level, r.final.eligibility], [62.5, 'Average', 'Not Eligible']);
 });

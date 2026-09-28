@@ -35,6 +35,9 @@ const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingm
 
 router.get('/dashboard', (req, res) => res.json(reports.dashboard()));
 
+// The LALCO IQ SCORE CLASSIFICATION table (reference; the same rows every screen uses).
+router.get('/iq-classification', (req, res) => res.json(reports.IQ_CLASSIFICATION));
+
 // ---- candidates --------------------------------------------------------
 
 const CANDIDATE_TEXT_FIELDS = ['name', 'phone', 'graduate_from', 'high_school', 'college', 'university', 'school_name', 'subject', 'gpa',

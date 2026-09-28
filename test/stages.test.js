@@ -58,7 +58,7 @@ test('one link runs IQ -> General -> Calculation -> Essay in order, details ente
   assert.equal(s.next_section, 'GENERAL');
   assert.equal(statuses(s), 'IQ:done GENERAL:next CALCULATION:upcoming ESSAY:upcoming');
   // The candidate sees the result of the test just finished, never the answers.
-  assert.deepEqual(s.last_result, { section: 'IQ', result: 'Pass', points: 6, max: 6, percent: 100, level: 'Exceptional', lalco_iq_score: 150, pass_mark: 70 });
+  assert.deepEqual(s.last_result, { section: 'IQ', result: 'Pass', points: 6, max: 6, percent: 100, level: 'Very superior', lalco_iq_score: 150, pass_mark: 70, level_lo: 'ສູງເດັ່ນຫຼາຍ' });
   assert.ok(!JSON.stringify(s).includes('correct_answer'), 'no correct answers are sent');
 
   s = (await candidate.post(url(a.token, '/continue'))).data;

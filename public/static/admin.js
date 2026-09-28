@@ -221,7 +221,7 @@ function iqResultBlock(r) {
     h('div', { class: 'iq-row' }, h('span', { class: 'muted' }, 'IQ Weighted Score'), h('strong', {}, r.iq_text)),
     h('div', { class: 'iq-row' }, h('span', { class: 'muted' }, 'IQ Percentage'), h('strong', {}, r.iq_score + '%')),
     h('div', { class: 'iq-row' }, h('span', { class: 'muted' }, 'LALCO IQ Score'), h('strong', { class: 'iq-main' }, r.lalco_iq_score != null ? r.lalco_iq_score + ' / 150' : 'Not available')),
-    h('div', { class: 'iq-row' }, h('span', { class: 'muted' }, 'IQ Level'), r.iq_category ? h('span', { class: 'badge neutral' }, r.iq_category) : '-'),
+    h('div', { class: 'iq-row' }, h('span', { class: 'muted' }, 'IQ Classification'), r.iq_category ? h('span', { class: 'badge neutral' }, r.iq_category + (r.iq_classification ? ` (${r.iq_classification.range})` : '')) : '-'),
     h('div', { class: 'iq-levels' }, (r.iq_levels || []).map((l) => h('div', { class: 'iq-level' },
       h('div', { class: 'small' }, h('strong', {}, l.label)),
       h('div', {}, l.correct_text + ' correct'),
@@ -233,7 +233,8 @@ function iqResultBlock(r) {
 // Dashboard
 // ---------------------------------------------------------------------------
 
-const LEVELS = ['Exceptional', 'Very High', 'High', 'Average', 'Low', 'Very Low'];
+const LEVELS = ['Exceptional', 'Very High', 'High', 'Average', 'Low', 'Very Low']; // % levels: General, Calculation, Essay, final score
+let IQ_CLASSES = []; // LALCO IQ SCORE CLASSIFICATION rows, from the server
 // Dashboard filters. Each looks at the candidate's latest assessment link.
 const DASHBOARD_FILTERS = [
   ['all', 'All candidates', () => true],
@@ -244,16 +245,21 @@ const DASHBOARD_FILTERS = [
     [sec + '_pass', `${SECTION_LABEL[sec]} Passed`, (c) => testOf(c, sec)?.result === 'Pass'],
     [sec + '_fail', `${SECTION_LABEL[sec]} Not Passed`, (c) => testOf(c, sec)?.result === 'Not Pass']]),
   ['essay_pending', 'Essay Pending HR marking', (c) => testOf(c, 'ESSAY')?.state === 'PENDING HR MARKING'],
-  ...LEVELS.map((l) => ['iq_' + l, `IQ Level: ${l}`, (c) => testOf(c, 'IQ')?.level === l]),
+
   ...LEVELS.map((l) => ['final_' + l, `Final Level: ${l}`, (c) => c.final_level === l]),
 ];
 let dashboardFilter = 'all';
+// The filter list with one entry per IQ classification (known once the dashboard data has arrived).
+const dashboardFilters = () => {
+  const i = DASHBOARD_FILTERS.findIndex(([k]) => k.startsWith('final_'));
+  return [...DASHBOARD_FILTERS.slice(0, i), ...IQ_CLASSES.map((c) => ['iq_' + c.description, `IQ Classification: ${c.description} (${c.range})`, (x) => testOf(x, 'IQ')?.level === c.description]), ...DASHBOARD_FILTERS.slice(i)];
+};
 
 // One row per candidate: every test's score, %, level and result, then the final result.
 function candidateResultsTable(list) {
   if (!list.length) return h('p', { class: 'muted' }, 'No candidates match this filter.');
   const TESTS = ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'];
-  const cols = (sec) => (sec === 'IQ' ? ['Score', 'LALCO IQ', '%', 'IQ Level', 'Result'] : ['Score', '%', 'Level', 'Result']);
+  const cols = (sec) => (sec === 'IQ' ? ['Score', 'LALCO IQ', '%', 'IQ Classification', 'Result'] : ['Score', '%', 'Level', 'Result']);
   const cells = (c, sec) => {
     const t = testOf(c, sec);
     const n = cols(sec).length;
@@ -281,13 +287,15 @@ function candidateResultsTable(list) {
 async function renderDashboard() {
   const d = await api('GET', '/dashboard');
   const s = d.summary;
+  IQ_CLASSES = d.iq_classification || [];
   const stat = (label, value, sub, cls) => h('div', { class: 'stat ' + (cls || '') }, h('div', { class: 'label' }, label), h('div', { class: 'value' }, value), sub ? h('div', { class: 'sub' }, sub) : null);
-  const filter = select('dashboard_filter', DASHBOARD_FILTERS.map(([k, label]) => [k, label]), dashboardFilter);
+  const filter = select('dashboard_filter', dashboardFilters().map(([k, label]) => [k, label]), dashboardFilter);
   filter.classList.add('inline-input');
   const tableBox = h('div');
   const count = h('span', { class: 'muted small' });
+  const filters = dashboardFilters();
   const draw = () => {
-    const f = (DASHBOARD_FILTERS.find(([k]) => k === dashboardFilter) || DASHBOARD_FILTERS[0])[2];
+    const f = (filters.find(([k]) => k === dashboardFilter) || filters[0])[2];
     const list = d.candidates.filter(f);
     count.textContent = `${list.length} of ${d.candidates.length} candidates`;
     tableBox.replaceChildren(candidateResultsTable(list));
@@ -314,13 +322,13 @@ async function renderDashboard() {
       card('General Passed', s.general_passed, 'GENERAL_pass'), card('General Not Passed', s.general_not_passed, 'GENERAL_fail'),
       card('Calculation Passed', s.calculation_passed, 'CALCULATION_pass'), card('Calculation Not Passed', s.calculation_not_passed, 'CALCULATION_fail'),
       card('Essay Pending', s.essay_pending, 'essay_pending')),
-    h('div', { class: 'stat-group-title' }, 'IQ Level'),
-    h('div', { class: 'stats' }, LEVELS.map((l) => card(l, s.iq_levels[l], 'iq_' + l))),
+    h('div', { class: 'stat-group-title' }, 'IQ Classification (LALCO IQ Score)'),
+    h('div', { class: 'stats' }, IQ_CLASSES.map((c) => card(`${c.description} (${c.range})`, s.iq_levels[c.description] ?? 0, 'iq_' + c.description))),
     h('div', { class: 'card' },
       h('div', { class: 'row between' }, h('h2', {}, 'Candidates'),
         h('div', { class: 'row' }, filter, count, h('a', { class: 'button small', href: '#/assessments' }, 'Create assessment link'), downloadLink('/export/candidates.xlsx', 'Export all (Excel)'))),
       tableBox,
-      h('p', { class: 'muted small' }, 'Each column group is one test of the candidate\'s latest assessment link. Level: 90%+ Exceptional, 80%+ Very High, 70%+ High, 60%+ Average, 50%+ Low, below 50% Very Low (IQ Level from the LALCO IQ Score). Result uses each test\'s pass mark. Final % = the average of the included tests; Company Eligibility = every test passed and Final % reaches the eligibility mark. HR Final Result is HR\'s own decision.')));
+      h('p', { class: 'muted small' }, 'Each column group is one test of the candidate\'s latest assessment link. General / Calculation / Essay level: 90%+ Exceptional, 80%+ Very High, 70%+ High, 60%+ Average, 50%+ Low, below 50% Very Low. IQ Classification comes from the LALCO IQ Score (see Results). Result uses each test\'s pass mark. Final % = the average of the included tests; Company Eligibility = every test passed and Final % reaches the eligibility mark. HR Final Result is HR\'s own decision.')));
   draw();
 }
 
@@ -1046,7 +1054,7 @@ function testsTable(tests) {
       h('td', {}, h('strong', {}, t.name)),
       h('td', {}, t.score_text || '-', t.lalco_iq_score != null ? h('div', { class: 'small' }, 'LALCO IQ Score ', h('strong', {}, t.lalco_iq_score + ' / 150')) : null),
       h('td', {}, fmtPct(t.percent)),
-      h('td', {}, t.level ? h('span', { class: 'badge neutral' }, (t.section === 'IQ' ? 'IQ Level: ' : '') + t.level) : '-'),
+      h('td', {}, t.level ? h('span', { class: 'badge neutral' }, (t.section === 'IQ' ? 'IQ Classification: ' : '') + t.level) : '-'),
       h('td', {}, t.result === 'Pass' || t.result === 'Not Pass' ? resultBadge(t.result) : testStateBadge(t.state)),
       h('td', {}, t.completion || '-'),
       h('td', {}, t.pass_mark != null ? t.pass_mark + '%' : '-'))))));
@@ -1285,11 +1293,20 @@ async function renderAssessment(id) {
 // ---------------------------------------------------------------------------
 
 
+// LALCO IQ SCORE CLASSIFICATION reference table (rows come from the server).
+function iqClassificationTable(classes) {
+  return h('div', { class: 'card' }, h('h2', {}, 'LALCO IQ Score Classification'),
+    h('div', { class: 'table-wrap' }, h('table', { class: 'iq-class-table' },
+      h('thead', {}, h('tr', {}, ['IQ Score', 'Description', '% of Population'].map((t) => h('th', {}, t)))),
+      h('tbody', {}, classes.map((c) => h('tr', {}, h('td', {}, h('strong', {}, c.range)), h('td', {}, c.description, h('span', { class: 'muted small lao-text', lang: 'lo' }, ' · ' + c.description_lo)), h('td', {}, c.populationReference)))))),
+    h('p', { class: 'muted small' }, 'The LALCO IQ Score is 50 + (IQ weighted marks ÷ maximum marks × 100), from 50 to 150; the classification is looked up from that score. The population percentages are reference values from the classification table only — they are not calculated from LALCO candidates and are not used for scoring or ranking. A recruitment score, not a clinical IQ.'));
+}
+
 async function renderResults() {
-  const [list, iq] = await Promise.all([api('GET', '/candidates'), api('GET', '/results/iq')]);
+  const [list, iq, classes] = await Promise.all([api('GET', '/candidates'), api('GET', '/results/iq'), api('GET', '/iq-classification')]);
   const iqCard = h('div', { class: 'card' }, h('h2', {}, 'IQ Test Results'),
     iq.length ? h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, ['Candidate', 'IQ Weighted Score', 'IQ %', 'LALCO IQ Score', 'IQ Level', 'Correct Answers', ...IQ_LEVELS.map((n) => 'Level ' + n), 'Assessment Date', ''].map((t) => h('th', {}, t)))),
+      h('thead', {}, h('tr', {}, ['Candidate', 'IQ Weighted Score', 'IQ %', 'LALCO IQ Score', 'IQ Classification', 'Correct Answers', ...IQ_LEVELS.map((n) => 'Level ' + n), 'Assessment Date', ''].map((t) => h('th', {}, t)))),
       h('tbody', {}, iq.map((r) => h('tr', {},
         h('td', {}, r.candidate_id ? h('a', { href: '#/candidates/' + r.candidate_id }, r.candidate_name) : '-'),
         h('td', {}, r.iq_text), h('td', {}, r.iq_score + '%'),
@@ -1302,6 +1319,7 @@ async function renderResults() {
     h('p', { class: 'muted small' }, 'IQ Test Score = marks earned out of the maximum. Each correct answer is worth its level: Level 1 = 1 mark up to Level 5 = 5 marks. The maximum comes from the questions the candidate actually got (e.g. 20 questions = 4 per level = 60). Tests taken before the 5-level scale keep their earlier Easy / Medium / Hard marks. It is a test score, not a clinical IQ measurement.'));
   view().replaceChildren(
     h('div', { class: 'row between' }, h('h1', {}, 'Results'), downloadLink('/export/candidates.xlsx', 'Export all candidates (Excel)', '')),
+    iqClassificationTable(classes),
     iqCard,
     h('div', { class: 'card' }, h('h2', {}, 'All candidates'), list.length ? h('div', { class: 'table-wrap' }, h('table', {},
       h('thead', {}, h('tr', {}, ['Candidate', 'IQ', 'General', 'Calculation', 'Essay', 'Current Stage', 'Final %', 'Final Level', 'Company Eligibility', 'HR Final Result', 'Date', 'Export'].map((t) => h('th', {}, t)))),

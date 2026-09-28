@@ -46,11 +46,11 @@ test('never below 50 or above 150; no score without a maximum', () => {
 });
 
 test('categories and their boundaries', () => {
-  const expected = { 50: 'Very Low', 69: 'Very Low', 70: 'Low', 84: 'Low', 85: 'Average', 99: 'Average', 100: 'High',
-    114: 'High', 115: 'Very High', 129: 'Very High', 130: 'Exceptional', 150: 'Exceptional' };
+  const expected = { 50: 'Extremely low', 69: 'Extremely low', 70: 'Borderline', 79: 'Borderline', 80: 'Low average', 89: 'Low average', 90: 'Average',
+    109: 'Average', 110: 'High average', 119: 'High average', 120: 'Superior', 129: 'Superior', 130: 'Very superior', 150: 'Very superior' };
   for (const [score, cat] of Object.entries(expected)) assert.equal(iqCategory(Number(score)), cat, String(score));
   assert.equal(iqCategory(null), null);
-  const examples = [[0, 'Very Low'], [18, 'High'], [21, 'High'], [24, 'Very High'], [27, 'Very High'], [30, 'Exceptional'], [36, 'Exceptional']];
+  const examples = [[0, 'Extremely low'], [18, 'Average'], [21, 'Average'], [24, 'High average'], [27, 'Superior'], [30, 'Very superior'], [36, 'Very superior']];
   for (const [raw, cat] of examples) assert.equal(iqCategory(lalcoIqScore(raw, 36)), cat, `${raw}/36`);
 });
 
@@ -84,17 +84,17 @@ test('a finished test shows weighted score, %, LALCO IQ Score and category every
   assert.ok(x['IQ Test Score'] && x['Assessment Result'] && x['Final Result'], 'existing columns kept');
 
   const word = (await mammoth.extractRawText({ buffer: (await admin.get(`/api/admin/candidates/${c.id}/export.docx`, { raw: true })).buffer })).value;
-  for (const want of ['IQ Weighted Score', '24 / 60 marks (40%)', 'LALCO IQ Score', '90 / 150 — Average', '50–150 scale']) assert.ok(word.includes(want), want);
+  for (const want of ['IQ Weighted Score', '24 / 60 marks (40%)', 'LALCO IQ Score', '90 / 150', 'IQ Classification', 'Average (90–109)', '50–150 scale']) assert.ok(word.includes(want), want);
 });
 
 test('earlier tests show a LALCO IQ Score from their stored marks, without changing them', async () => {
-  // A 3-level test from before: 27 / 36 -> 125 Very High.
+  // A 3-level test from before: 27 / 36 -> 125 Superior.
   const cid = db.prepare("INSERT INTO candidates (name, created_at, updated_at) VALUES ('Old 27 of 36', ?, ?)").run('2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z').lastInsertRowid;
   const aid = db.prepare(`INSERT INTO assessments (token, candidate_id, assessment_type, sections, time_limit_minutes, link_expiry_minutes, link_expires_at, status, started_at, deadline_at, submitted_at, created_at, iq_points, iq_max, iq_correct, iq_total, test_score, result)
     VALUES ('old-27', ?, 'IQ', '{"IQ":18}', 30, 60, '2026-01-02T00:00:00.000Z', 'SUBMITTED', '2026-01-01T09:00:00.000Z', '2026-01-01T09:30:00.000Z', '2026-01-01T09:20:00.000Z', '2026-01-01T08:00:00.000Z', 27, 36, 14, 18, 75, 'Pass')`).run(cid).lastInsertRowid;
   const before = db.prepare('SELECT * FROM assessments WHERE id = ?').get(aid);
   const r = (await admin.get('/api/admin/results/iq')).data.find((x) => x.id === aid);
-  assert.deepEqual([r.iq_text, r.iq_score, r.lalco_iq_score, r.iq_category], ['27 / 36', 75, 125, 'Very High']);
+  assert.deepEqual([r.iq_text, r.iq_score, r.lalco_iq_score, r.iq_category], ['27 / 36', 75, 125, 'Superior']);
   assert.deepEqual(db.prepare('SELECT * FROM assessments WHERE id = ?').get(aid), before, 'stored result unchanged');
   // No maximum stored -> not available rather than invented.
   db.prepare("INSERT INTO assessments (token, candidate_id, assessment_type, sections, time_limit_minutes, link_expiry_minutes, link_expires_at, status, submitted_at, created_at, iq_points, iq_max) VALUES ('old-none', ?, 'IQ', '{\"IQ\":1}', 30, 60, '2026-01-02T00:00:00.000Z', 'SUBMITTED', '2026-01-01T10:00:00.000Z', '2026-01-01T08:00:00.000Z', 0, 0)").run(cid);

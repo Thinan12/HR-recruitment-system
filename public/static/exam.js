@@ -40,7 +40,7 @@ const TEXT = {
     submit_test: 'Submit Test',
     stopped: 'Thank you.\nYou did not meet the required score for this assessment.\nPlease contact HR.',
     test_passed: '{name} Passed', test_not_passed: '{name} Not Passed', completed_title: 'Assessment Completed',
-    score: 'Score', percentage: 'Percentage', level: 'Level', iq_level: 'IQ Level', lalco_iq: 'LALCO IQ Score', result: 'Result', pass_mark: 'Pass mark',
+    score: 'Score', percentage: 'Percentage', level: 'Level', iq_level: 'IQ Classification', lalco_iq: 'LALCO IQ Score', result: 'Result', pass_mark: 'Pass mark',
     pass: 'PASS', not_pass: 'NOT PASS', pending_hr: 'Pending HR marking',
     essay_pending: 'Essay Result: Pending HR Marking.\nHR will mark your essay and review your results.',
     stopped_short: 'Assessment stopped. The later tests are locked.\nPlease contact HR.',
@@ -87,7 +87,7 @@ const TEXT = {
     submit_test: 'ສົ່ງແບບທົດສອບ',
     stopped: 'ຂອບໃຈ.\nທ່ານບໍ່ໄດ້ຄະແນນຕາມທີ່ກຳນົດສຳລັບການປະເມີນນີ້.\nກະລຸນາຕິດຕໍ່ຝ່າຍບຸກຄະລາກອນ (HR).',
     test_passed: 'ທ່ານຜ່ານ{name}ແລ້ວ', test_not_passed: 'ທ່ານບໍ່ຜ່ານ{name}', completed_title: 'ການປະເມີນສຳເລັດແລ້ວ',
-    score: 'ຄະແນນ', percentage: 'ເປີເຊັນ', level: 'ລະດັບ', iq_level: 'ລະດັບ IQ', lalco_iq: 'ຄະແນນ LALCO IQ', result: 'ຜົນ', pass_mark: 'ເກນຜ່ານ',
+    score: 'ຄະແນນ', percentage: 'ເປີເຊັນ', level: 'ລະດັບ', iq_level: 'ການຈັດລະດັບ IQ', lalco_iq: 'ຄະແນນ LALCO IQ', result: 'ຜົນ', pass_mark: 'ເກນຜ່ານ',
     pass: 'ຜ່ານ', not_pass: 'ບໍ່ຜ່ານ', pending_hr: 'ລໍຖ້າ HR ໃຫ້ຄະແນນ',
     essay_pending: 'ຜົນແບບທົດສອບການຂຽນ: ລໍຖ້າ HR ໃຫ້ຄະແນນ.\nຝ່າຍບຸກຄະລາກອນ (HR) ຈະໃຫ້ຄະແນນ ແລະ ກວດຜົນຂອງທ່ານ.',
     stopped_short: 'ການປະເມີນໄດ້ຢຸດລົງ. ແບບທົດສອບຕໍ່ໄປຖືກລັອກ.\nກະລຸນາຕິດຕໍ່ຝ່າຍບຸກຄະລາກອນ (HR).',
@@ -185,7 +185,8 @@ function resultTable(r) {
     row(T.score, `${r.points} / ${r.max}`),
     row(T.percentage, pct(r.percent)),
     iq && r.lalco_iq_score != null ? row(T.lalco_iq, `${r.lalco_iq_score} / 150`) : null,
-    r.level ? row(iq ? T.iq_level : T.level, T.levels[r.level] || r.level) : null,
+    // IQ: the classification from the LALCO IQ Score (Lao name from the server); other tests: the % level.
+    r.level ? row(iq ? T.iq_level : T.level, iq ? (document.documentElement.lang === 'lo' && r.level_lo ? r.level_lo : r.level) : T.levels[r.level] || r.level) : null,
     row(T.result, r.result === 'Pass' ? '✓ ' + T.pass : '✕ ' + T.not_pass, r.result === 'Pass' ? 'passed' : 'failed'),
     r.pass_mark != null ? row(T.pass_mark, pct(r.pass_mark)) : null));
 }
