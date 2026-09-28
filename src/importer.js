@@ -227,44 +227,115 @@ function applyAnswerKey(rows, key) {
   }
 }
 
-function rowsFromText(text, defaultSection) {
-  const lines = String(text).replace(/\r/g, '').split('\n').map((l) => l.replace(/ /g, ' ').trim());
+// ---- sections ------------------------------------------------------------------
+// A real recruitment document often mixes parts: a memo, a Calculation test
+// (numbered 1-10, then again 1-10 for harder ones), an essay prompt with its
+// marking guide, interview notes, scoring bands, policy tables. Headings split
+// the text into sections first; only sections that hold test questions are
+// read as questions, and numbering restarts in every section.
+//
+//   [1] ...            bracket heading (the preamble may say "[1] Calculation test")
+//   2/ ...             part heading
+//   Calculation Test / ຄຳຖາມງ່າຍໆ: / Interview:   short keyword heading
+const SECTION_WORDS = [
+  ['interview', /interview|ສໍາພາດ|ສຳພາດ/i],
+  ['essay', /essay|writing|motivation|ບົດຄວາມ|ຂຽນ/i],
+  ['calculation', /calculat|arithmetic|numerical|mathematic|ຄິດໄລ່|ຄຳນວນ|ຄໍານວນ/i],
+  ['iq', /\biq\b|intelligence|ໄອຄິວ/i],
+  ['general', /general\s*(knowledge|test|questions?)|ທົ່ວໄປ/i],
+  ['scoring', /scor|marking|ໃຫ້ຄະແນນ/i],
+];
+const LEVEL_WORDS = [['Easy', /\beasy\b|\bbasic\b|ງ່າຍ/i], ['Hard', /\bhard(er)?\b|difficult|advanced|ຍາກ/i]];
+// Hints / notes that belong to a question (or, in an essay, the marking guide) - never headings.
+const RE_HINT = /^(?:ຄຳແນະນຳ|ຄໍາແນະນໍາ|instructions?|hints?|note|guidance|marking\s*guide|key\s*points)\s*[:.]?/i;
+const QUESTION_TYPES = { calculation: 'CALCULATION', essay: 'ESSAY', iq: 'IQ', general: 'GENERAL' };
+const wordType = (s) => (SECTION_WORDS.find(([, re]) => re.test(s)) || [null])[0];
+const wordLevel = (s) => (LEVEL_WORDS.find(([, re]) => re.test(s)) || [null])[0];
+// "each question has 5 marks" / "ແຕ່ລະຄຳຖາມຈະມີ 5 ຄະແນນ" -> 5
+const sectionMarks = (s) => { const m = String(s).match(/(?:each\s+question|per\s+question|ແຕ່ລະຄຳຖາມ)\D{0,25}(\d+(?:\.\d+)?)\s*(?:marks?|points?|ຄະແນນ)/i); return m ? m[1] : ''; };
 
-  // Tab-separated tables (from .doc files, .tsv and .txt exports) are handled as tables.
-  const tabbed = lines.filter((l) => l.includes('\t')).map((l) => l.split('\t').map((c) => c.trim()));
-  if (tabbed.length > 1) {
-    const rows = rowsFromTable(tabbed, defaultSection);
-    if (rows && rows.length) { rows.format = 'table (header row)'; return rows; }
+// Is this line a heading? Returns { number, title, type, level, prompt } or null.
+function headingOf(line, bracketTypes) {
+  // Question lines, hints, "Type: IQ" / "Answer: B" lines, options, form fields and page lines are never headings.
+  if (RE_QUESTION.test(line) || RE_HINT.test(line) || RE_META.test(line) || RE_ANSWER.test(line) || RE_BLANK_FIELD.test(line) || RE_PAGE_LINE.test(line)
+    || /^\(?[A-Ea-e]\s*[.):]/.test(line)) return null;
+  let m = line.match(/^\[(\d{1,2})\]\s*(.*)$/);
+  if (m) {
+    const rest = m[2].trim();
+    // "[2] <a long question?>" is the heading AND the prompt of that section.
+    const prompt = rest.length > 80 || /[?？]\s*$/.test(rest) ? rest : '';
+    return { number: m[1], title: prompt ? '' : rest, type: wordType(prompt ? '' : rest) || bracketTypes.get(m[1]) || null, level: wordLevel(rest), prompt, marks: sectionMarks(rest) };
   }
+  m = line.match(/^(\d{1,2})\s*\/\s*(\S.*)$/);
+  if (m) return { number: null, part: true, title: m[2].trim(), type: wordType(m[2]) || 'other', level: null, prompt: '' };
+  if (line.length <= 60 && (/[:：]\s*$/.test(line) || (line.split(/\s+/).length <= 4 && !/[.?!,;？]/.test(line)))) {
+    const type = wordType(line);
+    const level = wordLevel(line);
+    if (type || (level && /[:：]\s*$/.test(line))) return { number: null, title: line.replace(/[:：]\s*$/, ''), type, level, prompt: '' };
+  }
+  return null;
+}
 
-  // Split off the answer key: everything after an "Answer Key" style heading
-  // that comes after at least one numbered question.
+// Splits lines into sections. Without any heading there is one section and
+// the file is read exactly as before (every line may be a question).
+function splitSections(lines) {
+  const bracketTypes = new Map();
+  for (const l of lines) {
+    const m = l.match(/^\[(\d{1,2})\]\s*(.*)$/);
+    if (m && !bracketTypes.has(m[1]) && wordType(m[2])) bracketTypes.set(m[1], wordType(m[2]));
+  }
+  const sections = [];
+  let cur = { key: 's0', type: 'intro', title: '', level: null, marks: '', lines: [] };
+  sections.push(cur);
+  for (const line of lines) {
+    const h = line && headingOf(line, bracketTypes);
+    if (!h) { cur.lines.push(line); continue; }
+    // A level heading with no type ("Harder questions:") continues the current test.
+    const inherit = !h.type && !h.number && !h.part && QUESTION_TYPES[cur.type];
+    cur = { key: 's' + sections.length, number: h.number ?? (inherit ? cur.number : null), type: h.type || (inherit ? cur.type : 'other'),
+      title: h.title, level: h.level || null, marks: h.marks || (inherit ? cur.marks : '') || '', prompt: h.prompt, lines: [] };
+    sections.push(cur);
+  }
+  // No heading at all: the file is read exactly as before. With headings, the part
+  // before the first heading still gives its numbered questions (not every line).
+  if (sections.length === 1) sections[0].type = 'questions';
+  else if (sections[0].lines.some((l) => RE_QUESTION.test(l))) sections[0].type = 'numbered';
+  return sections;
+}
+
+// Reads the questions of one section (the question / option / answer layout
+// is the same everywhere; only the test type differs).
+function questionsIn(section, defaultSection) {
+  const typeCode = QUESTION_TYPES[section.type] || defaultSection;
+  const lines = section.lines;
   const firstQuestion = lines.findIndex((l) => RE_QUESTION.test(l));
-  const keyAt = lines.findIndex((l, i) => i > firstQuestion && firstQuestion >= 0 && RE_KEY_HEADING.test(l));
-  const body = keyAt >= 0 ? lines.slice(0, keyAt) : lines;
-  const key = keyAt >= 0 ? readAnswerKey(lines.slice(keyAt + 1).filter(Boolean)) : new Map();
   const numbered = firstQuestion >= 0;
-
   const rows = [];
   let cur = null;
   let lastOption = null;
   let optionStyle = null;
+  let guide = false; // essay: the marking guide after the prompt (HR only)
   const start = (textValue, number) => {
-    cur = { question_text: textValue, section: defaultSection, option_a: '', option_b: '', option_c: '', option_d: '', option_e: '', correct_answer: '', category: '', difficulty: '', marks: '', number };
+    cur = { question_text: textValue, section: typeCode, option_a: '', option_b: '', option_c: '', option_d: '', option_e: '', correct_answer: '', category: '',
+      difficulty: section.type === 'questions' ? '' : section.level || '', marks: section.marks || '', number, section_key: section.key };
     rows.push(cur);
     lastOption = null;
+    guide = false;
   };
   const nextLetter = () => (lastOption ? LETTER_LIST[LETTER_LIST.indexOf(lastOption.slice(-1).toUpperCase()) + 1] : 'A');
+  if (section.prompt) start(section.prompt, 1);
 
-  for (let i = 0; i < body.length; i++) {
-    const line = body[i];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     if (!line) continue;
     // Page headers/footers and form fields ("Name: ____") are not questions.
     if (RE_PAGE_LINE.test(line) && !RE_QUESTION.test(line)) continue;
     if (RE_BLANK_FIELD.test(line) && !RE_QUESTION.test(line)) continue;
-    if (numbered && i < firstQuestion) continue; // title / instructions before question 1
+    if (numbered && i < firstQuestion && !cur) continue; // title / instructions before question 1
 
     let m;
+    if (guide && !RE_QUESTION.test(line)) { cur.correct_answer += (cur.correct_answer ? '\n' : '') + line; continue; }
+    if (cur && typeCode === 'ESSAY' && RE_HINT.test(line)) { guide = true; cur.correct_answer = line; continue; }
     if ((m = line.match(RE_ANSWER)) && cur) { cur.correct_answer = m[1].trim(); continue; }
     if ((m = line.match(RE_META)) && cur) {
       const k = m[1].toLowerCase();
@@ -281,7 +352,7 @@ function rowsFromText(text, defaultSection) {
       const want = nextLetter();
       const parsed = want && splitOptionLine(line, want);
       const bareOk = parsed && (parsed.style === 'mark' || parsed.options.length > 1 || lastOption
-        || (body[i + 1] && optionStart(body[i + 1], LETTER_LIST[LETTER_LIST.indexOf(want) + 1] || 'Z')));
+        || (lines[i + 1] && optionStart(lines[i + 1], LETTER_LIST[LETTER_LIST.indexOf(want) + 1] || 'Z')));
       if (parsed && bareOk && (!optionStyle || optionStyle === parsed.style || parsed.style === 'mark')) {
         optionStyle = optionStyle || parsed.style;
         for (const [L, t] of parsed.options) { lastOption = 'option_' + L.toLowerCase(); cur[lastOption] = t; }
@@ -293,19 +364,87 @@ function rowsFromText(text, defaultSection) {
     }
     if ((m = line.match(RE_QUESTION))) { start(m[3].trim(), Number(m[1] || m[2])); continue; }
     if ((m = line.match(RE_QUESTION_LABEL))) { start(m[1].trim(), null); continue; }
-    // Continuation line: part of the question, or of the last option.
-    if (!cur || (!numbered && cur.correct_answer)) { if (!numbered) start(line, null); continue; }
+    // Continuation line: part of the question (incl. its hint), or of the last option.
+    // Without numbering, every line is a question only in a plain file (no headings);
+    // inside a document section only a clear essay question line is (tables, notes are not).
+    const blockLine = section.type === 'questions' || (typeCode === 'ESSAY' && /[?？]\s*$/.test(line));
+    if (!cur || (!numbered && cur.correct_answer)) { if (!numbered && blockLine) start(line, null); continue; }
     if (lastOption) cur[lastOption] += ' ' + line;
     else cur.question_text += '\n' + line;
   }
+  return rows;
+}
 
+// A question without options that clearly asks for a calculation (amounts,
+// percentages, several numbers) is a short-answer Calculation question.
+const looksCalculation = (text) => (String(text).match(/\d+(?:[.,]\d+)*/g) || []).length >= 2 && /[%$€£¥₭]|\d\s*(?:kip|ກີບ|ໂດລາ|usd|dollars?|km|kg|months?|years?|ເດືອນ|ປີ)|[+\-×x*÷/=]\s*\d|\?|？|how\s+(much|many)|what\s+is|calculate|ເທົ່າໃດ|ຈັກ/i.test(text);
+
+function rowsFromText(text, defaultSection) {
+  const lines = String(text).replace(/\r/g, '').split('\n').map((l) => l.replace(/ /g, ' ').trim());
+
+  // Tab-separated tables (from .doc files, .tsv and .txt exports) are handled as tables.
+  const tabbed = lines.filter((l) => l.includes('\t')).map((l) => l.split('\t').map((c) => c.trim()));
+  if (tabbed.length > 1) {
+    const rows = rowsFromTable(tabbed, defaultSection);
+    if (rows && rows.length) { rows.format = 'table (header row)'; return rows; }
+  }
+
+  // Split off the answer key: everything after an "Answer Key" style heading
+  // that comes after at least one numbered question.
+  const firstQuestion = lines.findIndex((l) => RE_QUESTION.test(l));
+  const keyAt = lines.findIndex((l, i) => i > firstQuestion && firstQuestion >= 0 && RE_KEY_HEADING.test(l));
+  const body = keyAt >= 0 ? lines.slice(0, keyAt) : lines;
+  const key = keyAt >= 0 ? readAnswerKey(lines.slice(keyAt + 1).filter(Boolean)) : new Map();
+
+  const sections = splitSections(body);
+  const rows = [];
+  for (const s of sections) {
+    if (s.type === 'questions' || s.type === 'numbered' || QUESTION_TYPES[s.type]) rows.push(...questionsIn(s, defaultSection));
+  }
   applyAnswerKey(rows, key);
-  rows.format = numbered ? (key.size ? 'numbered questions with an answer key' : 'numbered questions') : rows.length ? 'question blocks' : 'no question structure found';
+
+  // Without headings: option-less questions that clearly ask for a calculation,
+  // when IQ or General is selected, are shown as Calculation (never put into IQ).
+  if (sections.length === 1 && ['IQ', 'GENERAL'].includes(defaultSection)) {
+    for (const r of rows) {
+      const hasOptions = LETTER_LIST.some((L) => r['option_' + L.toLowerCase()]);
+      if (!hasOptions && looksCalculation(r.question_text)) { r.section = 'CALCULATION'; r.section_key = 'detected-calculation'; }
+    }
+  }
+
+  // What was found, for the preview: question sections, and content that is not imported.
+  const summary = [];
+  if (sections.length > 1) {
+    for (const s of sections) {
+      const count = rows.filter((r) => r.section_key === s.key).length;
+      const content = s.lines.filter(Boolean).length + (s.prompt ? 1 : 0);
+      if (!count && !content) continue;
+      const kind = (QUESTION_TYPES[s.type] || s.type === 'numbered') && count ? 'questions' : s.type === 'interview' ? 'interview' : s.type === 'scoring' ? 'scoring' : 'other';
+      summary.push({ key: s.key, title: s.title || (s.number ? `[${s.number}]` : ''), kind, section: kind === 'questions' ? QUESTION_TYPES[s.type] || defaultSection : null, level: s.level, questions: count, lines: content });
+    }
+  } else {
+    for (const k of [...new Set(rows.map((r) => r.section_key || 's0'))]) {
+      const these = rows.filter((r) => (r.section_key || 's0') === k);
+      summary.push({ key: k, title: k === 'detected-calculation' ? 'Questions that look like short-answer Calculation' : '', kind: 'questions', section: these[0].section, questions: these.length, lines: these.length });
+    }
+    for (const r of rows) r.section_key = r.section_key || 's0';
+  }
+  const numbered = firstQuestion >= 0;
+  rows.format = (sections.length > 1 ? 'document with sections — ' : '') + (numbered ? (key.size ? 'numbered questions with an answer key' : 'numbered questions') : rows.length ? 'question blocks' : 'no question structure found');
   rows.keyCount = key.size;
+  rows.sections = summary;
   return rows;
 }
 
 // ---- validation ------------------------------------------------------------
+
+// More Lao letters than Latin ones: the text is written in Lao.
+function mostlyLao(text) {
+  const t = String(text || '');
+  const lao = (t.match(/[\u0E80-\u0EFF]/g) || []).length;
+  const latin = (t.match(/[A-Za-z]/g) || []).length;
+  return lao > 20 && lao > latin;
+}
 
 const IMAGE_KEYS = ['image_id', ...LETTERS.map((L) => `option_${L.toLowerCase()}_image`)];
 
@@ -318,7 +457,11 @@ function resolveAnswerLetter(answer, row) {
 }
 
 // Returns { question, errors }. question is ready to insert when errors is empty.
-function validateQuestion(input) {
+// allowMissingAnswer (imports): a short-answer Calculation question without its
+// answer is still a valid question; it is imported Inactive and marked
+// answer_required, so it never reaches an automatically marked test until HR
+// enters the answer. The answer is never guessed.
+function validateQuestion(input, { allowMissingAnswer = false } = {}) {
   const errors = [];
   const clean = (v, max) => String(v ?? '').trim().slice(0, max);
   const q = {
@@ -331,7 +474,8 @@ function validateQuestion(input) {
     option_c: clean(input.option_c, 1000),
     option_d: clean(input.option_d, 1000),
     option_e: clean(input.option_e, 1000),
-    correct_answer: clean(input.correct_answer, 1000),
+    // Essays may carry a marking guide here (HR only, never shown to candidates).
+    correct_answer: clean(input.correct_answer, sectionFrom(input.section) === 'ESSAY' || input.section === 'ESSAY' ? 5000 : 1000),
     marks: input.marks === '' || input.marks == null ? 1 : Number(input.marks),
   };
   // Pictures are referenced by id (uploaded separately); the route checks they exist.
@@ -357,6 +501,12 @@ function validateQuestion(input) {
     const problems = require('./lao').laoProblems(q, q);
     q.lo_status = problems.length ? 'needs_review' : 'translated';
     q.lo_note = problems.join(' ');
+  } else if (mostlyLao(q.question_text)) {
+    // The source itself is in Lao: it is also the Lao text (nothing is translated or changed).
+    q.question_text_lo = q.question_text;
+    for (const L of LETTERS) q[`option_${L.toLowerCase()}_lo`] = q['option_' + L.toLowerCase()];
+    q.lo_status = 'translated';
+    q.lo_note = 'The source question is in Lao.';
   }
   if (!Number.isFinite(q.marks) || q.marks <= 0 || q.marks > 100) errors.push('Marks must be a number between 0 and 100.');
 
@@ -375,7 +525,8 @@ function validateQuestion(input) {
   } else if (filled.length === 1) {
     errors.push('A multiple-choice question needs at least 2 options.');
   } else if (q.section === 'CALCULATION' && input.answer_error == null) {
-    if (!q.correct_answer) errors.push('Correct answer is missing.');
+    if (!q.correct_answer && allowMissingAnswer) { q.answer_required = true; q.status = 'Inactive'; }
+    else if (!q.correct_answer) errors.push('Correct answer is missing.');
   } else {
     errors.push('Options are missing (need Option A, Option B, ...).');
   }
@@ -464,12 +615,13 @@ async function parseFile(buffer, originalName, defaultSection) {
   if (!rows || rows.length === 0) throw new ImportError(`${NO_STRUCTURE}\n\nDetected format: ${(rows && rows.format) || 'no question structure found'}\nQuestions found: 0\n\nA question needs its text, options A, B, C ... (not for Essay or short-answer Calculation) and a correct answer.`);
   if (rows.length > MAX_ROWS) throw new ImportError(`This file has more than ${MAX_ROWS} questions. Please split it into smaller files.`);
   const checked = rows.map((raw, i) => {
-    const { question, errors } = validateQuestion(raw);
-    return { row: i + 1, number: raw.number ?? null, question, errors };
+    const { question, errors } = validateQuestion(raw, { allowMissingAnswer: true });
+    return { row: i + 1, number: raw.number ?? null, question, errors, section_key: raw.section_key || 's0', answer_required: !!question.answer_required };
   });
   if (!checked.some((r) => r.errors.length === 0)) throw new ImportError(diagnostics(rows, checked));
   checked.format = rows.format || 'table (header row)';
   checked.keyCount = rows.keyCount || 0;
+  checked.sections = rows.sections || [{ key: 's0', title: '', kind: 'questions', section: defaultSection, questions: checked.length, lines: checked.length }];
   return checked;
 }
 

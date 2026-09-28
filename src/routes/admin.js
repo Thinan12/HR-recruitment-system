@@ -121,11 +121,15 @@ router.get('/export/candidates.xlsx', (req, res) => {
 
 // ---- questions ---------------------------------------------------------
 
+const NEEDS_ANSWER_SQL = "section = 'CALCULATION' AND TRIM(correct_answer) = '' AND option_a = '' AND option_b = '' AND option_a_image IS NULL AND option_b_image IS NULL";
+
 router.get('/questions', (req, res) => {
   const where = [];
   const args = [];
   if (A.SECTIONS.includes(req.query.section)) { where.push('section = ?'); args.push(req.query.section); }
   if (req.query.status === 'Active' || req.query.status === 'Inactive') { where.push('status = ?'); args.push(req.query.status); }
+  // Short-answer questions still waiting for their correct answer.
+  if (req.query.status === 'needs_answer') where.push(NEEDS_ANSWER_SQL);
   if (req.query.q) {
     where.push('(question_text LIKE ? OR category LIKE ? OR question_text_lo LIKE ?)');
     args.push(`%${req.query.q}%`, `%${req.query.q}%`, `%${req.query.q}%`);
@@ -147,6 +151,7 @@ router.get('/questions', (req, res) => {
   }
   res.json({ questions: db.prepare(sql).all(...args), counts: A.activeCounts(), inactive_counts: A.inactiveCounts(), total_counts: totals, iq_levels: iqLevels,
     lao_counts: lao.laoCounts(), lao_ready_counts: A.activeCounts('lo'), translator: lao.hasProvider(), translate_job: lao.job,
+    needs_answer: db.prepare(`SELECT COUNT(*) AS n FROM questions WHERE ${NEEDS_ANSWER_SQL}`).get().n,
     categories: categories.list(), no_category: Object.fromEntries(A.SECTIONS.map((sec) => [sec, db.prepare('SELECT COUNT(*) AS n FROM questions WHERE section = ? AND category_id IS NULL').get(sec).n])) });
 });
 
@@ -155,12 +160,12 @@ const QUESTION_COLS = ['section', 'category', 'category_id', 'difficulty', 'ques
 // New questions may already carry a Lao translation (Lao columns in an import file).
 const INSERT_COLS = [...QUESTION_COLS, ...LAO_COLUMNS, 'lo_status', 'lo_note', 'lo_translated_at'];
 const insertRow = db.prepare(`INSERT INTO questions (${INSERT_COLS.join(', ')}, status, created_at)
-  VALUES (${INSERT_COLS.map((c) => '@' + c).join(', ')}, 'Active', @created_at)`);
+  VALUES (${INSERT_COLS.map((c) => '@' + c).join(', ')}, @status, @created_at)`);
 const insertQuestion = { run: (q) => insertRow.run({ ...Object.fromEntries([...LAO_COLUMNS, 'lo_status', 'lo_note'].map((c) => [c, ''])), ...q,
-  category_id: q.category_id ?? null, lo_translated_at: q.lo_status ? q.created_at : null }) };
+  category_id: q.category_id ?? null, status: q.status === 'Inactive' ? 'Inactive' : 'Active', lo_translated_at: q.lo_status ? q.created_at : null }) };
 
 function checkedQuestion(body, current) {
-  const { question, errors } = validateQuestion(body);
+  const { question, errors } = validateQuestion(body, { allowMissingAnswer: body?.status === 'Inactive' });
   for (const key of IMAGE_KEYS) if (question[key] && !images.imageExists(question[key])) errors.push('A picture could not be found. Please upload it again.');
   if (errors.length) throw new A.InputError(errors.join(' '));
   // The category is chosen from the managed list of that test type (by id,
@@ -345,11 +350,19 @@ router.post('/questions/import/preview', (req, res, next) => {
         decisions.set(key, d);
       }
       const bySection = Object.fromEntries(A.SECTIONS.map((s) => [s, valid.filter((r) => r.question.section === s).length]));
+      // What the document contains, per section, and whether it matches the chosen type.
+      const sections = (rows.sections || []).map((sec) => ({ ...sec, valid: rows.filter((r) => r.section_key === sec.key && !r.errors.length).length,
+        answer_required: rows.filter((r) => r.section_key === sec.key && r.answer_required && !r.errors.length).length }));
+      const detected = [...new Set(valid.map((r) => r.question.section))];
+      const mismatch = detected.length && !detected.includes(defaultSection)
+        ? `This document appears to contain ${detected.map((d) => ({ IQ: 'IQ', GENERAL: 'General', CALCULATION: 'Calculation', ESSAY: 'Essay' })[d]).join(' and ')} questions, but ${({ IQ: 'IQ', GENERAL: 'General', CALCULATION: 'Calculation', ESSAY: 'Essay' })[defaultSection]} questions is selected. Nothing is put into the ${({ IQ: 'IQ', GENERAL: 'General', CALCULATION: 'Calculation', ESSAY: 'Essay' })[defaultSection]} bank unless you choose it below.`
+        : null;
       const duplicates = rows.filter((r) => r.errors.some((e) => /already in the question bank/.test(e))).length;
       const conflicts = rows.filter((r) => r.errors.some((e) => /conflict/i.test(e))).length;
       res.json({ found: rows.length, valid: valid.length, invalid: rows.length - valid.length, duplicates, conflicts,
         format: rows.format, answer_key: rows.keyCount, test_type: defaultSection, file: req.file.originalname, by_section: bySection,
         category_decisions: [...decisions.values()], missing_category: valid.filter((r) => r.category_state === 'missing').length,
+        sections, type_mismatch: mismatch, answer_required: valid.filter((r) => r.answer_required).length,
         categories: categories.list({ status: 'active' }), rows });
     } catch (e) {
       if (e instanceof ImportError) return bad(res, e.message);
@@ -373,7 +386,7 @@ router.post('/questions/import', (req, res) => {
   const decided = req.body?.category_decisions && typeof req.body.category_decisions === 'object' ? req.body.category_decisions : {};
   const undecided = new Map();
   for (const row of rows) {
-    const { question, errors } = validateQuestion(row);
+    const { question, errors } = validateQuestion(row, { allowMissingAnswer: true });
     const name = String(question.category || '').trim();
     if (errors.length || !name) continue;
     const c = categories.byName(question.section, name);
@@ -384,7 +397,7 @@ router.post('/questions/import', (req, res) => {
   db.transaction(() => {
     const seen = existingQuestionKeys();
     for (const row of rows) {
-      const { question, errors } = validateQuestion(row);
+      const { question, errors } = validateQuestion(row, { allowMissingAnswer: true });
       const key = A.questionKey(question);
       if (errors.length || seen.has(key)) { skipped++; continue; }
       const name = String(question.category || '').trim();
@@ -402,7 +415,8 @@ router.post('/questions/import', (req, res) => {
   })();
   // New questions without Lao are translated in the background when a service is set up.
   if (lao.hasProvider() && newIds.length) lao.translateMissing(newIds, req.admin.username);
-  res.json({ imported, skipped, ...(lao.hasProvider() && newIds.length ? { translating: true } : {}) });
+  const waiting = newIds.length ? db.prepare(`SELECT COUNT(*) AS n FROM questions WHERE id IN (${newIds.join(',')}) AND ${NEEDS_ANSWER_SQL}`).get().n : 0;
+  res.json({ imported, skipped, ...(waiting ? { answer_required: waiting } : {}), ...(lao.hasProvider() && newIds.length ? { translating: true } : {}) });
 });
 
 // ---- assessments -------------------------------------------------------
