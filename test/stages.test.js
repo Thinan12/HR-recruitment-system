@@ -97,11 +97,14 @@ test('failing IQ stops the assessment: no later test can be opened', async () =>
   assert.equal(statuses(s), 'IQ:failed GENERAL:locked CALCULATION:locked');
 
   assert.equal((await candidate.post(url(a.token, '/continue'))).status, 409);
-  assert.equal((await candidate.post(url(a.token, '/start'), CANDIDATE)).data.state, 'submitted');
-  assert.equal((await candidate.get(url(a.token))).data.outcome, 'stopped', 'refreshing shows the same end');
-  const sections = db.prepare('SELECT DISTINCT section FROM assessment_questions WHERE assessment_id = ?').all(attemptOf(a)).map((r) => r.section);
+  // The stopped attempt released this browser: the next person gets a new attempt; the stopped one is unchanged.
+  assert.equal((await candidate.get(url(a.token))).data.state, 'ready', 'reopening shows the start form, not the old result');
+  const next = (await candidate.post(url(a.token, '/start'), { ...CANDIDATE, name: 'Next Person', phone: '020 1111 2222' })).data;
+  assert.deepEqual([next.state, next.candidate.name], ['in_progress', 'Next Person']);
+  const stopped = db.prepare("SELECT a.id, a.result FROM assessments a JOIN candidates c ON c.id = a.candidate_id WHERE a.link_id = ? AND c.name = 'Fails IQ'").get(a.id);
+  const sections = db.prepare('SELECT DISTINCT section FROM assessment_questions WHERE assessment_id = ?').all(stopped.id).map((r) => r.section);
   assert.deepEqual(sections, ['IQ'], 'no General or Calculation questions were ever drawn');
-  assert.equal(db.prepare('SELECT result FROM assessments WHERE id = ?').get(attemptOf(a)).result, 'Not Pass');
+  assert.equal(stopped.result, 'Not Pass');
 });
 
 test('the server enforces the order: no answering, opening or skipping out of turn', async () => {
@@ -215,7 +218,7 @@ test('the server reports the current stage: IQ -> GENERAL -> CALCULATION -> ESSA
   const after = (await admin.get('/api/admin/assessments/' + attemptOf(r.a))).data;
   assert.equal(after.assessment.current_stage.key, 'COMPLETE');
   assert.equal(after.assessment.result, 'Pass');
-  assert.equal((await candidate.get(url(r.a.token))).data.current_stage, 'COMPLETE');
+  assert.equal((await candidate.get(url(r.a.token))).data.state, 'ready', 'the finished attempt released the browser');
 });
 
 test('refresh / reopening the link resumes the same test, answers and timer', async () => {

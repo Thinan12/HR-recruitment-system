@@ -463,6 +463,300 @@
           }
         },
         {
+          "name": "POST Admin Login — second session (to be logged out)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "const c = pm.response.headers.all().find((h) => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('hr_session='));",
+                  "pm.test('A second session token was issued', () => pm.expect(c, 'no hr_session cookie').to.exist);",
+                  "pm.environment.set('secondAdminToken', c ? c.value.split(';')[0].slice('hr_session='.length) : '');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "**Purpose:** A second, separate admin session (cookie jar off). Its token is kept only for the next three requests, then cleared.\n\n**Authentication:** None — sent without any cookie on purpose\n\n**Input:** JSON body\n\n**Expected:** HTTP 200, JSON",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{adminUsername}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "GET Current Admin — second session works",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Signed in', () => pm.expect(body.username).to.equal(env('adminUsername'))); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "hr_session={{secondAdminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "auth",
+                "me"
+              ]
+            },
+            "description": "**Purpose:** GET Current Admin — second session works\n\n**Authentication:** Explicit cookie: `hr_session={{secondAdminToken}}` (cookie jar off)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "POST Logout — second session",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('ok = true', () => pm.expect(body.ok).to.equal(true)); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "hr_session={{secondAdminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "**Purpose:** POST Logout — second session\n\n**Authentication:** Explicit cookie: `hr_session={{secondAdminToken}}` (cookie jar off)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "GET Current Admin — logged-out token replayed",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Error message says: Your session has ended', () => pm.expect(String((body && (body.error || body.message)) || '')).to.include(\"Your session has ended\"));",
+                  "pm.environment.set('secondAdminToken', ''); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "hr_session={{secondAdminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "auth",
+                "me"
+              ]
+            },
+            "description": "**Purpose:** Logout revokes the token itself (not only the cookie): the same token sent again is refused at once.\n\n**Authentication:** Explicit cookie: `hr_session={{secondAdminToken}}` (cookie jar off)\n\n**Input:** none\n\n**Expected:** HTTP 401, JSON — error contains “Your session has ended”"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "GET Current Admin — the main session is not affected",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Still signed in', () => pm.expect(body.username).to.equal(env('adminUsername'))); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "auth",
+                "me"
+              ]
+            },
+            "description": "**Purpose:** GET Current Admin — the main session is not affected\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          }
+        },
+        {
           "name": "POST Logout",
           "event": [
             {
@@ -5989,6 +6283,78 @@
           }
         },
         {
+          "name": "POST Import Preview — Excel 97-2003 (.xls)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "pm.variables.set('maxMs', 10000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('3 found, 3 valid, read as a table', () => { pm.expect(body.found).to.equal(3); pm.expect(body.valid).to.equal(3); pm.expect(body.format).to.equal('table (header row)'); });",
+                  "pm.test('Questions, answers and categories read', () => {",
+                  "  pm.expect(body.rows.map((r) => r.question.question_text)).to.eql(['Which device prints on paper?', 'How many hours are in two days?', 'Which file type is a spreadsheet?']);",
+                  "  pm.expect(body.rows.map((r) => r.question.correct_answer)).to.eql(['B', 'C', 'B']);",
+                  "  pm.expect(body.rows.map((r) => r.question.category)).to.eql(['Office', 'Numbers', 'Office']);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/questions/import/preview",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "questions",
+                "import",
+                "preview"
+              ]
+            },
+            "description": "**Purpose:** A real .xls file (BIFF8 / OLE, not a renamed .xlsx). Preview only: nothing is saved.\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** multipart form: section, file (file fixtures/mcq-bank-97.xls)\n\n**Expected:** HTTP 200, JSON",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "section",
+                  "value": "{{testTypeKey}}",
+                  "type": "text"
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "fixtures/mcq-bank-97.xls"
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "POST Import Preview — CSV with semicolons and quotes",
           "event": [
             {
@@ -9452,6 +9818,401 @@
             },
             "description": "**Purpose:** DELETE Link — already deleted\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 404, JSON"
           }
+        },
+        {
+          "name": "GET Question Counts — the temporary MCQ type",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Has active questions', () => pm.expect(body[env('testTypeKey')]).to.be.above(0)); set('guardNeed', String(body[env('testTypeKey')])); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/questions/counts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "questions",
+                "counts"
+              ]
+            },
+            "description": "**Purpose:** GET Question Counts — the temporary MCQ type\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          }
+        },
+        {
+          "name": "POST Create Assessment — a link that needs every question of the temporary MCQ type",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "set('guardLinkId', String(body.id)); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/assessments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "assessments"
+              ]
+            },
+            "description": "**Purpose:** POST Create Assessment — a link that needs every question of the temporary MCQ type\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** JSON body\n\n**Expected:** HTTP 201, JSON",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"title\": \"{{runTag}} GUARD LINK\", \"tests\": [\"{{testTypeKey}}\"], \"counts\": { \"{{testTypeKey}}\": {{guardNeed}} }, \"link_expiry_minutes\": 60, \"eligibility_mark\": 0, \"language\": \"en\" }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET Questions — one active question of the temporary MCQ type",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "const q = body.questions[0]; pm.test('Found', () => pm.expect(q).to.exist); set('guardQuestionId', String(q.id)); set('guardQuestionJson', { ...q, status: 'Inactive' }); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/questions?section={{testTypeKey}}&status=Active",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "questions"
+              ],
+              "query": [
+                {
+                  "key": "section",
+                  "value": "{{testTypeKey}}"
+                },
+                {
+                  "key": "status",
+                  "value": "Active"
+                }
+              ]
+            },
+            "description": "**Purpose:** GET Questions — one active question of the temporary MCQ type\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** query: section, status\n\n**Expected:** HTTP 200, JSON"
+          }
+        },
+        {
+          "name": "PUT Question — make it Inactive while an open link needs it",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Error message says: without enough active questions', () => pm.expect(String((body && (body.error || body.message)) || '')).to.include(\"without enough active questions\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/questions/{{guardQuestionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "questions",
+                "{{guardQuestionId}}"
+              ]
+            },
+            "description": "**Purpose:** Removal guard: HR cannot make a question Inactive when an open link (or a candidate between tests) would then not have enough questions. Only a temporary question of this run is used.\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** JSON body\n\n**Expected:** HTTP 400, JSON — error contains “without enough active questions”",
+            "body": {
+              "mode": "raw",
+              "raw": "{{guardQuestionJson}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "DELETE Question — while an open link needs it",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Error message says: Disable those links, or add questions first.', () => pm.expect(String((body && (body.error || body.message)) || '')).to.include(\"Disable those links, or add questions first.\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/questions/{{guardQuestionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "questions",
+                "{{guardQuestionId}}"
+              ]
+            },
+            "description": "**Purpose:** DELETE Question — while an open link needs it\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 400, JSON — error contains “Disable those links, or add questions first.”"
+          }
+        },
+        {
+          "name": "GET Questions — the question is still active",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Not removed, not deactivated', () => pm.expect(body.questions.map((q) => q.id)).to.include(Number(env('guardQuestionId')))); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/questions?section={{testTypeKey}}&status=Active",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "questions"
+              ],
+              "query": [
+                {
+                  "key": "section",
+                  "value": "{{testTypeKey}}"
+                },
+                {
+                  "key": "status",
+                  "value": "Active"
+                }
+              ]
+            },
+            "description": "**Purpose:** GET Questions — the question is still active\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** query: section, status\n\n**Expected:** HTTP 200, JSON"
+          }
+        },
+        {
+          "name": "DELETE Link — the guard link (unused)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('ok = true', () => pm.expect(body.ok).to.equal(true)); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/links/{{guardLinkId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "links",
+                "{{guardLinkId}}"
+              ]
+            },
+            "description": "**Purpose:** DELETE Link — the guard link (unused)\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          }
         }
       ]
     },
@@ -10766,7 +11527,8 @@
                 "exec": [
                   "const env = (k) => pm.environment.get(k);",
                   "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
-                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "pm.environment.set('sessionUsedByA', pm.environment.get('candidateSessionA')); "
                 ]
               }
             },
@@ -10788,7 +11550,8 @@
                   "  const m = h.key.toLowerCase() === 'set-cookie' && /lalco_candidate_session=([^;]+)/.exec(h.value);",
                   "  if (m) pm.environment.set('candidateSession' + \"A\", m[1]);",
                   "}",
-                  "pm.test('Submitted; waiting for HR marking', () => { pm.expect(body.state).to.equal('submitted'); pm.expect(body.last_result.result).to.equal('Pending'); }); "
+                  "pm.test('Submitted; waiting for HR marking', () => { pm.expect(body.state).to.equal('submitted'); pm.expect(body.last_result.result).to.equal('Pending'); });",
+                  "pm.test('The finished attempt released this browser: a new session cookie', () => pm.expect(env('candidateSessionA')).to.not.equal(env('sessionUsedByA')));"
                 ]
               }
             }
@@ -10864,7 +11627,7 @@
                   "  const m = h.key.toLowerCase() === 'set-cookie' && /lalco_candidate_session=([^;]+)/.exec(h.value);",
                   "  if (m) pm.environment.set('candidateSession' + \"A\", m[1]);",
                   "}",
-                  "pm.test('Refused: already submitted', () => pm.expect(body.state).to.equal('submitted')); "
+                  "pm.test('Refused, and nothing of A is shown', () => { pm.expect(body.state).to.not.equal('in_progress'); pm.expect(body).to.not.have.property('candidate'); pm.expect(body).to.not.have.property('questions'); }); "
                 ]
               }
             }
@@ -10893,7 +11656,7 @@
                 "submit"
               ]
             },
-            "description": "**Purpose:** POST Submit — Candidate A again\n\n**Authentication:** Candidate session cookie `lalco_candidate_session` of candidate A (cookie jar off)\n\n**Input:** JSON body\n\n**Expected:** HTTP 409, JSON",
+            "description": "**Purpose:** The browser now has a new session, so there is nothing to submit; A's finished attempt is not changed (checked in folder 15).\n\n**Authentication:** Candidate session cookie `lalco_candidate_session` of candidate A (cookie jar off)\n\n**Input:** JSON body\n\n**Expected:** HTTP 409, JSON",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"answers\": {}\n}",
@@ -10984,6 +11747,928 @@
           }
         },
         {
+          "name": "GET Exam — the same browser, next person (SB2) opens the link",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "// Keep this candidate's own session cookie (the cookie jar is off for candidate requests).",
+                  "for (const h of pm.response.headers.all()) {",
+                  "  const m = h.key.toLowerCase() === 'set-cookie' && /lalco_candidate_session=([^;]+)/.exec(h.value);",
+                  "  if (m) pm.environment.set('candidateSession' + \"A\", m[1]);",
+                  "}",
+                  "pm.test('Start form, nothing of the previous person', () => { pm.expect(body.state).to.equal('ready'); pm.expect(body).to.not.have.property('candidate'); pm.expect(body).to.not.have.property('questions'); }); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "lalco_candidate_session={{candidateSessionA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/exam/{{linkToken}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "exam",
+                "{{linkToken}}"
+              ]
+            },
+            "description": "**Purpose:** GET Exam — the same browser, next person (SB2) opens the link\n\n**Authentication:** Candidate session cookie `lalco_candidate_session` of candidate A (cookie jar off)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "POST Start — SB2 on the same browser",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "const P = {\"who\":\"SB2\"};",
+                  "pm.environment.set('sameBrowserSession' + P.who, pm.environment.get('candidateSessionA')); "
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "const P = {\"who\":\"SB2\"};",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "// Keep this candidate's own session cookie (the cookie jar is off for candidate requests).",
+                  "for (const h of pm.response.headers.all()) {",
+                  "  const m = h.key.toLowerCase() === 'set-cookie' && /lalco_candidate_session=([^;]+)/.exec(h.value);",
+                  "  if (m) pm.environment.set('candidateSession' + \"A\", m[1]);",
+                  "}",
+                  "pm.test('A NEW attempt for this person', () => { pm.expect(body.state).to.equal('in_progress'); pm.expect(body.candidate.name).to.equal(env('runTag') + ' ' + P.who); pm.expect(body.questions.length).to.equal(3); });",
+                  "set('questions' + P.who, body.questions.map((q) => ({ id: q.id, options: q.options.map((o) => o.key) })));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "lalco_candidate_session={{candidateSessionA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/exam/{{linkToken}}/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "exam",
+                "{{linkToken}}",
+                "start"
+              ]
+            },
+            "description": "**Purpose:** POST Start — SB2 on the same browser\n\n**Authentication:** Candidate session cookie `lalco_candidate_session` of candidate A (cookie jar off)\n\n**Input:** JSON body\n\n**Expected:** HTTP 200, JSON",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{runTag}} SB2\",\n  \"phone\": \"020 0000 0201\",\n  \"graduate_from\": \"University\",\n  \"university\": \"Postman University\",\n  \"subject\": \"Testing\",\n  \"gpa\": \"3.0\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "POST Start — someone else tries to take over SB2 (active)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Error message says: assessment_in_progress', () => pm.expect(String((body && (body.error || body.message)) || '')).to.include(\"assessment_in_progress\"));",
+                  "// Keep this candidate's own session cookie (the cookie jar is off for candidate requests).",
+                  "for (const h of pm.response.headers.all()) {",
+                  "  const m = h.key.toLowerCase() === 'set-cookie' && /lalco_candidate_session=([^;]+)/.exec(h.value);",
+                  "  if (m) pm.environment.set('candidateSession' + \"A\", m[1]);",
+                  "}",
+                  "pm.test('Only the error: no candidate, questions, answers or result', () => pm.expect(Object.keys(body)).to.eql(['error'])); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "lalco_candidate_session={{candidateSessionA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/exam/{{linkToken}}/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "exam",
+                "{{linkToken}}",
+                "start"
+              ]
+            },
+            "description": "**Purpose:** While an attempt is active in this browser, a Start with other details is refused; nothing of the owner is sent back and no record is created.\n\n**Authentication:** Candidate session cookie `lalco_candidate_session` of candidate A (cookie jar off)\n\n**Input:** JSON body\n\n**Expected:** HTTP 409, JSON — error contains “assessment_in_progress”",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{runTag}} INTRUDER\",\n  \"phone\": \"020 0000 0299\",\n  \"graduate_from\": \"University\",\n  \"university\": \"Postman University\",\n  \"subject\": \"Testing\",\n  \"gpa\": \"3.0\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "GET Exam — SB2 refreshes and resumes",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "// Keep this candidate's own session cookie (the cookie jar is off for candidate requests).",
+                  "for (const h of pm.response.headers.all()) {",
+                  "  const m = h.key.toLowerCase() === 'set-cookie' && /lalco_candidate_session=([^;]+)/.exec(h.value);",
+                  "  if (m) pm.environment.set('candidateSession' + \"A\", m[1]);",
+                  "}",
+                  "pm.test('SB2\\'s own attempt, same questions', () => { pm.expect(body.state).to.equal('in_progress'); pm.expect(body.candidate.name).to.equal(env('runTag') + ' SB2'); pm.expect(body.questions.map((q) => q.id)).to.eql(getJSON('questionsSB2').map((q) => q.id)); }); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "lalco_candidate_session={{candidateSessionA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/exam/{{linkToken}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "exam",
+                "{{linkToken}}"
+              ]
+            },
+            "description": "**Purpose:** GET Exam — SB2 refreshes and resumes\n\n**Authentication:** Candidate session cookie `lalco_candidate_session` of candidate A (cookie jar off)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "POST Submit — SB2, first test",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "const P = {\"who\":\"SB2\"};",
+                  "const a = {}; getJSON('questions' + P.who).forEach((q) => { a[q.id] = q.options[0]; }); pm.variables.set('answers' + P.who, JSON.stringify(a)); "
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "const P = {\"who\":\"SB2\"};",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "// Keep this candidate's own session cookie (the cookie jar is off for candidate requests).",
+                  "for (const h of pm.response.headers.all()) {",
+                  "  const m = h.key.toLowerCase() === 'set-cookie' && /lalco_candidate_session=([^;]+)/.exec(h.value);",
+                  "  if (m) pm.environment.set('candidateSession' + \"A\", m[1]);",
+                  "}",
+                  "pm.test('Next test waiting', () => pm.expect(body.state).to.equal('next_test')); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "lalco_candidate_session={{candidateSessionA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/exam/{{linkToken}}/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "exam",
+                "{{linkToken}}",
+                "submit"
+              ]
+            },
+            "description": "**Purpose:** POST Submit — SB2, first test\n\n**Authentication:** Candidate session cookie `lalco_candidate_session` of candidate A (cookie jar off)\n\n**Input:** JSON body\n\n**Expected:** HTTP 200, JSON",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"answers\": {{answersSB2}} }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "POST Continue — SB2",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "const P = {\"who\":\"SB2\"};"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "const P = {\"who\":\"SB2\"};",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "// Keep this candidate's own session cookie (the cookie jar is off for candidate requests).",
+                  "for (const h of pm.response.headers.all()) {",
+                  "  const m = h.key.toLowerCase() === 'set-cookie' && /lalco_candidate_session=([^;]+)/.exec(h.value);",
+                  "  if (m) pm.environment.set('candidateSession' + \"A\", m[1]);",
+                  "}",
+                  "pm.test('Interview test running', () => pm.expect(body.state).to.equal('in_progress')); set('essayQuestion' + P.who, String(body.questions[0].id)); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "lalco_candidate_session={{candidateSessionA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/exam/{{linkToken}}/continue",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "exam",
+                "{{linkToken}}",
+                "continue"
+              ]
+            },
+            "description": "**Purpose:** POST Continue — SB2\n\n**Authentication:** Candidate session cookie `lalco_candidate_session` of candidate A (cookie jar off)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "POST Submit — SB2, interview answer",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "const P = {\"who\":\"SB2\"};"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "const P = {\"who\":\"SB2\"};",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "// Keep this candidate's own session cookie (the cookie jar is off for candidate requests).",
+                  "for (const h of pm.response.headers.all()) {",
+                  "  const m = h.key.toLowerCase() === 'set-cookie' && /lalco_candidate_session=([^;]+)/.exec(h.value);",
+                  "  if (m) pm.environment.set('candidateSession' + \"A\", m[1]);",
+                  "}",
+                  "pm.test('Submitted; result shown at once; session released', () => { pm.expect(body.state).to.equal('submitted'); pm.expect(env('candidateSessionA')).to.not.equal(env('sameBrowserSession' + P.who)); }); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "lalco_candidate_session={{candidateSessionA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/exam/{{linkToken}}/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "exam",
+                "{{linkToken}}",
+                "submit"
+              ]
+            },
+            "description": "**Purpose:** POST Submit — SB2, interview answer\n\n**Authentication:** Candidate session cookie `lalco_candidate_session` of candidate A (cookie jar off)\n\n**Input:** JSON body\n\n**Expected:** HTTP 200, JSON",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"answers\": { \"{{essayQuestionSB2}}\": \"My own answer.\" } }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "GET Exam — the same browser, next person (SB3) opens the link",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "// Keep this candidate's own session cookie (the cookie jar is off for candidate requests).",
+                  "for (const h of pm.response.headers.all()) {",
+                  "  const m = h.key.toLowerCase() === 'set-cookie' && /lalco_candidate_session=([^;]+)/.exec(h.value);",
+                  "  if (m) pm.environment.set('candidateSession' + \"A\", m[1]);",
+                  "}",
+                  "pm.test('Start form, nothing of the previous person', () => { pm.expect(body.state).to.equal('ready'); pm.expect(body).to.not.have.property('candidate'); pm.expect(body).to.not.have.property('questions'); }); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "lalco_candidate_session={{candidateSessionA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/exam/{{linkToken}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "exam",
+                "{{linkToken}}"
+              ]
+            },
+            "description": "**Purpose:** GET Exam — the same browser, next person (SB3) opens the link\n\n**Authentication:** Candidate session cookie `lalco_candidate_session` of candidate A (cookie jar off)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "POST Start — SB3 on the same browser",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "const P = {\"who\":\"SB3\"};",
+                  "pm.environment.set('sameBrowserSession' + P.who, pm.environment.get('candidateSessionA')); "
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "const P = {\"who\":\"SB3\"};",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "// Keep this candidate's own session cookie (the cookie jar is off for candidate requests).",
+                  "for (const h of pm.response.headers.all()) {",
+                  "  const m = h.key.toLowerCase() === 'set-cookie' && /lalco_candidate_session=([^;]+)/.exec(h.value);",
+                  "  if (m) pm.environment.set('candidateSession' + \"A\", m[1]);",
+                  "}",
+                  "pm.test('A NEW attempt for this person', () => { pm.expect(body.state).to.equal('in_progress'); pm.expect(body.candidate.name).to.equal(env('runTag') + ' ' + P.who); pm.expect(body.questions.length).to.equal(3); });",
+                  "set('questions' + P.who, body.questions.map((q) => ({ id: q.id, options: q.options.map((o) => o.key) })));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "lalco_candidate_session={{candidateSessionA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/exam/{{linkToken}}/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "exam",
+                "{{linkToken}}",
+                "start"
+              ]
+            },
+            "description": "**Purpose:** POST Start — SB3 on the same browser\n\n**Authentication:** Candidate session cookie `lalco_candidate_session` of candidate A (cookie jar off)\n\n**Input:** JSON body\n\n**Expected:** HTTP 200, JSON",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{runTag}} SB3\",\n  \"phone\": \"020 0000 0202\",\n  \"graduate_from\": \"University\",\n  \"university\": \"Postman University\",\n  \"subject\": \"Testing\",\n  \"gpa\": \"3.0\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "POST Submit — SB3, first test",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "const P = {\"who\":\"SB3\"};",
+                  "const a = {}; getJSON('questions' + P.who).forEach((q) => { a[q.id] = q.options[0]; }); pm.variables.set('answers' + P.who, JSON.stringify(a)); "
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "const P = {\"who\":\"SB3\"};",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "// Keep this candidate's own session cookie (the cookie jar is off for candidate requests).",
+                  "for (const h of pm.response.headers.all()) {",
+                  "  const m = h.key.toLowerCase() === 'set-cookie' && /lalco_candidate_session=([^;]+)/.exec(h.value);",
+                  "  if (m) pm.environment.set('candidateSession' + \"A\", m[1]);",
+                  "}",
+                  "pm.test('Next test waiting', () => pm.expect(body.state).to.equal('next_test')); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "lalco_candidate_session={{candidateSessionA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/exam/{{linkToken}}/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "exam",
+                "{{linkToken}}",
+                "submit"
+              ]
+            },
+            "description": "**Purpose:** POST Submit — SB3, first test\n\n**Authentication:** Candidate session cookie `lalco_candidate_session` of candidate A (cookie jar off)\n\n**Input:** JSON body\n\n**Expected:** HTTP 200, JSON",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"answers\": {{answersSB3}} }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "POST Continue — SB3",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "const P = {\"who\":\"SB3\"};"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "const P = {\"who\":\"SB3\"};",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "// Keep this candidate's own session cookie (the cookie jar is off for candidate requests).",
+                  "for (const h of pm.response.headers.all()) {",
+                  "  const m = h.key.toLowerCase() === 'set-cookie' && /lalco_candidate_session=([^;]+)/.exec(h.value);",
+                  "  if (m) pm.environment.set('candidateSession' + \"A\", m[1]);",
+                  "}",
+                  "pm.test('Interview test running', () => pm.expect(body.state).to.equal('in_progress')); set('essayQuestion' + P.who, String(body.questions[0].id)); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "lalco_candidate_session={{candidateSessionA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/exam/{{linkToken}}/continue",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "exam",
+                "{{linkToken}}",
+                "continue"
+              ]
+            },
+            "description": "**Purpose:** POST Continue — SB3\n\n**Authentication:** Candidate session cookie `lalco_candidate_session` of candidate A (cookie jar off)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "POST Submit — SB3, interview answer",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "const P = {\"who\":\"SB3\"};"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "const P = {\"who\":\"SB3\"};",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "// Keep this candidate's own session cookie (the cookie jar is off for candidate requests).",
+                  "for (const h of pm.response.headers.all()) {",
+                  "  const m = h.key.toLowerCase() === 'set-cookie' && /lalco_candidate_session=([^;]+)/.exec(h.value);",
+                  "  if (m) pm.environment.set('candidateSession' + \"A\", m[1]);",
+                  "}",
+                  "pm.test('Submitted; result shown at once; session released', () => { pm.expect(body.state).to.equal('submitted'); pm.expect(env('candidateSessionA')).to.not.equal(env('sameBrowserSession' + P.who)); }); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "lalco_candidate_session={{candidateSessionA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/exam/{{linkToken}}/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "exam",
+                "{{linkToken}}",
+                "submit"
+              ]
+            },
+            "description": "**Purpose:** POST Submit — SB3, interview answer\n\n**Authentication:** Candidate session cookie `lalco_candidate_session` of candidate A (cookie jar off)\n\n**Input:** JSON body\n\n**Expected:** HTTP 200, JSON",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"answers\": { \"{{essayQuestionSB3}}\": \"My own answer.\" } }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "GET Link — A, SB2 and SB3: three attempts from one browser",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "const find = (who) => body.attempts.find((x) => x.candidate_name === env('runTag') + ' ' + who);",
+                  "const list = ['A', 'SB2', 'SB3'].map(find);",
+                  "pm.test('Three submitted attempts', () => list.forEach((a) => { pm.expect(a).to.exist; pm.expect(a.status).to.equal('SUBMITTED'); }));",
+                  "pm.test('Different attempts and candidates', () => { pm.expect(new Set(list.map((a) => a.id)).size).to.equal(3); pm.expect(new Set(list.map((a) => a.candidate_id)).size).to.equal(3); });",
+                  "pm.test('Three different browser sessions were used', () => pm.expect(new Set([env('sessionUsedByA'), env('sameBrowserSessionSB2'), env('sameBrowserSessionSB3')]).size).to.equal(3));",
+                  "pm.test('The intruder was never recorded', () => pm.expect(body.attempts.some((x) => x.candidate_name === env('runTag') + ' INTRUDER')).to.equal(false));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/links/{{linkId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "links",
+                "{{linkId}}"
+              ]
+            },
+            "description": "**Purpose:** GET Link — A, SB2 and SB3: three attempts from one browser\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          }
+        },
+        {
           "name": "GET Link — two independent attempts",
           "event": [
             {
@@ -11013,7 +12698,7 @@
                   "const a = body.attempts.find((x) => x.candidate_name === env('runTag') + ' A');",
                   "const b = body.attempts.find((x) => x.candidate_name === env('runTag') + ' BB');",
                   "pm.test('A submitted, B in progress, separate candidates', () => { pm.expect(a.status).to.equal('SUBMITTED'); pm.expect(b.status).to.equal('IN_PROGRESS'); pm.expect(a.candidate_id).to.not.equal(b.candidate_id); });",
-                  "set('assessmentId', String(a.id)); set('attemptB', String(b.id));"
+                  "set('assessmentId', String(a.id)); set('attemptB', String(b.id)); set('candidateIdA', String(a.candidate_id));"
                 ]
               }
             }
@@ -13235,7 +14920,7 @@
                   "const env = (k) => pm.environment.get(k);",
                   "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
                   "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
-                  "const P = {\"fields\":[\"Candidate Name\",\"Phone Number\",\"Graduate From\",\"High School\",\"College\",\"University\",\"School Name\",\"Subject\",\"GPA / Mark\",\"Date and Time\",\"IQ Test Score\",\"Behavioral Assessment Score\",\"Calculation Score\",\"Essay Score\",\"Pass / Not Pass Status\"]};"
+                  "const P = {\"fields\":[\"Candidate Name\",\"Phone Number\",\"Graduate From\",\"High School\",\"College\",\"University\",\"School Name\",\"Subject\",\"GPA / Mark\",\"Date and Time\",\"IQ Test Score\",\"Behavioral Interview Test Score\",\"Calculation Score\",\"Essay Score\",\"Pass / Not Pass Status\"]};"
                 ]
               }
             },
@@ -13247,7 +14932,7 @@
                   "const env = (k) => pm.environment.get(k);",
                   "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
                   "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
-                  "const P = {\"fields\":[\"Candidate Name\",\"Phone Number\",\"Graduate From\",\"High School\",\"College\",\"University\",\"School Name\",\"Subject\",\"GPA / Mark\",\"Date and Time\",\"IQ Test Score\",\"Behavioral Assessment Score\",\"Calculation Score\",\"Essay Score\",\"Pass / Not Pass Status\"]};",
+                  "const P = {\"fields\":[\"Candidate Name\",\"Phone Number\",\"Graduate From\",\"High School\",\"College\",\"University\",\"School Name\",\"Subject\",\"GPA / Mark\",\"Date and Time\",\"IQ Test Score\",\"Behavioral Interview Test Score\",\"Calculation Score\",\"Essay Score\",\"Pass / Not Pass Status\"]};",
                   "let body = null;",
                   "try { body = pm.response.json(); } catch (e) { body = null; }",
                   "pm.test('Status is 200', () => pm.response.to.have.status(200));",
@@ -13943,6 +15628,263 @@
               ]
             },
             "description": "**Purpose:** GET Assessment — interview now marked\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          }
+        },
+        {
+          "name": "GET Standard Report — Behavioral Interview Test column after HR marking",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "const row = (name) => body.rows.find((r) => r.values[0] === env('runTag') + ' ' + name);",
+                  "pm.test('Field 12 is named \"Behavioral Interview Test Score\"', () => pm.expect(body.fields[11]).to.equal('Behavioral Interview Test Score'));",
+                  "pm.test('Candidate A: 100.0% (the marked interview answer)', () => pm.expect(row('A').values[11]).to.equal('100.0%'));",
+                  "pm.test('SB2 (not marked yet): Pending HR marking, never 0', () => pm.expect(row('SB2').values[11]).to.equal('Pending HR marking'));",
+                  "pm.test('S1 (IQ only): no behavioural score', () => pm.expect(row('S1').values[11]).to.equal('—'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/report/standard",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "report",
+                "standard"
+              ]
+            },
+            "description": "**Purpose:** Field 12 is the Behavioral Interview Test: the attempt's interview-format test (here the temporary interview type, marked full marks by HR). A candidate without such a test shows \"—\", never another test's score.\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          }
+        },
+        {
+          "name": "GET Dashboard — Behavioral Interview Test counters",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Behavioral Interview Test passed / not passed / pending are counted', () => { ['behavioral_passed', 'behavioral_not_passed', 'behavioral_pending'].forEach((k) => pm.expect(body.summary[k], k).to.be.a('number')); });",
+                  "pm.test('At least A passed, SB2 and SB3 pending', () => { pm.expect(body.summary.behavioral_passed).to.be.at.least(1); pm.expect(body.summary.behavioral_pending).to.be.at.least(2); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/dashboard",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "dashboard"
+              ]
+            },
+            "description": "**Purpose:** GET Dashboard — Behavioral Interview Test counters\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          }
+        },
+        {
+          "name": "GET Export Candidate PDF — A (Behavioral Interview Test)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "pm.variables.set('maxMs', 5000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/pdf', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/pdf'));",
+                  "pm.test('File is not empty', () => pm.expect(pm.response.stream ? pm.response.stream.length : pm.response.responseSize).to.be.above(0));",
+                  "pm.test('File starts like a real PDF', () => pm.expect(pm.response.stream.slice(0, 5).toString('latin1')).to.equal(\"%PDF-\"));",
+                  "pm.test('Sent as a download with a .pdf file name', () => pm.expect(pm.response.headers.get('Content-Disposition') || '').to.match(/attachment; filename=\".+\\.pdf\"/));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/candidates/{{candidateIdA}}/export.pdf",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "candidates",
+                "{{candidateIdA}}",
+                "export.pdf"
+              ]
+            },
+            "description": "**Purpose:** GET Export Candidate PDF — A (Behavioral Interview Test)\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 200, application/pdf"
+          }
+        },
+        {
+          "name": "GET Export Candidate Word — A (Behavioral Interview Test)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "pm.variables.set('maxMs', 5000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/vnd.openxmlformats-officedocument.wordprocessingml.document', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/vnd.openxmlformats-officedocument.wordprocessingml.document'));",
+                  "pm.test('File is not empty', () => pm.expect(pm.response.stream ? pm.response.stream.length : pm.response.responseSize).to.be.above(0));",
+                  "pm.test('File starts like a real DOCX', () => pm.expect(pm.response.stream.slice(0, 2).toString('latin1')).to.equal(\"PK\"));",
+                  "pm.test('Sent as a download with a .docx file name', () => pm.expect(pm.response.headers.get('Content-Disposition') || '').to.match(/attachment; filename=\".+\\.docx\"/));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/candidates/{{candidateIdA}}/export.docx",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "candidates",
+                "{{candidateIdA}}",
+                "export.docx"
+              ]
+            },
+            "description": "**Purpose:** GET Export Candidate Word — A (Behavioral Interview Test)\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 200, application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          }
+        },
+        {
+          "name": "GET Export Candidate Excel — A (Behavioral Interview Test)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "pm.variables.set('maxMs', 5000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'));",
+                  "pm.test('File is not empty', () => pm.expect(pm.response.stream ? pm.response.stream.length : pm.response.responseSize).to.be.above(0));",
+                  "pm.test('File starts like a real XLSX', () => pm.expect(pm.response.stream.slice(0, 2).toString('latin1')).to.equal(\"PK\"));",
+                  "pm.test('Sent as a download with a .xlsx file name', () => pm.expect(pm.response.headers.get('Content-Disposition') || '').to.match(/attachment; filename=\".+\\.xlsx\"/));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/candidates/{{candidateIdA}}/export.xlsx",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "candidates",
+                "{{candidateIdA}}",
+                "export.xlsx"
+              ]
+            },
+            "description": "**Purpose:** GET Export Candidate Excel — A (Behavioral Interview Test)\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 200, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           }
         },
         {
@@ -16726,7 +18668,9 @@
                   "pm.test('Status is 200', () => pm.response.to.have.status(200));",
                   "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
                   "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
-                  "pm.test('New token', () => pm.expect(body.token).to.not.equal(env('internalSingleLinkToken'))); set('oldInternalToken', env('internalSingleLinkToken')); set('internalSingleLinkToken', body.token); "
+                  "pm.test('New token', () => pm.expect(body.token).to.not.equal(env('internalSingleLinkToken')));",
+                  "pm.test('The expiry date HR chose is kept (not recalculated)', () => pm.expect(Date.parse(body.link_expires_at)).to.equal(Date.parse(env('internalExpiresAt'))));",
+                  "set('oldInternalToken', env('internalSingleLinkToken')); set('internalSingleLinkToken', body.token);"
                 ]
               }
             }
@@ -16915,6 +18859,58 @@
                 }
               }
             }
+          }
+        },
+        {
+          "name": "POST Regenerate Internal Link — a relative expiry starts again",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Expires 60 minutes from now', () => pm.expect(Date.parse(body.link_expires_at) - Date.now()).to.be.within(55 * 60000, 61 * 60000)); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/internal/links/{{internalSpareLinkId}}/regenerate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "internal",
+                "links",
+                "{{internalSpareLinkId}}",
+                "regenerate"
+              ]
+            },
+            "description": "**Purpose:** POST Regenerate Internal Link — a relative expiry starts again\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
           }
         },
         {
@@ -18131,7 +20127,8 @@
                 "exec": [
                   "const env = (k) => pm.environment.get(k);",
                   "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
-                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "pm.environment.set('staffSessionUsedByA', pm.environment.get('internalStaffSession')); "
                 ]
               }
             },
@@ -18330,6 +20327,687 @@
               ]
             },
             "description": "**Purpose:** Pictures are only served to an employee while the test that contains them is running.\n\n**Authentication:** Internal staff session cookie `lalco_staff_session` of staff member A (cookie jar off)\n\n**Input:** none\n\n**Expected:** HTTP 404, JSON"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "GET Internal Exam — the same browser after Staff A finished",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "// Keep this employee's own session cookie (the cookie jar is off for staff requests).",
+                  "for (const h of pm.response.headers.all()) {",
+                  "  const m = h.key.toLowerCase() === 'set-cookie' && /lalco_staff_session=([^;]+)/.exec(h.value);",
+                  "  if (m) pm.environment.set(\"internalStaffSession\", m[1]);",
+                  "}",
+                  "pm.test('Start form, nothing of Staff A', () => { pm.expect(body.state).to.equal('ready'); pm.expect(body).to.not.have.property('staff'); pm.expect(body).to.not.have.property('questions'); }); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "lalco_staff_session={{internalStaffSession}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/internal-exam/{{internalLinkToken}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "internal-exam",
+                "{{internalLinkToken}}"
+              ]
+            },
+            "description": "**Purpose:** GET Internal Exam — the same browser after Staff A finished\n\n**Authentication:** Internal staff session cookie `lalco_staff_session` of staff member A (cookie jar off)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "POST Start — Staff E on the same browser",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "pm.environment.set('staffSessionUsedByE', pm.environment.get('internalStaffSession')); "
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "// Keep this employee's own session cookie (the cookie jar is off for staff requests).",
+                  "for (const h of pm.response.headers.all()) {",
+                  "  const m = h.key.toLowerCase() === 'set-cookie' && /lalco_staff_session=([^;]+)/.exec(h.value);",
+                  "  if (m) pm.environment.set(\"internalStaffSession\", m[1]);",
+                  "}",
+                  "pm.test('A new attempt for Staff E', () => { pm.expect(body.state).to.equal('in_progress'); pm.expect(body.section).to.equal('IQ'); }); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "lalco_staff_session={{internalStaffSession}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/internal-exam/{{internalLinkToken}}/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "internal-exam",
+                "{{internalLinkToken}}",
+                "start"
+              ]
+            },
+            "description": "**Purpose:** POST Start — Staff E on the same browser\n\n**Authentication:** Internal staff session cookie `lalco_staff_session` of staff member A (cookie jar off)\n\n**Input:** JSON body\n\n**Expected:** HTTP 200, JSON",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{runTag}} STAFF E\",\n  \"employee_id\": \"{{runStamp}}-E\",\n  \"department\": \"Postman Department\",\n  \"position\": \"Tester\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "POST Start — Staff F tries to take over E (active)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Error message says: assessment_in_progress', () => pm.expect(String((body && (body.error || body.message)) || '')).to.include(\"assessment_in_progress\"));",
+                  "// Keep this employee's own session cookie (the cookie jar is off for staff requests).",
+                  "for (const h of pm.response.headers.all()) {",
+                  "  const m = h.key.toLowerCase() === 'set-cookie' && /lalco_staff_session=([^;]+)/.exec(h.value);",
+                  "  if (m) pm.environment.set(\"internalStaffSession\", m[1]);",
+                  "}",
+                  "pm.test('Only the error, nothing of Staff E', () => pm.expect(Object.keys(body)).to.eql(['error'])); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "lalco_staff_session={{internalStaffSession}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/internal-exam/{{internalLinkToken}}/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "internal-exam",
+                "{{internalLinkToken}}",
+                "start"
+              ]
+            },
+            "description": "**Purpose:** POST Start — Staff F tries to take over E (active)\n\n**Authentication:** Internal staff session cookie `lalco_staff_session` of staff member A (cookie jar off)\n\n**Input:** JSON body\n\n**Expected:** HTTP 409, JSON — error contains “assessment_in_progress”",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{runTag}} STAFF F\",\n  \"employee_id\": \"{{runStamp}}-F\",\n  \"department\": \"Postman Department\",\n  \"position\": \"Tester\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "GET Internal Link — find Staff E",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "const e = body.results.find((r) => r.staff && r.staff.employee_id === env('runStamp') + '-E');",
+                  "pm.test('E has an own attempt and staff record; F was never recorded', () => {",
+                  "  pm.expect(e).to.exist; pm.expect(e.id).to.not.equal(Number(env('internalAssessmentId'))); pm.expect(e.staff.id).to.not.equal(Number(env('internalStaffId')));",
+                  "  pm.expect(body.results.some((r) => r.staff && r.staff.employee_id === env('runStamp') + '-F')).to.equal(false);",
+                  "});",
+                  "set('internalResultE', String(e.id));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/internal/links/{{internalLinkId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "internal",
+                "links",
+                "{{internalLinkId}}"
+              ]
+            },
+            "description": "**Purpose:** GET Internal Link — find Staff E\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          }
+        },
+        {
+          "name": "GET Internal Result — Staff E snapshot (IQ answers)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "const P = {\"var\":\"internalAnswersE1\"};"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "const P = {\"var\":\"internalAnswersE1\"};",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "// The running test's questions of this attempt (its own snapshot): answer every one correctly.",
+                  "const running = body.stages.find((s) => s.status === 'IN_PROGRESS');",
+                  "const answers = {};",
+                  "body.questions.filter((q) => q.section === running.section).forEach((q) => { answers[q.id] = q.correct_answer; });",
+                  "pm.test('Snapshot of the running test found', () => pm.expect(Object.keys(answers).length).to.be.above(0));",
+                  "set(P.var, answers);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/internal/results/{{internalResultE}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "internal",
+                "results",
+                "{{internalResultE}}"
+              ]
+            },
+            "description": "**Purpose:** GET Internal Result — Staff E snapshot (IQ answers)\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          }
+        },
+        {
+          "name": "POST Submit — Staff E, IQ",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "// Keep this employee's own session cookie (the cookie jar is off for staff requests).",
+                  "for (const h of pm.response.headers.all()) {",
+                  "  const m = h.key.toLowerCase() === 'set-cookie' && /lalco_staff_session=([^;]+)/.exec(h.value);",
+                  "  if (m) pm.environment.set(\"internalStaffSession\", m[1]);",
+                  "}",
+                  "pm.test('Next test waiting', () => pm.expect(body.state).to.equal('next_test')); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "lalco_staff_session={{internalStaffSession}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/internal-exam/{{internalLinkToken}}/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "internal-exam",
+                "{{internalLinkToken}}",
+                "submit"
+              ]
+            },
+            "description": "**Purpose:** POST Submit — Staff E, IQ\n\n**Authentication:** Internal staff session cookie `lalco_staff_session` of staff member A (cookie jar off)\n\n**Input:** JSON body\n\n**Expected:** HTTP 200, JSON",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"answers\": {{internalAnswersE1}} }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "POST Continue — Staff E",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "// Keep this employee's own session cookie (the cookie jar is off for staff requests).",
+                  "for (const h of pm.response.headers.all()) {",
+                  "  const m = h.key.toLowerCase() === 'set-cookie' && /lalco_staff_session=([^;]+)/.exec(h.value);",
+                  "  if (m) pm.environment.set(\"internalStaffSession\", m[1]);",
+                  "}",
+                  "pm.test('Second test running', () => pm.expect(body.state).to.equal('in_progress')); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "lalco_staff_session={{internalStaffSession}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/internal-exam/{{internalLinkToken}}/continue",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "internal-exam",
+                "{{internalLinkToken}}",
+                "continue"
+              ]
+            },
+            "description": "**Purpose:** POST Continue — Staff E\n\n**Authentication:** Internal staff session cookie `lalco_staff_session` of staff member A (cookie jar off)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "GET Internal Result — Staff E snapshot (second test)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "const P = {\"var\":\"internalAnswersE2\"};"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "const P = {\"var\":\"internalAnswersE2\"};",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "// The running test's questions of this attempt (its own snapshot): answer every one correctly.",
+                  "const running = body.stages.find((s) => s.status === 'IN_PROGRESS');",
+                  "const answers = {};",
+                  "body.questions.filter((q) => q.section === running.section).forEach((q) => { answers[q.id] = q.correct_answer; });",
+                  "pm.test('Snapshot of the running test found', () => pm.expect(Object.keys(answers).length).to.be.above(0));",
+                  "set(P.var, answers);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/internal/results/{{internalResultE}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "internal",
+                "results",
+                "{{internalResultE}}"
+              ]
+            },
+            "description": "**Purpose:** GET Internal Result — Staff E snapshot (second test)\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          }
+        },
+        {
+          "name": "POST Submit — Staff E, second test",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "// Keep this employee's own session cookie (the cookie jar is off for staff requests).",
+                  "for (const h of pm.response.headers.all()) {",
+                  "  const m = h.key.toLowerCase() === 'set-cookie' && /lalco_staff_session=([^;]+)/.exec(h.value);",
+                  "  if (m) pm.environment.set(\"internalStaffSession\", m[1]);",
+                  "}",
+                  "pm.test('Submitted, Pass; session released', () => { pm.expect(body.state).to.equal('submitted'); pm.expect(body.last_result.result).to.equal('Pass'); pm.expect(env('internalStaffSession')).to.not.equal(env('staffSessionUsedByE')); }); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "lalco_staff_session={{internalStaffSession}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/internal-exam/{{internalLinkToken}}/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "internal-exam",
+                "{{internalLinkToken}}",
+                "submit"
+              ]
+            },
+            "description": "**Purpose:** POST Submit — Staff E, second test\n\n**Authentication:** Internal staff session cookie `lalco_staff_session` of staff member A (cookie jar off)\n\n**Input:** JSON body\n\n**Expected:** HTTP 200, JSON",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"answers\": {{internalAnswersE2}} }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "POST Start — Staff G on the same browser",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "pm.environment.set('staffSessionUsedByG', pm.environment.get('internalStaffSession')); "
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "// Keep this employee's own session cookie (the cookie jar is off for staff requests).",
+                  "for (const h of pm.response.headers.all()) {",
+                  "  const m = h.key.toLowerCase() === 'set-cookie' && /lalco_staff_session=([^;]+)/.exec(h.value);",
+                  "  if (m) pm.environment.set(\"internalStaffSession\", m[1]);",
+                  "}",
+                  "pm.test('A third attempt starts', () => pm.expect(body.state).to.equal('in_progress'));",
+                  "pm.test('Three different sessions on one browser', () => pm.expect(new Set([env('staffSessionUsedByA'), env('staffSessionUsedByE'), env('staffSessionUsedByG')]).size).to.equal(3));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "lalco_staff_session={{internalStaffSession}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/internal-exam/{{internalLinkToken}}/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "internal-exam",
+                "{{internalLinkToken}}",
+                "start"
+              ]
+            },
+            "description": "**Purpose:** POST Start — Staff G on the same browser\n\n**Authentication:** Internal staff session cookie `lalco_staff_session` of staff member A (cookie jar off)\n\n**Input:** JSON body\n\n**Expected:** HTTP 200, JSON",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{runTag}} STAFF G\",\n  \"employee_id\": \"{{runStamp}}-G\",\n  \"department\": \"Postman Department\",\n  \"position\": \"Tester\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           },
           "protocolProfileBehavior": {
             "disableCookies": true
@@ -18793,7 +21471,7 @@
                   "const env = (k) => pm.environment.get(k);",
                   "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
                   "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
-                  "const P = {\"fields\":[\"Staff Name\",\"Employee ID\",\"Department\",\"Position\",\"Assessment\",\"IQ Test Score\",\"Behavioral Assessment Score\",\"Calculation Score\",\"Essay Score\",\"Pass / Not Pass Status\",\"Date and Time\"]};"
+                  "const P = {\"fields\":[\"Staff Name\",\"Employee ID\",\"Department\",\"Position\",\"Assessment\",\"IQ Test Score\",\"Behavioral Interview Test Score\",\"Calculation Score\",\"Essay Score\",\"Pass / Not Pass Status\",\"Date and Time\"]};"
                 ]
               }
             },
@@ -18805,7 +21483,7 @@
                   "const env = (k) => pm.environment.get(k);",
                   "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
                   "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
-                  "const P = {\"fields\":[\"Staff Name\",\"Employee ID\",\"Department\",\"Position\",\"Assessment\",\"IQ Test Score\",\"Behavioral Assessment Score\",\"Calculation Score\",\"Essay Score\",\"Pass / Not Pass Status\",\"Date and Time\"]};",
+                  "const P = {\"fields\":[\"Staff Name\",\"Employee ID\",\"Department\",\"Position\",\"Assessment\",\"IQ Test Score\",\"Behavioral Interview Test Score\",\"Calculation Score\",\"Essay Score\",\"Pass / Not Pass Status\",\"Date and Time\"]};",
                   "let body = null;",
                   "try { body = pm.response.json(); } catch (e) { body = null; }",
                   "pm.test('Status is 200', () => pm.response.to.have.status(200));",
@@ -19413,7 +22091,8 @@
                   "pm.test('Content-Type is application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'));",
                   "pm.test('File is not empty', () => pm.expect(pm.response.stream ? pm.response.stream.length : pm.response.responseSize).to.be.above(0));",
                   "pm.test('File starts like a real XLSX', () => pm.expect(pm.response.stream.slice(0, 2).toString('latin1')).to.equal(\"PK\"));",
-                  "pm.test('Sent as a download with a .xlsx file name', () => pm.expect(pm.response.headers.get('Content-Disposition') || '').to.match(/attachment; filename=\".+\\.xlsx\"/));"
+                  "pm.test('Sent as a download with a .xlsx file name', () => pm.expect(pm.response.headers.get('Content-Disposition') || '').to.match(/attachment; filename=\".+\\.xlsx\"/));",
+                  "set('internalExportSize', String(pm.response.stream.length)); "
                 ]
               }
             }
@@ -19435,6 +22114,178 @@
               ]
             },
             "description": "**Purpose:** GET Export Internal Staff Report (Excel)\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 200, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          }
+        },
+        {
+          "name": "GET Internal Results — search q (Employee ID)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Only Staff E', () => { pm.expect(body.results.length).to.equal(1); pm.expect(body.results[0].staff.employee_id).to.equal(env('runStamp') + '-E'); }); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/internal/results?q={{runStamp}}-E",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "internal",
+                "results"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "{{runStamp}}-E"
+                }
+              ]
+            },
+            "description": "**Purpose:** GET Internal Results — search q (Employee ID)\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** query: q\n\n**Expected:** HTTP 200, JSON"
+          }
+        },
+        {
+          "name": "GET Export Internal Staff Report — search q (Employee ID)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "pm.variables.set('maxMs', 8000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'));",
+                  "pm.test('File is not empty', () => pm.expect(pm.response.stream ? pm.response.stream.length : pm.response.responseSize).to.be.above(0));",
+                  "pm.test('File starts like a real XLSX', () => pm.expect(pm.response.stream.slice(0, 2).toString('latin1')).to.equal(\"PK\"));",
+                  "pm.test('Sent as a download with a .xlsx file name', () => pm.expect(pm.response.headers.get('Content-Disposition') || '').to.match(/attachment; filename=\".+\\.xlsx\"/));",
+                  "pm.test('Smaller than the unfiltered export (filtered rows only)', () => pm.expect(pm.response.stream.length).to.be.below(Number(env('internalExportSize')))); set('internalExportOneSize', String(pm.response.stream.length)); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/internal/export/results.xlsx?q={{runStamp}}-E",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "internal",
+                "export",
+                "results.xlsx"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "{{runStamp}}-E"
+                }
+              ]
+            },
+            "description": "**Purpose:** The Excel export uses the same search as the results table. The workbook is compressed, so its content is checked by size: one row is smaller than all rows (content is checked cell by cell in the unit tests).\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** query: q\n\n**Expected:** HTTP 200, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          }
+        },
+        {
+          "name": "GET Export Internal Staff Report — search q (no match)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "pm.variables.set('maxMs', 8000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'));",
+                  "pm.test('File is not empty', () => pm.expect(pm.response.stream ? pm.response.stream.length : pm.response.responseSize).to.be.above(0));",
+                  "pm.test('File starts like a real XLSX', () => pm.expect(pm.response.stream.slice(0, 2).toString('latin1')).to.equal(\"PK\"));",
+                  "pm.test('Sent as a download with a .xlsx file name', () => pm.expect(pm.response.headers.get('Content-Disposition') || '').to.match(/attachment; filename=\".+\\.xlsx\"/));",
+                  "pm.test('Header only: smaller than the one-row export', () => pm.expect(pm.response.stream.length).to.be.below(Number(env('internalExportOneSize')))); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/internal/export/results.xlsx?q={{runTag}} NO SUCH STAFF",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "internal",
+                "export",
+                "results.xlsx"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "{{runTag}} NO SUCH STAFF"
+                }
+              ]
+            },
+            "description": "**Purpose:** GET Export Internal Staff Report — search q (no match)\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** query: q\n\n**Expected:** HTTP 200, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           }
         },
         {
@@ -19517,11 +22368,11 @@
                   "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
                   "const b = getJSON('internalBaseline');",
                   "pm.test('Counters moved as expected', () => {",
-                  "  pm.expect(body.totalStaff - b.totalStaff).to.equal(3);",
-                  "  pm.expect(body.totalAssessments - b.totalAssessments).to.equal(3);",
-                  "  pm.expect(body.completed - b.completed).to.equal(1);",
-                  "  pm.expect(body.inProgress - b.inProgress).to.equal(2);",
-                  "  pm.expect(body.passed - b.passed).to.equal(1);",
+                  "  pm.expect(body.totalStaff - b.totalStaff).to.equal(5);",
+                  "  pm.expect(body.totalAssessments - b.totalAssessments).to.equal(5);",
+                  "  pm.expect(body.completed - b.completed).to.equal(2);",
+                  "  pm.expect(body.inProgress - b.inProgress).to.equal(3);",
+                  "  pm.expect(body.passed - b.passed).to.equal(2);",
                   "  pm.expect(body.activeLinks - b.activeLinks).to.equal(1);",
                   "});",
                   "pm.test('Recent results include Staff A', () => pm.expect(body.recentResults.map((r) => r.id)).to.include(Number(env('internalAssessmentId'))));",
@@ -19545,7 +22396,7 @@
                 "dashboard"
               ]
             },
-            "description": "**Purpose:** After this run: 2 more staff (A was created by HR; B and C by starting — D was refused), 3 more assessments (A completed, B and C in progress), 1 more PASS, 2 more active links.\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+            "description": "**Purpose:** After this run: 5 more staff (A was created by HR; B, C, E and G by starting — D and F were refused), 5 more assessments (A and E completed, B, C and G in progress), 2 more PASS, 1 more active link.\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
           }
         },
         {

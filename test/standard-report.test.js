@@ -10,9 +10,10 @@ const { PDFParse } = require('pdf-parse');
 const { start, stop, client, db, CANDIDATE, seedQuestions } = require('./helpers');
 
 const FIELDS = ['Candidate Name', 'Phone Number', 'Graduate From', 'High School', 'College', 'University', 'School Name', 'Subject', 'GPA / Mark',
-  'Date and Time', 'IQ Test Score', 'Behavioral Assessment Score', 'Calculation Score', 'Essay Score', 'Pass / Not Pass Status'];
+  'Date and Time', 'IQ Test Score', 'Behavioral Interview Test Score', 'Calculation Score', 'Essay Score', 'Pass / Not Pass Status'];
 
 let admin;
+let BEH;
 const ids = {};
 test.before(async () => {
   await start();
@@ -22,12 +23,17 @@ test.before(async () => {
   seedQuestions('GENERAL', 10);
   seedQuestions('CALCULATION', 10);
   db.prepare("INSERT INTO questions (section, question_text, marks, created_at) VALUES ('ESSAY', 'Why LALCO?', 10, ?)").run(new Date().toISOString());
-  // HR has renamed General (as in production); the column stays "Behavioral Assessment Score".
+  // HR has renamed General (as in production). Its result is NOT the behavioural
+  // column: that column is the Behavioral Interview Test (an interview-format type).
   const g = (await admin.get('/api/admin/test-types')).data.find((t) => t.key === 'GENERAL');
   await admin.put('/api/admin/test-types/GENERAL', { ...g, name: 'Behavioral Assessment' });
+  BEH = (await admin.post('/api/admin/test-types', { name: 'Behavioral Interview Test', behavior: 'interview' })).data.key;
+  for (const q of ['Tell me about a time you solved a problem.', 'Describe a team you worked in.']) {
+    db.prepare("INSERT INTO questions (section, question_text, marks, created_at) VALUES (?, ?, 10, ?)").run(BEH, q, new Date().toISOString());
+  }
 
-  const link = async (pass = {}) => (await admin.post('/api/admin/assessments', { tests: ['IQ', 'GENERAL', 'CALCULATION', 'ESSAY'], counts: { IQ: 5, GENERAL: 5, CALCULATION: 4, ESSAY: 1 },
-    link_expiry_minutes: 60, pass_marks: { IQ: 0, GENERAL: 0, CALCULATION: 0, ESSAY: 0, ...pass }, eligibility_mark: 0 })).data;
+  const link = async (pass = {}) => (await admin.post('/api/admin/assessments', { tests: ['IQ', 'GENERAL', BEH, 'CALCULATION', 'ESSAY'], counts: { IQ: 5, GENERAL: 5, [BEH]: 2, CALCULATION: 4, ESSAY: 1 },
+    link_expiry_minutes: 60, pass_marks: { IQ: 0, GENERAL: 0, [BEH]: 0, CALCULATION: 0, ESSAY: 0, ...pass }, eligibility_mark: 0 })).data;
   const right = (q) => db.prepare('SELECT correct_answer FROM assessment_questions WHERE id = ?').get(q.id).correct_answer;
   const take = async (l, info, answer) => {
     const c = client();
@@ -40,13 +46,14 @@ test.before(async () => {
   };
   const all = await link();
   const allRight = (q) => (q.kind === 'essay' ? 'Because LALCO grows.' : right(q));
-  // A: everything right; HR marks the essay 8 / 10 -> PASS.
+  // A: everything right; HR marks the essay 8 / 10 and the interview answers 10 + 5 of 20 -> PASS.
   ids.A = await take(all, { name: 'Anna Pass', phone: '020 5555 1234', subject: 'Accounting', gpa: '3.4' }, allRight);
   const essay = db.prepare("SELECT id FROM assessment_questions WHERE assessment_id = ? AND section = 'ESSAY'").get(ids.A.id);
-  await admin.put(`/api/admin/assessments/${ids.A.id}/essay-marks`, { marks: { [essay.id]: 8 } });
+  const beh = db.prepare('SELECT id FROM assessment_questions WHERE assessment_id = ? AND section = ? ORDER BY position').all(ids.A.id, BEH);
+  await admin.put(`/api/admin/assessments/${ids.A.id}/essay-marks`, { marks: { [essay.id]: 8, [beh[0].id]: 10, [beh[1].id]: 5 } });
   // B: finished, essay not marked yet -> Pending (never 0).
   ids.B = await take(all, { name: 'Ben Pending', phone: '020 7777 0000' }, allRight);
-  // C: Behavioral Assessment below its pass mark -> NOT PASS; the later tests stay locked.
+  // C: the General test (renamed "Behavioral Assessment") below its pass mark -> NOT PASS; the later tests stay locked.
   ids.C = await take(await link({ GENERAL: 100 }), { name: 'Cara Fail', phone: '020 8888 0000' }, (q, s) => (s.questions[0] && q.kind !== 'essay' && db.prepare('SELECT section FROM assessment_questions WHERE id = ?').get(q.id).section === 'GENERAL' ? 'Z' : right(q)));
   // D: same phone as A, written another way -> both marked as duplicates.
   ids.D = await take(all, { name: 'Dan Same Phone', phone: '+856 20 5555 1234' }, allRight);
@@ -67,9 +74,11 @@ test('web report: the 15 fields, one row per candidate, scores as already calcul
   const a = by['Anna Pass'].values;
   assert.deepEqual(a.slice(0, 9), ['Anna Pass', '020 5555 1234', 'University', 'Vientiane High School', '—', 'National University of Laos', 'NUOL', 'Accounting', '3.4']);
   assert.match(a[9], /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/, 'Date and Time');
-  assert.deepEqual(a.slice(10), ['150 / 150', '100.0%', '100.0%', '8 / 10', 'PASS']);
-  assert.deepEqual(by['Ben Pending'].values.slice(10), ['150 / 150', '100.0%', '100.0%', 'Pending HR marking', 'PENDING']);
-  assert.deepEqual(by['Cara Fail'].values.slice(10), ['150 / 150', '0.0%', 'Locked', 'Locked', 'NOT PASS']);
+  // The behavioural column is the Behavioral Interview Test (15 / 20), never General (100%).
+  assert.deepEqual(a.slice(10), ['150 / 150', '75.0%', '100.0%', '8 / 10', 'PASS']);
+  assert.deepEqual(by['Ben Pending'].values.slice(10), ['150 / 150', 'Pending HR marking', '100.0%', 'Pending HR marking', 'PENDING']);
+  // Cara failed General: the Behavioral Interview Test was never reached, and General's 0% is not shown as it.
+  assert.deepEqual(by['Cara Fail'].values.slice(10), ['150 / 150', 'Locked', 'Locked', 'Locked', 'NOT PASS']);
   assert.deepEqual(by['Eve No Test'].values.slice(9), ['—', '—', '—', '—', '—', '—']);
   assert.deepEqual(r.rows.filter((x) => x.duplicate_phone).map((x) => x.values[0]).sort(), ['Anna Pass', 'Dan Same Phone']);
   // Existing Essay scoring unchanged: the stage holds HR's 8 of 10.
@@ -94,7 +103,7 @@ test('Excel: exactly 15 columns, AutoFilter on the header row, bold PASS / NOT P
   assert.deepEqual([c.getCell(15).value, c.getCell(15).font.bold], ['NOT PASS', true]);
   assert.equal(a.getCell(14).value, '8 / 10');
   assert.equal(rowOf(sheet, 'Ben Pending').getCell(14).value, 'Pending HR marking');
-  assert.deepEqual([a.getCell(12).value, a.getCell(12).numFmt], [1, '0.0%'], 'Behavioral Assessment % as a number (filterable)');
+  assert.deepEqual([a.getCell(12).value, a.getCell(12).numFmt], [0.75, '0.0%'], 'Behavioral Interview Test % as a number (filterable)');
   assert.equal(a.getCell(11).value, '150 / 150');
   for (const name of ['Anna Pass', 'Dan Same Phone']) {
     const p = rowOf(sheet, name).getCell(2);
@@ -111,9 +120,9 @@ test('PDF and Word: the same 15 fields, Essay Score, PASS / NOT PASS in bold', a
   const pdfBuf = (await admin.get(`/api/admin/candidates/${ids.A.candidate_id}/export.pdf`, { raw: true })).buffer;
   const pdf = await pdfText(pdfBuf);
   for (const f of FIELDS) assert.ok(pdf.includes(f), 'PDF ' + f);
-  for (const v of ['Anna Pass', '020 5555 1234', '150 / 150', '100.0%', '8 / 10', 'PASS']) assert.ok(pdf.includes(v), 'PDF ' + v);
+  for (const v of ['Anna Pass', '020 5555 1234', '150 / 150', '75.0%', '100.0%', '8 / 10', 'PASS']) assert.ok(pdf.includes(v), 'PDF ' + v);
   assert.ok(pdfBuf.toString('latin1').includes('/BaseFont /Helvetica-Bold'), 'PDF status in a bold font');
-  for (const bad of ['LALCO IQ Score', 'Level 1', 'Company Eligibility', 'Interview']) assert.ok(!pdf.includes(bad), 'no detailed field: ' + bad);
+  for (const bad of ['LALCO IQ Score', 'Level 1', 'Company Eligibility', 'Behavioral Assessment Score']) assert.ok(!pdf.includes(bad), 'no detailed field: ' + bad);
 
   const docBuf = (await admin.get(`/api/admin/candidates/${ids.A.candidate_id}/export.docx`, { raw: true })).buffer;
   const text = (await mammoth.extractRawText({ buffer: docBuf })).value;

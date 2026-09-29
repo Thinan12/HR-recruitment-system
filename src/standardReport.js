@@ -9,7 +9,7 @@ const docx = require('docx');
 
 const FIELDS = [
   'Candidate Name', 'Phone Number', 'Graduate From', 'High School', 'College', 'University', 'School Name', 'Subject', 'GPA / Mark',
-  'Date and Time', 'IQ Test Score', 'Behavioral Assessment Score', 'Calculation Score', 'Essay Score', 'Pass / Not Pass Status',
+  'Date and Time', 'IQ Test Score', 'Behavioral Interview Test Score', 'Calculation Score', 'Essay Score', 'Pass / Not Pass Status',
 ];
 const NONE = '—'; // not part of this candidate's assessment / not entered
 const TIME_ZONE = process.env.DISPLAY_TIME_ZONE || 'Asia/Vientiane';
@@ -25,6 +25,9 @@ function stamp(iso) {
 }
 
 const testOf = (c, sec) => (c.tests || []).find((t) => t.section === sec);
+// The Behavioral Interview Test of an assessment: its behavioural / interview-format test.
+// (Older results of the legacy General test are not relabelled as behavioural.)
+const behavioralOf = (c) => (c.tests || []).find((t) => require('./testTypes').behavior(t.section) === 'interview') || null;
 // A test's score as the application already shows it; a test that is not
 // finished / not marked shows its state (never a made-up 0).
 function score(t, finished) {
@@ -44,7 +47,7 @@ const phoneKey = (p) => {
 // One candidate -> the 15 values (plus the numbers Excel uses for % columns).
 function row(c) {
   const iq = testOf(c, 'IQ');
-  const general = testOf(c, 'GENERAL');
+  const general = behavioralOf(c);
   const calc = testOf(c, 'CALCULATION');
   const essay = testOf(c, 'ESSAY');
   const text = (v) => (v == null || String(v).trim() === '' ? NONE : String(v));
@@ -150,4 +153,4 @@ const xlsx = (candidates) => tableXlsx({ sheet: 'Candidates', fields: FIELDS, ro
 const pdf = (c) => recordPdf({ title: `Candidate report - ${c.name}`, subtitle: 'Candidate Report', fields: FIELDS, values: rows([c])[0].values, statusCol: 14 });
 const word = (c) => recordWord({ title: `Candidate report - ${c.name}`, subtitle: 'Candidate Report', fields: FIELDS, values: rows([c])[0].values, statusCol: 14 });
 
-module.exports = { FIELDS, rows, xlsx, pdf, word, phoneKey, tableXlsx, recordPdf, recordWord, score, stamp, testOf, STATUS, NONE };
+module.exports = { FIELDS, rows, xlsx, pdf, word, phoneKey, tableXlsx, recordPdf, recordWord, score, stamp, testOf, behavioralOf, STATUS, NONE };

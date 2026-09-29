@@ -206,8 +206,12 @@ test('no "Start New Candidate": the candidate page has no control to switch or c
   const first = (await A.post(u(link, '/start'), person('Only Once', '901'))).data;
   const r = await A.post(u(link, '/new-candidate'));
   assert.equal(r.status, 404);
-  // The same browser cannot start a second attempt: Start again resumes the first one.
-  const again = (await A.post(u(link, '/start'), person('Someone Else', '902'))).data;
+  // While A's attempt is active, someone else cannot take over this browser: refused, and nothing of A's is shown.
+  const taken = await A.post(u(link, '/start'), person('Someone Else', '902'));
+  assert.equal(taken.status, 409);
+  assert.deepEqual(taken.data, { error: 'assessment_in_progress' });
+  // A pressing Start again (same details) resumes their own attempt.
+  const again = (await A.post(u(link, '/start'), person('Only Once', '901'))).data;
   assert.equal(again.state, 'in_progress');
   assert.equal(again.candidate.name, 'Only Once');
   assert.deepEqual(again.questions.map((q) => q.id), first.questions.map((q) => q.id));

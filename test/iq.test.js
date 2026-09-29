@@ -163,7 +163,9 @@ test('TEST 9: one link with the 95 pool: 20 IQ -> General -> Calculation -> Essa
   assert.equal(s.outcome, 'completed');
   const essay = copies(attemptOf(a)).find((q) => q.section === 'ESSAY');
   await admin.put(`/api/admin/assessments/${attemptOf(a)}/essay-marks`, { marks: { [essay.id]: 8 } });
-  assert.equal((await candidate.get(url(a.token))).data.current_stage, 'COMPLETE');
+  assert.equal((await admin.get('/api/admin/assessments/' + attemptOf(a))).data.assessment.current_stage.key, 'COMPLETE');
+  // The finished attempt released this browser: reopening the link shows the start form for the next person.
+  assert.equal((await candidate.get(url(a.token))).data.state, 'ready');
 });
 
 test('TEST 10 and 11: IQ failure stops the link; refresh resumes the same 20 questions', async () => {
@@ -189,8 +191,10 @@ test('import: levels 1-5 by number or name; missing = Level 3; unknown rejected'
 });
 
 test('inactive questions are never selected and stay visible in the bank', async () => {
+  // Earlier links need the whole 95 pool; HR closes them before retiring questions.
+  db.prepare('UPDATE assessment_links SET enabled = 0').run();
   const easy = db.prepare("SELECT * FROM questions WHERE section = 'IQ' AND difficulty = 'Easy' ORDER BY id").all();
-  for (const q of easy.slice(4)) await admin.put('/api/admin/questions/' + q.id, { ...q, status: 'Inactive' });
+  for (const q of easy.slice(4)) { const r = await admin.put('/api/admin/questions/' + q.id, { ...q, status: 'Inactive' }); assert.equal(r.status, 200, JSON.stringify(r.data)); }
   const inactive = new Set(easy.slice(4).map((q) => q.id));
   for (let i = 0; i < 3; i++) {
     const a = await sit('After Cleanup ' + i);

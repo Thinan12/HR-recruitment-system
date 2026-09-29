@@ -28,6 +28,8 @@ const TEXT = {
     name_required: 'Please enter your name.',
     phone_required: 'Please enter your phone number.',
     no_questions: 'This assessment has no questions yet.\nPlease contact HR.',
+    assessment_unavailable: 'The next test is currently unavailable.\nPlease contact HR.',
+    assessment_in_progress: 'This browser already has an assessment in progress.\nPlease finish it first, or use another device.',
     not_enough_questions: 'This test cannot start: there are not enough questions in the question bank.\nPlease contact HR.',
     sections: { IQ: 'IQ Test', GENERAL: 'General Test', CALCULATION: 'Calculation Test', ESSAY: 'Essay Test' },
     progress_title: 'Assessment Progress',
@@ -73,6 +75,8 @@ const TEXT = {
     name_required: 'ກະລຸນາປ້ອນຊື່ຂອງທ່ານ.',
     phone_required: 'ກະລຸນາປ້ອນເບີໂທລະສັບ.',
     no_questions: 'ການທົດສອບນີ້ຍັງບໍ່ມີຄຳຖາມ.\nກະລຸນາຕິດຕໍ່ຝ່າຍບຸກຄະລາກອນ (HR).',
+    assessment_unavailable: 'ແບບທົດສອບຕໍ່ໄປຍັງບໍ່ພ້ອມໃຊ້ງານ.\nກະລຸນາຕິດຕໍ່ຝ່າຍບຸກຄະລາກອນ (HR).',
+    assessment_in_progress: 'ບຣາວເຊີນີ້ມີການທົດສອບທີ່ກຳລັງດຳເນີນຢູ່ແລ້ວ.\nກະລຸນາເຮັດໃຫ້ສຳເລັດກ່ອນ ຫຼື ໃຊ້ອຸປະກອນອື່ນ.',
     not_enough_questions: 'ບໍ່ສາມາດເລີ່ມການທົດສອບນີ້ໄດ້: ຄຳຖາມໃນຄັງຄຳຖາມບໍ່ພຽງພໍ.\nກະລຸນາຕິດຕໍ່ຝ່າຍບຸກຄະລາກອນ (HR).',
     sections: { IQ: 'ແບບທົດສອບ IQ', GENERAL: 'ແບບທົດສອບທົ່ວໄປ', CALCULATION: 'ແບບທົດສອບການຄິດໄລ່', ESSAY: 'ແບບທົດສອບການຂຽນ' },
     progress_title: 'ຄວາມຄືບໜ້າຂອງການປະເມີນ',
@@ -237,7 +241,7 @@ function renderNext(data) {
 const testTitles = {};
 function testName(key) {
   const t = testTitles[key];
-  if (t) return (T === TEXT.lo && t.lo) || (T !== TEXT.lo && t.en) || T.sections[key] || key;
+  if (t) return (T === TEXT.lo && t.lo) || t.en || T.sections[key] || key;
   return T.sections[key] || key;
 }
 
@@ -258,6 +262,7 @@ function show(data) {
     case 'expired': return bigMessage(T.expired);
     case 'disabled': return bigMessage(T.disabled);
     case 'used': return bigMessage(T.used);
+    case 'unavailable': return bigMessage(T.assessment_unavailable, data.tests);
     case 'not_found': return bigMessage(T.not_found);
     default: return bigMessage(T.error);
   }
@@ -283,7 +288,7 @@ function renderStaffStart(data) {
       h('ol', {}, data.tests.map((t) => h('li', {}, fillCount(T.test_line, { name: testName(t.section), q: t.question_count, m: t.minutes }))))) : null,
     h('p', { class: 'message ok section-gap' }, fillCount(T.rules, { m: data.time_limit_minutes, n: data.question_count })),
     button);
-  const showErr = (text) => { err.textContent = text; err.classList.remove('hidden'); };
+  const showErr = (text) => { err.textContent = text; err.classList.remove('hidden'); err.scrollIntoView({ block: 'center' }); };
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const body = Object.fromEntries([...form.elements].filter((el) => el.name).map((el) => [el.name, el.value.trim()]));
@@ -292,7 +297,7 @@ function renderStaffStart(data) {
     button.disabled = true;
     try {
       const r = await call('POST', '/start', body);
-      if (r.status === 400) { button.disabled = false; return showErr(T[r.data.error] || T.error); }
+      if (r.status === 400 || (r.status === 409 && r.data.error === 'assessment_in_progress')) { button.disabled = false; return showErr(T[r.data.error] || T.error); }
       show(r.data);
     } catch { button.disabled = false; showErr(T.error); }
   });
@@ -328,11 +333,11 @@ function renderStart(data) {
     button.disabled = true;
     try {
       const r = await call('POST', '/start', body);
-      if (r.status === 400) { button.disabled = false; return showErr(T[r.data.error] || T.error); }
+      if (r.status === 400 || (r.status === 409 && r.data.error === 'assessment_in_progress')) { button.disabled = false; return showErr(T[r.data.error] || T.error); }
       show(r.data);
     } catch { button.disabled = false; showErr(T.error); }
   });
-  function showErr(text) { err.textContent = text; err.classList.remove('hidden'); }
+  function showErr(text) { err.textContent = text; err.classList.remove('hidden'); err.scrollIntoView({ block: 'center' }); }
   render(h('div', { class: 'card' }, form));
 }
 

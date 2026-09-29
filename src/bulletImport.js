@@ -227,7 +227,7 @@ function bulletQuestions(input) {
   return {
     rows,
     document: {
-      type: behavioural ? 'Behavioural Interview Question Bank' : 'Question list',
+      type: behavioural ? 'Behavioral Interview Question Bank' : 'Question list',
       structure: 'Bullet questions' + (hasCategories ? ' grouped by ' + (behavioural ? 'competency' : 'heading') : ''),
       behavioural,
       categories: [...categories].map(([name, questions]) => ({ name, questions })),

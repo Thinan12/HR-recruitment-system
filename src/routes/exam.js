@@ -136,6 +136,7 @@ function stateResponse(a) {
     base.last_result = lastResult(a, stages);
     const next = stages.find((st) => st.status === 'NOT_STARTED');
     base.next_section = next.section;
+    if (!A.stageAvailable(a, next)) { base.state = 'unavailable'; base.error = 'assessment_unavailable'; }
     base.question_count = next.question_count;
     base.time_limit_minutes = next.time_limit_minutes;
   }
@@ -181,6 +182,28 @@ function noAttempt(res, r) {
   return res.status(404).json({ state: 'not_found' });
 }
 
+// A finished attempt (submitted, stopped, or waiting for HR marking) releases
+// this browser: the response that shows the result also gives the browser a
+// fresh session secret, so the next person on the same device and the same
+// URL starts a new attempt. The finished attempt is kept unchanged. While an
+// attempt is active (running, or between tests) the session never changes.
+function releaseIfFinished(res, r, a) {
+  if (r.link && a && a.status === 'SUBMITTED') setSecret(res, r.link.token, A.newSessionSecret());
+}
+
+// Creates this person's own attempt on the shared link with the given session secret.
+function startNew(res, link, body, secret) {
+  try {
+    return res.json(stateResponse(A.startFromLink(link, body, secret)));
+  } catch (e) {
+    if (e instanceof A.InputError) {
+      if (e.message === 'link_closed') return res.status(409).json(linkResponse(A.getLink(link.id)));
+      return res.status(400).json({ error: e.message });
+    }
+    throw e;
+  }
+}
+
 router.get('/:token', (req, res) => {
   const r = loadFresh(req);
   if (r.link && !r.a) {
@@ -190,6 +213,7 @@ router.get('/:token', (req, res) => {
     return res.json(linkResponse(r.link));
   }
   if (!r.a) return res.status(404).json({ state: 'not_found' });
+  releaseIfFinished(res, r, r.a);
   res.json(stateResponse(r.a));
 });
 
@@ -198,16 +222,18 @@ router.post('/:token/start', (req, res) => {
   if (r.link && !r.a) {
     let secret = r.secret;
     if (!secret) { secret = A.newSessionSecret(); setSecret(res, r.link.token, secret); }
-    try {
-      return res.json(stateResponse(A.startFromLink(r.link, req.body, secret)));
-    } catch (e) {
-      if (e instanceof A.InputError) {
-        if (e.message === 'link_closed') return res.status(409).json(linkResponse(A.getLink(r.link.id)));
-        return res.status(400).json({ error: e.message });
-      }
-      throw e;
-    }
+    return startNew(res, r.link, req.body, secret);
   }
+  // The previous person on this browser has finished: a new session and a new
+  // attempt for this person (the finished one is kept as it is).
+  if (r.link && r.a.status === 'SUBMITTED') {
+    const secret = A.newSessionSecret();
+    setSecret(res, r.link.token, secret);
+    return startNew(res, r.link, req.body, secret);
+  }
+  // An assessment is running in this browser: only its owner may resume it.
+  // Somebody else is refused, and nothing of the owner's is sent back.
+  if (r.link && !A.sameOwner(r.a, req.body)) return res.status(409).json({ error: 'assessment_in_progress' });
   const a = r.a;
   if (!a) return res.status(404).json({ state: 'not_found' });
   const state = A.linkState(a);
@@ -231,10 +257,14 @@ router.post('/:token/continue', (req, res) => {
   if (!a) return noAttempt(res, r);
   const state = A.linkState(a);
   if (state === 'in_progress') return res.json(stateResponse(a));
-  if (state !== 'next_test') return res.status(409).json(stateResponse(a));
+  if (state !== 'next_test') { releaseIfFinished(res, r, a); return res.status(409).json(stateResponse(a)); }
   try {
     A.continueAssessment(a);
   } catch (e) {
+    // The next test has no (or not enough) questions right now: a clear state, never a hang.
+    if (e instanceof A.InputError && ['no_questions', 'not_enough_questions'].includes(e.message)) {
+      return res.status(409).json({ ...stateResponse(a), state: 'unavailable', error: 'assessment_unavailable' });
+    }
     if (e instanceof A.InputError) return res.status(400).json({ error: e.message });
     throw e;
   }
@@ -245,7 +275,7 @@ router.put('/:token/answer', (req, res) => {
   const r = loadFresh(req);
   const a = r.a;
   if (!a) return noAttempt(res, r);
-  if (A.linkState(a) !== 'in_progress') return res.status(409).json(stateResponse(a));
+  if (A.linkState(a) !== 'in_progress') { releaseIfFinished(res, r, a); return res.status(409).json(stateResponse(a)); }
   // saveAnswer only touches a question of THIS attempt's running test.
   if (!A.saveAnswer(a, req.body?.question_id, req.body?.answer)) return res.status(400).json({ error: 'unknown_question' });
   res.json({ ok: true, remaining_seconds: Math.max(0, Math.floor((Date.parse(a.deadline_at) - Date.now()) / 1000)) });
@@ -274,10 +304,12 @@ router.post('/:token/submit', (req, res) => {
   const r = resolve(req);
   const a = r.a;
   if (!a) return noAttempt(res, r);
-  if (a.status === 'SUBMITTED') return res.status(409).json(stateResponse(a));
+  if (a.status === 'SUBMITTED') { releaseIfFinished(res, r, a); return res.status(409).json(stateResponse(a)); }
   if (A.linkState(a) !== 'in_progress') return res.status(409).json(stateResponse(a));
   A.submitAssessment(a, req.body?.answers);
-  res.json(stateResponse(A.getAssessment(a.id)));
+  const done = A.getAssessment(a.id);
+  releaseIfFinished(res, r, done); // the result is shown now; the next person gets a new session
+  res.json(stateResponse(done));
 });
 
 return router;

@@ -170,15 +170,15 @@ test('an attempt whose saved questions do not match its count is flagged for HR,
   const link = await newLink(18);
   const c = client();
   const s = (await c.post(`/api/exam/${link.token}/start`, { ...CANDIDATE, name: 'Mismatch' })).data;
-  await c.post(`/api/exam/${link.token}/submit`, { answers: Object.fromEntries(s.questions.map((q) => [q.id, 'A'])) });
   const aid = attempt(link, 'Mismatch');
-  const before = saved(aid);
   // Simulate an old attempt recorded as 30 while 18 questions were saved.
   db.prepare("UPDATE assessment_stages SET question_count = 30 WHERE assessment_id = ? AND section = 'IQ'").run(aid);
+  // The result the candidate sees (the submit answer; the finished attempt then releases the browser).
+  const lr = (await c.post(`/api/exam/${link.token}/submit`, { answers: Object.fromEntries(s.questions.map((q) => [q.id, 'A'])) })).data.last_result;
+  const before = saved(aid);
   const t = (await admin.get('/api/admin/assessments/' + aid)).data.tests[0];
   assert.equal(t.review_required, 'Attempt question count mismatch — review required.');
   assert.deepEqual([t.questions_assigned, t.question_count, t.score_text], [18, 30, '55 / 55'], 'the score is from the saved questions');
   assert.deepEqual(saved(aid), before, 'saved questions and answers untouched');
-  const lr = (await c.get(`/api/exam/${link.token}`)).data.last_result;
   assert.equal('review_required' in lr, false, 'HR-only flag not sent to the candidate');
 });

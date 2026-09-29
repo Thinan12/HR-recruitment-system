@@ -107,13 +107,17 @@ test('candidate cannot submit twice or reuse a completed link', async () => {
   await startExam(a.token);
   const first = await candidate.post(exam(a.token, '/submit'), { answers: {} });
   assert.equal(first.status, 200);
+  const done = attemptOf(a);
+  const before = JSON.stringify(db.prepare('SELECT * FROM assessments WHERE id = ?').get(done));
+  // Submitting again: the finished attempt released the browser, so there is nothing to submit.
   const second = await candidate.post(exam(a.token, '/submit'), { answers: {} });
   assert.equal(second.status, 409);
-  assert.equal(second.data.state, 'submitted');
-  assert.equal((await startExam(a.token)).data.state, 'submitted');
-  assert.equal((await candidate.get(exam(a.token))).data.state, 'submitted');
-  const count = db.prepare("SELECT COUNT(*) AS n FROM assessments WHERE id = ? AND status = 'SUBMITTED'").get(attemptOf(a)).n;
-  assert.equal(count, 1);
+  assert.notEqual(second.data.state, 'in_progress');
+  assert.equal((await candidate.get(exam(a.token))).data.state, 'ready', 'reopening shows the start form');
+  // Starting again is a NEW attempt on the same link; the finished one is untouched.
+  assert.equal((await startExam(a.token)).data.state, 'in_progress');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM assessments WHERE link_id = ?').get(a.id).n, 2);
+  assert.equal(JSON.stringify(db.prepare('SELECT * FROM assessments WHERE id = ?').get(done)), before);
 });
 
 test('double-clicking Start only starts once', async () => {

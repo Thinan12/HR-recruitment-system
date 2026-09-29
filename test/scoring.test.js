@@ -138,10 +138,12 @@ test('all four PASS and final >= 70% -> ELIGIBLE; the same URL is used from star
   assert.equal(c.final_result, 'Not Pass');
   assert.equal(c.eligibility, 'Eligible');
 
-  // The candidate reopening the link sees the finished assessment on the same URL.
+  // The result was shown when the last test was submitted; the finished attempt then
+  // released this browser, so reopening the same URL shows the start form for the next person.
+  assert.equal(seen[3].state, 'submitted');
   const again = (await browser.get(url(a.token))).data;
-  assert.equal(again.state, 'submitted');
-  assert.equal(again.current_stage, 'COMPLETE');
+  assert.equal(again.state, 'ready');
+  assert.equal(again.candidate, undefined, 'nothing of the finished candidate is shown');
 });
 
 test('Essay NOT PASS -> NOT ELIGIBLE, no final score', async () => {
@@ -196,14 +198,16 @@ test('IQ FAIL -> General, Calculation and Essay stay locked; refresh or changing
   assert.deepEqual(s.last_result, { section: 'IQ', result: 'Not Pass', points: 5, max: 10, level: 'Borderline', lalco_iq_score: 75, pass_mark: 70, level_lo: 'ກ້ຳເກິ່ງ' });
   assert.deepEqual(s.tests.map((t) => t.status), ['failed', 'locked', 'locked', 'locked']);
 
-  for (const [method, path, body] of [['post', '/continue'], ['post', '/start', CANDIDATE], ['post', '/submit', { answers: {} }], ['put', '/answer', { question_id: 1, answer: 'A' }]]) {
+  const stoppedId = attemptOf(a);
+  const before = JSON.stringify(db.prepare('SELECT * FROM assessment_stages WHERE assessment_id = ? ORDER BY position').all(stoppedId));
+  // No later test can be opened or answered from this browser (the stopped attempt released it).
+  for (const [method, path, body] of [['post', '/continue'], ['post', '/submit', { answers: {} }], ['put', '/answer', { question_id: 1, answer: 'A' }]]) {
     const r = await c[method](url(a.token, path), body);
     assert.equal(r.status, 409, `${method} ${path}`);
   }
-  const refreshed = (await c.get(url(a.token))).data;
-  assert.equal(refreshed.outcome, 'stopped');
-  assert.deepEqual(refreshed.tests.map((t) => t.status), ['failed', 'locked', 'locked', 'locked']);
-  assert.deepEqual(db.prepare('SELECT DISTINCT section FROM assessment_questions WHERE assessment_id = ?').all(attemptOf(a)).map((r) => r.section), ['IQ']);
+  assert.equal((await c.get(url(a.token))).data.state, 'ready', 'refreshing shows the start form, never General');
+  assert.equal(JSON.stringify(db.prepare('SELECT * FROM assessment_stages WHERE assessment_id = ? ORDER BY position').all(stoppedId)), before, 'the stopped attempt is unchanged');
+  assert.deepEqual(db.prepare('SELECT DISTINCT section FROM assessment_questions WHERE assessment_id = ?').all(stoppedId).map((r) => r.section), ['IQ']);
 
   const p = await profile(candidateId);
   assert.deepEqual(p.tests.map((t) => t.state), ['NOT PASS', 'LOCKED', 'LOCKED', 'LOCKED']);

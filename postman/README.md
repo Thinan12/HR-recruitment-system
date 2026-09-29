@@ -4,7 +4,7 @@ An executable test suite for every API route in the source (`src/app.js`, `src/r
 
 | File | What it is |
 |---|---|
-| `LALCO-HR-Recruitment-System.postman_collection.json` | The collection (Postman v2.1): 22 folders, 363 requests, about 2,950 assertions per run |
+| `LALCO-HR-Recruitment-System.postman_collection.json` | The collection (Postman v2.1): 22 folders, 408 requests, about 3,300 assertions per run |
 | `env/LALCO-HR-Local.postman_environment.json` | `baseUrl` = http://localhost:3000, `mode` = LOCAL |
 | `env/LALCO-HR-Production.postman_environment.json` | `baseUrl` = the Railway URL, `mode` = PRODUCTION |
 | `fixtures/` | The files the upload requests attach, each with a known expected result |
@@ -44,6 +44,22 @@ npx newman@6.2.2 run postman/LALCO-HR-Recruitment-System.postman_collection.json
 ## Internal Office Staff (folders 17–20)
 
 Staff CRUD and the internal dashboard; internal links (reusable, single use, disable / enable / regenerate / delete); two employees on one link and a third on a single-use link (own sessions with `lalco_staff_session`, own snapshots, cross-answer refused, used link refused); results, detail, exports, the staff report; dashboard counters before and after; and isolation both ways (ids, tokens and session cookies of one area never open the other; recruitment dashboard, report and IQ results unchanged).
+
+## Session lifecycle and the audit regressions
+
+- **One browser, several people in turn.** In folder 12, Candidate A's cookie variable is reused as one browser for A, then SB2, then SB3. Each person gets a new session and a new attempt once the previous one has finished. The run checks that the three session values and attempts differ. Folder 19 does the same for staff (A, then E, then G).
+- **No takeover.** While SB2 (or Staff E) is active, a Start with other details on that browser returns `409 {"error":"assessment_in_progress"}`, and nothing else. A refresh still resumes the owner's attempt.
+- **Behavioral Interview Test.** Field 12 of the standard report is the interview-format test, checked after HR marks Candidate A. The dashboard shows `behavioral_*` counters.
+- **Removal guard.** Folder 11 checks that a question needed by an open link can't be made Inactive or deleted. It only uses a temporary question.
+- **Other checks:**
+  - logout revokes the token (a second session is logged out and its token replayed);
+  - the internal Excel export honours `q`;
+  - a fixed internal link expiry is kept on regenerate;
+  - a real `.xls` (Excel 97-2003) file previews.
+
+## Jenkins
+
+`Jenkinsfile` (repository root) runs **this repository's collection file** with the Postman CLI. It does not run a cloud copy, so what runs is always what is reviewed here. It needs two Jenkins "Secret text" credentials, `postman-api-key` and `lalco-admin-password`. No key or password is ever written in the Jenkinsfile, the collection, the committed environments or this README.
 
 ## Not covered
 

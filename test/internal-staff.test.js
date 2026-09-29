@@ -109,7 +109,7 @@ test('two employees on one reusable link: own sessions, snapshots, answers and r
   const results = (await admin.get('/api/admin/internal/results')).data;
   const rowA = results.results.find((r) => r.staff && r.staff.employee_id === 'EMP-001');
   assert.deepEqual(results.fields.slice(0, 5), ['Staff Name', 'Employee ID', 'Department', 'Position', 'Assessment']);
-  assert.deepEqual([rowA.values[0], rowA.values[4], rowA.values[5], rowA.values[6], rowA.values[9]], ['Noy Staff', 'Q4 Staff Check', '150 / 150', '100.0%', 'PASS']);
+  assert.deepEqual([rowA.values[0], rowA.values[4], rowA.values[5], rowA.values[6], rowA.values[9]], ['Noy Staff', 'Q4 Staff Check', '150 / 150', '—', 'PASS'], 'General is not the Behavioral Interview Test: that column stays empty');
   assert.ok(results.results.some((r) => r.staff.employee_id === 'EMP-777' && r.values[9] === 'IN PROGRESS'));
   const detail = (await admin.get('/api/admin/internal/results/' + rowA.id)).data;
   assert.deepEqual([detail.staff.employee_id, detail.entered_details.name, detail.tests.length, detail.questions.length], ['EMP-001', 'Noy typed', 2, 8]);

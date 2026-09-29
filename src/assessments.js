@@ -128,6 +128,7 @@ class InputError extends Error {}
 // opts.area: 'RECRUITMENT' (default) or 'INTERNAL_STAFF'. Internal links may also
 // have a description, be single-use (reusable = false) and expire at a date/time.
 function createAssessment(input, { area = 'RECRUITMENT' } = {}) {
+  let fixedExpiry = 0;
   const settings = getSettings();
   let tests;
   if (Array.isArray(input.tests)) {
@@ -192,6 +193,7 @@ function createAssessment(input, { area = 'RECRUITMENT' } = {}) {
     expiry = Math.ceil((t - Date.parse(created)) / 60000);
     if (expiry < 1 || expiry > 60 * 24 * 90) throw new InputError('The link expiry must be in the future and at most 90 days away.');
     expiresAt = new Date(t).toISOString();
+    fixedExpiry = 1; // HR chose a date and time: regenerating the link keeps it
   } else {
     expiry = Number(input.link_expiry_minutes || settings.default_link_expiry_minutes);
     if (!Number.isInteger(expiry) || expiry < 1 || expiry > 60 * 24 * 90) throw new InputError('Link expiry must be between 1 minute and 90 days.');
@@ -206,9 +208,9 @@ function createAssessment(input, { area = 'RECRUITMENT' } = {}) {
   const total = included.reduce((sum, sec) => sum + minutes[sec], 0);
   const stages = included.map((sec) => ({ section: sec, question_count: sections[sec], time_limit_minutes: minutes[sec], pass_mark: passMarks[sec] }));
   const id = db.prepare(`INSERT INTO assessment_links
-    (token, title, assessment_type, sections, stages, time_limit_minutes, link_expiry_minutes, link_expires_at, language, eligibility_mark, created_at, business_area, description, reusable)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(newToken(), title, type, JSON.stringify(sections), JSON.stringify(stages), total, expiry, expiresAt, language, eligibility, created, area, description, reusable).lastInsertRowid;
+    (token, title, assessment_type, sections, stages, time_limit_minutes, link_expiry_minutes, link_expires_at, language, eligibility_mark, created_at, business_area, description, reusable, expiry_fixed)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(newToken(), title, type, JSON.stringify(sections), JSON.stringify(stages), total, expiry, expiresAt, language, eligibility, created, area, description, reusable, fixedExpiry).lastInsertRowid;
   return getLink(id);
 }
 
@@ -356,6 +358,49 @@ const insertQuestion = db.prepare(`INSERT INTO assessment_questions
     correct_answer, option_order, max_marks, difficulty)
   VALUES (@assessment_id, @question_id, @position, @section, @question_text, ${SNAPSHOT_COLS.map((c) => '@' + c).join(', ')},
     ${LAO_SNAPSHOT_COLS.map((c) => '@' + c).join(', ')}, @display_language, @correct_answer, @option_order, @max_marks, @difficulty)`);
+
+// How many different questions one stage of this attempt could draw right now
+// (the same rules as openStage: active, Lao-ready for Lao links, not already used).
+function stageSupply(a, stage) {
+  const used = new Set(db.prepare('SELECT * FROM assessment_questions WHERE assessment_id = ?').all(a.id).map(questionKey));
+  const lao = a.language === 'lo' && a.link_id;
+  const keys = new Set();
+  for (const q of db.prepare(`SELECT * FROM questions WHERE section = ? AND ${lao ? usableFor('lo') : USABLE}`).all(stage.section)) {
+    const k = questionKey(q);
+    if (!used.has(k)) keys.add(k);
+  }
+  return keys.size;
+}
+const stageAvailable = (a, stage) => stageSupply(a, stage) >= stage.question_count;
+
+// What still needs questions of one test type: open links (enabled, not expired)
+// and attempts in progress whose later test of that type has not opened yet.
+function questionDemand(section) {
+  const nowIso = now();
+  const out = [];
+  for (const l of db.prepare("SELECT * FROM assessment_links WHERE enabled = 1 AND link_expires_at > ?").all(nowIso)) {
+    for (const st of JSON.parse(l.stages)) if (st.section === section) out.push({ kind: 'link', title: l.title || `link #${l.id}`, need: st.question_count, lao: l.language === 'lo' });
+  }
+  for (const r of db.prepare(`SELECT s.question_count, a.id, a.language, a.link_id FROM assessment_stages s JOIN assessments a ON a.id = s.assessment_id
+    WHERE a.status = 'IN_PROGRESS' AND s.status = 'NOT_STARTED' AND s.section = ?`).all(section)) {
+    out.push({ kind: 'attempt', title: `assessment #${r.id} in progress`, need: r.question_count, lao: r.language === 'lo' && !!r.link_id });
+  }
+  return out;
+}
+
+// Refuses to remove questions (delete, make Inactive, delete all) when an open
+// link or a candidate already in an assessment would then not have enough.
+function checkRemoval(section, removedIds) {
+  const demand = questionDemand(section);
+  if (!demand.length) return;
+  const removed = new Set(removedIds.map(Number));
+  const supply = (lao) => new Set(db.prepare(`SELECT * FROM questions WHERE section = ? AND ${lao ? usableFor('lo') : USABLE}`).all(section)
+    .filter((q) => !removed.has(q.id)).map(questionKey)).size;
+  const short = demand.filter((d) => supply(d.lao) < d.need);
+  if (!short.length) return;
+  const names = [...new Set(short.map((d) => d.title))].slice(0, 5).join(', ');
+  throw new InputError(`This would leave the ${label(section)} test without enough active questions for ${short.length} open assessment link(s) or candidate(s) in progress (${names}; they need up to ${Math.max(...short.map((d) => d.need))}). Disable those links, or add questions first.`);
+}
 
 // Opens one test: draws its random questions (never repeating one already used
 // in this assessment), shuffles the answers and starts its timer.
@@ -660,7 +705,22 @@ function regenerateLink(id) {
   return getAssessment(id);
 }
 
+// Is this start request from the person who owns the attempt? Recruitment: same
+// name and phone digits; internal staff: same Employee ID (case / spaces ignored).
+function sameOwner(a, body) {
+  const norm = (v) => String(v ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+  // Phone digits, "+856 20 ..." read as "020 ..." (as for duplicate phones in the report).
+  const digits = (v) => { const d = String(v ?? '').replace(/\D/g, ''); return d.startsWith('856') ? '0' + d.slice(3) : d; };
+  if (a.business_area === 'INTERNAL_STAFF') {
+    const s = a.staff_id ? db.prepare('SELECT employee_key FROM internal_staff WHERE id = ?').get(a.staff_id) : null;
+    return !!s && s.employee_key === require('./internalStaff').employeeKey(body?.employee_id);
+  }
+  const c = a.candidate_id ? db.prepare('SELECT name, phone FROM candidates WHERE id = ?').get(a.candidate_id) : null;
+  return !!c && norm(c.name) === norm(body?.name) && digits(c.phone) === digits(body?.phone);
+}
+
 module.exports = {
+  stageSupply, stageAvailable, questionDemand, checkRemoval, sameOwner,
   getLink, linkByToken, linkShareState, linkView, attemptFor, startFromLink, newSessionSecret,
   stagesOf, continueAssessment, currentStage, T,
   SECTIONS, TYPES, LANGUAGES, LETTERS, DIFFICULTIES, LEVEL_MARKS, LEGACY_LEVELS, levelOf, levelNumber, InputError, label, questionKey, difficultyLevel, levelSplit, pickProgressive, syncIqLevels,

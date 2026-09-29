@@ -77,8 +77,10 @@ router.post('/links/:id/regenerate', (req, res) => {
   const l = internalLink(req.params.id);
   if (!l) return notFound(res);
   if (A.linkView(l).candidates > 0) return bad(res, 'Staff have already used this link, so its address cannot change. Disable it and create a new link instead.');
+  // A date and time HR chose is kept; a relative expiry ("7 days") starts again from now.
+  const expires = l.expiry_fixed ? l.link_expires_at : new Date(Date.now() + l.link_expiry_minutes * 60000).toISOString();
   db.prepare('UPDATE assessment_links SET token = ?, link_expires_at = ?, enabled = 1 WHERE id = ?')
-    .run(require('crypto').randomBytes(24).toString('base64url'), new Date(Date.now() + l.link_expiry_minutes * 60000).toISOString(), l.id);
+    .run(require('crypto').randomBytes(24).toString('base64url'), expires, l.id);
   res.json(linkOut(A.getLink(l.id)));
 });
 // Only an unused link can be deleted; one with results is kept (disable it instead).
@@ -131,7 +133,7 @@ router.get('/results/:id/export.:format', (req, res, next) => {
 // The Internal Staff report: every internal result, one row each (never recruitment).
 router.get('/export/results.xlsx', async (req, res, next) => {
   try {
-    const rows = IR.results({ department: req.query.department, link_id: req.query.link_id, status: req.query.status });
+    const rows = IR.results({ q: String(req.query.q || '').trim(), department: req.query.department, link_id: req.query.link_id, status: req.query.status });
     sendFile(res, await IR.resultsXlsx(rows), `LALCO_Internal_Staff_Results_${new Date().toISOString().slice(0, 10)}.xlsx`, XLSX_TYPE);
   } catch (e) { next(e); }
 });

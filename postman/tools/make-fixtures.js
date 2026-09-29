@@ -62,6 +62,16 @@ const P = (t) => new docx.Paragraph(t);
   XLSX.utils.book_append_sheet(book, sheet, 'Questions');
   write('mcq-bank.xlsx', XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }));
 
+  // C2. The same kind of table as an Excel 97-2003 file (.xls, BIFF8 / OLE): 3 other questions.
+  const oldBook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(oldBook, XLSX.utils.aoa_to_sheet([
+    ['Question', 'Option A', 'Option B', 'Option C', 'Option D', 'Correct Answer', 'Category'],
+    ['Which device prints on paper?', 'Scanner', 'Printer', 'Monitor', 'Mouse', 'B', 'Office'],
+    ['How many hours are in two days?', '24', '36', '48', '72', 'C', 'Numbers'],
+    ['Which file type is a spreadsheet?', '.docx', '.xls', '.png', '.mp3', 'B', 'Office'],
+  ]), 'Questions');
+  write('mcq-bank-97.xls', XLSX.write(oldBook, { type: 'buffer', bookType: 'biff8' }));
+
   // D. CSV with semicolons and a quoted value containing a semicolon: 3 questions.
   write('mcq-semicolon.csv', [
     'Question;Option A;Option B;Option C;Correct Answer',

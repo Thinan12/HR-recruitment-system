@@ -4,3 +4,9 @@ data/
 *.db-wal
 *.db-shm
 .env
+
+# Postman Local View copies (may hold local secrets; the canonical files are in postman/ and postman/env/)
+.postman/
+postman/collections/
+postman/environments/
+postman/globals/

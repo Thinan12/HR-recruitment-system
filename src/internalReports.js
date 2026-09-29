@@ -8,14 +8,13 @@ const SR = require('./standardReport');
 const staff = require('./internalStaff');
 
 const AREA = staff.AREA;
-const FIELDS = ['Staff Name', 'Employee ID', 'Department', 'Position', 'Assessment', 'IQ Test Score', 'Behavioral Assessment Score',
+const FIELDS = ['Staff Name', 'Employee ID', 'Department', 'Position', 'Assessment', 'IQ Test Score', 'Behavioral Interview Test Score',
   'Calculation Score', 'Essay Score', 'Pass / Not Pass Status', 'Date and Time'];
 const STATUS_COL = 9;
 
-// The behavioural score: the General ("Behavioral Assessment") test, or else the
-// first behavioural / interview-format test of the attempt.
+// The Behavioral Interview Test score: the attempt's behavioural / interview-format test.
 function behaviouralTest(tests) {
-  return tests.find((t) => t.section === 'GENERAL') || tests.find((t) => A.T.behavior(t.section) === 'interview') || null;
+  return tests.find((t) => A.T.behavior(t.section) === 'interview') || null;
 }
 
 // One attempt as a results row (values in FIELDS order) with its details.

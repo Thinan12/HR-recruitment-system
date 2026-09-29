@@ -76,12 +76,27 @@ function login(req, res) {
     return res.status(401).json({ error: 'Incorrect username or password.' });
   }
   failures.delete(ip);
-  const token = jwt.sign({ sub: admin.id, username: admin.username }, JWT_SECRET, { expiresIn: `${SESSION_HOURS}h` });
-  setSessionCookie(res, token);
+  setSessionCookie(res, issueToken(admin));
   res.json({ username: admin.username });
 }
 
+// Each token has its own id (jti), and carries the admin's token_version.
+function issueToken(admin) {
+  return jwt.sign({ sub: admin.id, username: admin.username, tv: admin.token_version || 0, jti: crypto.randomBytes(16).toString('hex') },
+    JWT_SECRET, { expiresIn: `${SESSION_HOURS}h` });
+}
+
+// Logout ends THIS session at once: its token id is refused until the token
+// would have expired anyway. (Other signed-in computers are not signed out.)
 function logout(req, res) {
+  const token = readCookie(req, COOKIE);
+  if (token) {
+    try {
+      const p = jwt.verify(token, JWT_SECRET);
+      if (p.jti) db.prepare('INSERT OR IGNORE INTO revoked_tokens (jti, expires_at) VALUES (?, ?)').run(p.jti, p.exp);
+    } catch { /* already invalid: nothing to revoke */ }
+  }
+  db.prepare('DELETE FROM revoked_tokens WHERE expires_at < ?').run(Math.floor(Date.now() / 1000));
   res.clearCookie(COOKIE, { path: '/' });
   res.json({ ok: true });
 }
@@ -91,8 +106,11 @@ function requireAdmin(req, res, next) {
   if (!token) return res.status(401).json({ error: 'Please log in.' });
   try {
     const payload = jwt.verify(token, JWT_SECRET);
-    const admin = db.prepare('SELECT id, username FROM admins WHERE id = ?').get(payload.sub);
+    const admin = db.prepare('SELECT id, username, token_version FROM admins WHERE id = ?').get(payload.sub);
     if (!admin) return res.status(401).json({ error: 'Please log in.' });
+    // Signed out, or issued before the last password change: refused.
+    if ((payload.tv || 0) !== (admin.token_version || 0)) return res.status(401).json({ error: 'Your session has ended. Please log in again.' });
+    if (payload.jti && db.prepare('SELECT 1 FROM revoked_tokens WHERE jti = ?').get(payload.jti)) return res.status(401).json({ error: 'Your session has ended. Please log in again.' });
     req.admin = admin;
     next();
   } catch {
@@ -106,7 +124,9 @@ function changePassword(req, res) {
   const admin = db.prepare('SELECT * FROM admins WHERE id = ?').get(req.admin.id);
   if (!bcrypt.compareSync(current, admin.password_hash)) return res.status(400).json({ error: 'Current password is incorrect.' });
   if (next.length < 8) return res.status(400).json({ error: 'New password must be at least 8 characters.' });
-  db.prepare('UPDATE admins SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(next, 12), admin.id);
+  // A new password ends every other session; this one continues with a fresh token.
+  db.prepare('UPDATE admins SET password_hash = ?, token_version = token_version + 1 WHERE id = ?').run(bcrypt.hashSync(next, 12), admin.id);
+  setSessionCookie(res, issueToken(db.prepare('SELECT * FROM admins WHERE id = ?').get(admin.id)));
   res.json({ ok: true });
 }
 

@@ -597,7 +597,7 @@ function numberedRows(lines, defaultSection) {
   const interviewRows = rows.filter((r) => r.type_behavior === 'interview' || T.behavior(r.section) === 'interview').length;
   if (cats.size || interviewRows) {
     rows.document = {
-      type: interviewRows >= rows.length * 0.5 ? 'Behavioural Interview Question Bank' : 'Question document',
+      type: interviewRows >= rows.length * 0.5 ? 'Behavioral Interview Question Bank' : 'Question document',
       structure: (numbered ? 'Numbered questions' : 'Questions') + (cats.size ? ' grouped by category' : '') + (key.size ? ' with an answer key' : ''),
       behavioural: interviewRows >= rows.length * 0.5,
       categories: [...cats].map(([name, questions]) => ({ name, questions })),
@@ -613,7 +613,7 @@ const DETECTED_TITLE = { 'detected-calculation': 'Questions that look like short
 // managed interview test type; when there is none, HR is asked to create one
 // (or choose an existing type) - they are never put into IQ, General,
 // Calculation or Essay without HR choosing it.
-const INTERVIEW_TYPE_NAME = 'Behavioural Interview';
+const INTERVIEW_TYPE_NAME = 'Behavioral Interview Test';
 function bulletRows({ rows: found, document }, defaultSection) {
   const interview = document.behavioural ? T.interviewType() : null;
   const section = document.behavioural ? interview : defaultSection;

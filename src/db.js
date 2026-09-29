@@ -263,11 +263,16 @@ db.exec(`CREATE TABLE IF NOT EXISTS internal_staff (
 )`);
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_staff_employee ON internal_staff(employee_key)');
 addMissingColumns('assessment_links', [['business_area', "TEXT NOT NULL DEFAULT 'RECRUITMENT'"], ['description', "TEXT NOT NULL DEFAULT ''"],
-  ['reusable', 'INTEGER NOT NULL DEFAULT 1']]);
+  ['reusable', 'INTEGER NOT NULL DEFAULT 1'], ['expiry_fixed', 'INTEGER NOT NULL DEFAULT 0']]);
 addMissingColumns('assessments', [['business_area', "TEXT NOT NULL DEFAULT 'RECRUITMENT'"],
   ['staff_id', 'INTEGER REFERENCES internal_staff(id) ON DELETE CASCADE'], ['staff_details', 'TEXT']]);
 db.exec('CREATE INDEX IF NOT EXISTS idx_assessments_area ON assessments(business_area, status)');
 db.exec('CREATE INDEX IF NOT EXISTS idx_assessments_staff ON assessments(staff_id)');
+
+// Admin sessions: a signed-out token is refused until it would have expired
+// anyway (jti), and a password change ends every other session (token_version).
+addMissingColumns('admins', [['token_version', 'INTEGER NOT NULL DEFAULT 0']]);
+db.exec('CREATE TABLE IF NOT EXISTS revoked_tokens (jti TEXT PRIMARY KEY, expires_at INTEGER NOT NULL)');
 
 const DEFAULT_SETTINGS = {
   default_time_minutes: '30',

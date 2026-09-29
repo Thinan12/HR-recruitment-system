@@ -61,7 +61,7 @@ test('a PDF footer with a tab ("Title <tab> Page 1 of 4") is never read as a tab
   assert.equal(p.found, 6);
   assert.ok(p.rows.every(ok) && p.rows.every((r) => !/Sample Answer|Page \d/.test(r.question.question_text)), 'no sample answers or footers in the questions');
   assert.match(p.rows[0].question.correct_answer, /^I planned carefully/, 'the sample answer is HR-only guidance');
-  assert.deepEqual(p.type_decisions.map((d) => [d.name, d.behavior]), [['Behavioural Interview', 'interview']], 'open interview questions are not put into General');
+  assert.deepEqual(p.type_decisions.map((d) => [d.name, d.behavior]), [['Behavioral Interview Test', 'interview']], 'open interview questions are not put into General');
 });
 
 test('behavioural bank: "1. ADAPTABILITY" + "Question 1:" on its own line + "Sample Answer:" (the real TXT layout) -> questions with categories', async () => {
@@ -73,12 +73,12 @@ test('behavioural bank: "1. ADAPTABILITY" + "Question 1:" on its own line + "Sam
     [1, 'Adaptability', 'Tell me about a time when you were asked to do something you had never done before.'],
     [2, 'Adaptability', 'Describe a situation in which you embraced a new system.'],
     [3, 'Culture Fit', 'What are the three things that are most important to you in a job?']]);
-  assert.ok(p.rows.every((r) => r.question.type_name === 'Behavioural Interview'), 'not Calculation, not General');
+  assert.ok(p.rows.every((r) => r.question.type_name === 'Behavioral Interview Test'), 'not Calculation, not General');
   assert.equal(p.document.categories.length, 2);
   // Import: create the interview type; categories come with it; guidance kept HR-only.
-  const imp = await importRows(p, { type_decisions: { 'behavioural interview': { create: true, behavior: 'interview' } } });
+  const imp = await importRows(p, { type_decisions: { 'behavioral interview test': { create: true, behavior: 'interview' } } });
   assert.deepEqual(imp, { imported: 3, skipped: 0 });
-  const key = (await admin.get('/api/admin/test-types')).data.find((t) => t.name === 'Behavioural Interview').key;
+  const key = (await admin.get('/api/admin/test-types')).data.find((t) => t.name === 'Behavioral Interview Test').key;
   const bank = db.prepare('SELECT q.question_text, q.correct_answer, q.status, c.name AS category FROM questions q LEFT JOIN question_categories c ON c.id = q.category_id WHERE q.section = ? ORDER BY q.id').all(key);
   assert.deepEqual(bank.map((q) => [q.category, q.status]), [['Adaptability', 'Active'], ['Adaptability', 'Active'], ['Culture Fit', 'Active']]);
   assert.match(bank[0].correct_answer, /^When I was given a task/);

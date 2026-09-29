@@ -223,6 +223,8 @@ router.put('/questions/:id', (req, res) => {
   if (!before) return notFound(res);
   const q = checkedQuestion(req.body, before);
   const status = req.body?.status === 'Inactive' ? 'Inactive' : 'Active';
+  // Making an active question Inactive (or moving it to another test) must not leave an open link short.
+  if (before.status === 'Active' && (status === 'Inactive' || q.section !== before.section)) A.checkRemoval(before.section, [id]);
   // English only: the Lao translation is edited separately (Edit Lao).
   db.prepare(`UPDATE questions SET ${QUESTION_COLS.map((c) => `${c} = @${c}`).join(', ')}, status = @status WHERE id = @id`).run({ ...q, status, id });
   lao.markStale(before, { ...q, id });
@@ -233,6 +235,8 @@ router.put('/questions/:id', (req, res) => {
 
 // Past assessments keep their own copy of each question, so deleting is safe.
 router.delete('/questions/:id', (req, res) => {
+  const q = db.prepare('SELECT id, section, status FROM questions WHERE id = ?').get(Number(req.params.id));
+  if (q && q.status === 'Active') A.checkRemoval(q.section, [q.id]);
   const info = db.prepare('DELETE FROM questions WHERE id = ?').run(Number(req.params.id));
   if (!info.changes) return notFound(res);
   res.json({ ok: true });
@@ -243,7 +247,13 @@ router.delete('/questions/:id', (req, res) => {
 // (text, options, answer, marks, pictures), so no past result changes.
 router.post('/questions/delete-all', (req, res) => {
   const section = String(req.body?.section || '').toUpperCase();
-  if (!T.get(section)) return res.status(400).json({ success: false, message: 'Please choose a test area.' });
+  if (!T.get(section)) return res.status(400).json({ success: false, message: 'Please choose a test area.', error: 'Please choose a test area.' });
+  try {
+    A.checkRemoval(section, db.prepare('SELECT id FROM questions WHERE section = ?').all(section).map((x) => x.id));
+  } catch (e) {
+    if (e instanceof A.InputError) return res.status(400).json({ success: false, message: e.message, error: e.message });
+    throw e;
+  }
   try {
     const deletedCount = db.transaction(() => {
       const n = db.prepare('SELECT COUNT(*) AS n FROM questions WHERE section = ?').get(section).n;

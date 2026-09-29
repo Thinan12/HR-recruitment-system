@@ -67,7 +67,7 @@ test('a multiple-choice type renamed "Behavioral Assessment" is not used for opt
     const txt = ['Leadership', '• Tell me about a time when you led a team.', '• Describe a time when you motivated others.', '• Give me an example of a hard decision you made.'].join('\n');
     const r = await preview(Buffer.from(txt), 'i.txt', 'GENERAL');
     assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
-    assert.deepEqual(r.data.type_decisions.map((d) => [d.name, d.behavior, d.count]), [['Behavioural Interview', 'interview', 3]]);
+    assert.deepEqual(r.data.type_decisions.map((d) => [d.name, d.behavior, d.count]), [['Behavioral Interview Test', 'interview', 3]]);
     assert.match(r.data.document.note, /"Behavioral Assessment" is a multiple-choice test type/);
     assert.ok(r.data.rows.every((x) => !x.question.section));
   } finally {
@@ -80,9 +80,9 @@ test('two-column competency PDF: bullet questions under their competency; titles
   const r = await preview(await competencyPdf(), 'competencies.pdf', 'IQ');
   assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 500));
   const p = r.data;
-  assert.equal(p.document.type, 'Behavioural Interview Question Bank');
+  assert.equal(p.document.type, 'Behavioral Interview Question Bank');
   assert.equal(p.document.structure, 'Bullet questions grouped by competency');
-  assert.equal(p.document.detected_type, 'Behavioural Interview');
+  assert.equal(p.document.detected_type, 'Behavioral Interview Test');
   assert.deepEqual(p.document.categories, [{ name: 'Change Leadership', questions: 3 }, { name: 'Problem Solving / Judgement', questions: 2 }, { name: 'Self Control', questions: 4 }]);
   assert.deepEqual(p.rows.map((x) => [x.question.category, x.question.question_text]), [
     ['Change Leadership', 'Please tell us about a time when you led a significant change in your organization and how you helped others to deal with the change.'],
@@ -98,9 +98,9 @@ test('two-column competency PDF: bullet questions under their competency; titles
   ]);
   const all = texts(p).join('\n');
   for (const bad of ['Sample Behavioural', 'SAMPLE INTERVIEW', 'Competencies that support', 'Brought to you', 'Catching problems early', 'Competency']) assert.ok(!all.includes(bad), 'not imported: ' + bad);
-  // No options, no answers needed; no test type yet -> HR decides (detected: Behavioural Interview).
+  // No options, no answers needed; no test type yet -> HR decides (detected: Behavioral Interview Test).
   assert.ok(p.rows.every((x) => !x.question.option_a && !x.question.correct_answer));
-  assert.deepEqual(p.type_decisions.map((d) => [d.name, d.behavior, d.count]), [['Behavioural Interview', 'interview', 8]]);
+  assert.deepEqual(p.type_decisions.map((d) => [d.name, d.behavior, d.count]), [['Behavioral Interview Test', 'interview', 8]]);
   assert.equal(p.duplicates, 1, 'the repeated question is a duplicate');
   assert.equal(p.needs_review, 1);
   const review = p.rows.find((x) => x.review);
@@ -109,15 +109,15 @@ test('two-column competency PDF: bullet questions under their competency; titles
   assert.ok(p.rows.filter((x) => !x.review).every((x) => x.confidence === 'High'));
   assert.equal(p.by_section.IQ, 0, 'nothing goes to IQ even with IQ selected');
 
-  // Import: create the Behavioural Interview type; its categories come from the document.
+  // Import: create the Behavioral Interview Test type; its categories come from the document.
   const pending = p.rows.filter((x) => x.errors.length === 1 && /^Test Type "/.test(x.errors[0]));
   assert.equal(pending.length, 8, 'waiting for the type decision (the duplicate is not)');
   assert.deepEqual(p.rows.find((x) => /Duplicate/.test(x.errors.join(' '))).errors.length, 1, 'a duplicate shows only the duplicate message');
   const chosen = pending.filter((x) => !x.review).map((x) => x.question);
-  const imp = await admin.post('/api/admin/questions/import', { questions: chosen, type_decisions: { 'behavioural interview': { create: true, behavior: 'interview' } } });
+  const imp = await admin.post('/api/admin/questions/import', { questions: chosen, type_decisions: { 'behavioral interview test': { create: true, behavior: 'interview' } } });
   assert.equal(imp.status, 200, JSON.stringify(imp.data));
   assert.deepEqual(imp.data, { imported: 7, skipped: 0 });
-  const type = (await admin.get('/api/admin/test-types')).data.find((x) => x.name === 'Behavioural Interview');
+  const type = (await admin.get('/api/admin/test-types')).data.find((x) => x.name === 'Behavioral Interview Test');
   assert.equal(type.behavior, 'interview');
   const bank = (await admin.get('/api/admin/questions?section=' + type.key)).data.questions;
   assert.equal(bank.length, 7);
@@ -162,12 +162,12 @@ test('plain text: bullets under headings, no question marks, multi-sentence, wra
     ['Teamwork', 'Recount a time you helped a colleague who was struggling.'],
     ['Teamwork', 'Discuss a project where the team disagreed with your ideas. Explain how you would build trust in a new team.'],
   ]);
-  const bi = (await admin.get('/api/admin/test-types')).data.find((x) => x.name === 'Behavioural Interview').key;
+  const bi = (await admin.get('/api/admin/test-types')).data.find((x) => x.name === 'Behavioral Interview Test').key;
   assert.ok(p.rows.every((x) => x.question.section === bi && x.errors.length === 0), 'the interview type, not Essay');
 });
 
 test('Word competency table with bullet lists; an existing Interview type is used automatically', async () => {
-  const bi = (await admin.get('/api/admin/test-types')).data.find((x) => x.name === 'Behavioural Interview').key;
+  const bi = (await admin.get('/api/admin/test-types')).data.find((x) => x.name === 'Behavioral Interview Test').key;
   await admin.post(`/api/admin/test-types/${bi}/deactivate`);
   const made = await admin.post('/api/admin/test-types', { name: 'Interview', behavior: 'interview' });
   assert.equal(made.status, 201, JSON.stringify(made.data));

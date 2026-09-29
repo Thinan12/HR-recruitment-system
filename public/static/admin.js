@@ -347,6 +347,9 @@ const DASHBOARD_FILTERS = [
   ['not_eligible', 'Not Eligible', (c) => c.eligibility === 'Not Eligible'],
   ['pending', 'Eligibility pending', (c) => c.eligibility === 'Pending'],
   ['essay_pending', 'Essay Pending HR marking', (c) => (c.tests || []).some((t) => isEssayType(t.section) && t.state === 'PENDING HR MARKING')],
+  // The Behavioral Interview Test: every behavioural / interview-format test.
+  ['behavioral_pass', 'Behavioral Interview Test Passed', (c) => (c.tests || []).some((t) => typeFormat(t.section) === 'interview' && t.result === 'Pass')],
+  ['behavioral_fail', 'Behavioral Interview Test Not Passed', (c) => (c.tests || []).some((t) => typeFormat(t.section) === 'interview' && t.result === 'Not Pass')],
 
   ...LEVELS.map((l) => ['final_' + l, `Final Level: ${l}`, (c) => c.final_level === l]),
 ];
@@ -424,7 +427,7 @@ async function renderDashboard() {
     h('div', { class: 'stat-group-title' }, 'Test results'),
     h('div', { class: 'stats' },
       card('IQ Passed', s.iq_passed, 'IQ_pass'), card('IQ Not Passed', s.iq_not_passed, 'IQ_fail'),
-      card('General Passed', s.general_passed, 'GENERAL_pass'), card('General Not Passed', s.general_not_passed, 'GENERAL_fail'),
+      card('Behavioral Interview Test Passed', s.behavioral_passed, 'behavioral_pass'), card('Behavioral Interview Test Not Passed', s.behavioral_not_passed, 'behavioral_fail'),
       card('Calculation Passed', s.calculation_passed, 'CALCULATION_pass'), card('Calculation Not Passed', s.calculation_not_passed, 'CALCULATION_fail'),
       card('Essay Pending', s.essay_pending, 'essay_pending')),
     h('div', { class: 'stat-group-title' }, 'IQ Classification (LALCO IQ Score)'),
@@ -433,7 +436,7 @@ async function renderDashboard() {
       h('div', { class: 'row between' }, h('h2', {}, 'Candidates'),
         h('div', { class: 'row' }, filter, count, h('a', { class: 'button small', href: '#/assessments' }, 'Create assessment link'), downloadLink('/export/candidates.xlsx', 'Export all (Excel)'), downloadLink('/export/candidates.xlsx?detail=full', 'Detailed Excel'))),
       tableBox,
-      h('p', { class: 'muted small' }, 'Each column group is one test of the candidate\'s latest assessment link. General / Calculation / Essay level: 90%+ Exceptional, 80%+ Very High, 70%+ High, 60%+ Average, 50%+ Low, below 50% Very Low. IQ Classification comes from the LALCO IQ Score (see Results). Result uses each test\'s pass mark. Final % = the average of the included tests; Company Eligibility = every test passed and Final % reaches the eligibility mark. HR Final Result is HR\'s own decision.')));
+      h('p', { class: 'muted small' }, 'Each column group is one test of the candidate\'s latest assessment link. Behavioral Interview Test / Calculation / Essay level: 90%+ Exceptional, 80%+ Very High, 70%+ High, 60%+ Average, 50%+ Low, below 50% Very Low. IQ Classification comes from the LALCO IQ Score (see Results). Result uses each test\'s pass mark. Final % = the average of the included tests; Company Eligibility = every test passed and Final % reaches the eligibility mark. HR Final Result is HR\'s own decision.')));
   draw();
 }
 
@@ -912,9 +915,9 @@ function confirmDeleteAll(sec, total, reload) {
         await reload();
         const view = document.querySelector('#view .card');
         if (view) flash(view, `All ${name} questions deleted successfully.\n${r.deletedCount} question${r.deletedCount === 1 ? '' : 's'} removed.\nHistorical assessment results were preserved.`, 'ok');
-      } catch {
+      } catch (ex) {
         yes.disabled = false;
-        flash(box, 'Questions were not deleted.\nPlease try again or check the server logs.');
+        flash(box, ex && ex.message && !/Something went wrong/.test(ex.message) ? ex.message : 'Questions were not deleted.\nPlease try again or check the server logs.');
       }
     });
   }
@@ -1320,7 +1323,7 @@ async function renderReport() {
       h('div', { class: 'row' }, downloadLink('/export/candidates.xlsx', 'Download Excel (15 columns)', ''), downloadLink('/export/candidates.xlsx?detail=full', 'Detailed Excel'))),
     h('div', { class: 'card' },
       h('div', { class: 'row' }, search, h('label', { class: 'small' }, dupOnly, ` Only duplicate phone numbers (${dups})`)),
-      h('p', { class: 'muted small' }, 'One row per candidate. Scores are the ones the assessment already calculated: IQ = LALCO IQ Score, Behavioral Assessment and Calculation = percentage, Essay = marks (or "Pending HR marking" until HR marks it). "—" = not part of the candidate\'s assessment. A highlighted phone number is used by more than one candidate (nothing is merged or deleted). Each candidate\'s PDF / Word report has the same 15 fields.'),
+      h('p', { class: 'muted small' }, 'One row per candidate. Scores are the ones the assessment already calculated: IQ = LALCO IQ Score, Behavioral Interview Test and Calculation = percentage, Essay = marks (or "Pending HR marking" until HR marks it). "—" = not part of the candidate\'s assessment. A highlighted phone number is used by more than one candidate (nothing is merged or deleted). Each candidate\'s PDF / Word report has the same 15 fields.'),
       h('div', { class: 'table-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, data.fields.map((f) => h('th', {}, f)))), body))));
   draw();
 }

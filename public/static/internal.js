@@ -213,7 +213,7 @@ async function renderStaffLink(id) {
 // ---- results & reports ---------------------------------------------------------------
 
 function resultsTable(list, empty) {
-  return tableOf(['Staff Name', 'Employee ID', 'Department', 'Position', 'Assessment', 'IQ Test Score', 'Behavioral Assessment Score', 'Calculation Score', 'Essay Score', 'Pass / Not Pass', 'Date and Time', ''],
+  return tableOf(['Staff Name', 'Employee ID', 'Department', 'Position', 'Assessment', 'IQ Test Score', 'Behavioral Interview Test Score', 'Calculation Score', 'Essay Score', 'Pass / Not Pass', 'Date and Time', ''],
     list.map((r) => h('tr', {}, r.values.map((v, i) => (i === 0 ? h('td', {}, h('a', { href: '#/internal/results/' + r.id }, h('strong', {}, v)))
       : i === 9 ? h('td', {}, statusBadge(v)) : h('td', { class: i >= 5 ? 'nowrap' : null }, v))),
     h('td', { class: 'nowrap' }, downloadLink(`/internal/results/${r.id}/export.pdf`, 'PDF'), ' ', downloadLink(`/internal/results/${r.id}/export.docx`, 'Word'), ' ', downloadLink(`/internal/results/${r.id}/export.xlsx`, 'Excel')))), empty);

@@ -178,6 +178,23 @@ const authFolder = folder('02 Authentication', 'Admin login uses an httpOnly JWT
     },
   }),
   req('GET Current Admin', 'GET', '/api/admin/auth/me', { test: () => { pm.test('Session belongs to the admin', () => pm.expect(body.username).to.equal(env('adminUsername'))); } }),
+  req('POST Admin Login — second session (to be logged out)', 'POST', '/api/admin/auth/login', {
+    noAuth: true, json: { username: '{{adminUsername}}', password: '{{adminPassword}}' },
+    desc: 'A second, separate admin session (cookie jar off). Its token is kept only for the next three requests, then cleared.',
+    test: () => {
+      const c = pm.response.headers.all().find((h) => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('hr_session='));
+      pm.test('A second session token was issued', () => pm.expect(c, 'no hr_session cookie').to.exist);
+      pm.environment.set('secondAdminToken', c ? c.value.split(';')[0].slice('hr_session='.length) : '');
+    },
+  }),
+  req('GET Current Admin — second session works', 'GET', '/api/admin/auth/me', { cookie: 'hr_session={{secondAdminToken}}', test: () => { pm.test('Signed in', () => pm.expect(body.username).to.equal(env('adminUsername'))); } }),
+  req('POST Logout — second session', 'POST', '/api/admin/auth/logout', { cookie: 'hr_session={{secondAdminToken}}', test: () => { pm.test('ok = true', () => pm.expect(body.ok).to.equal(true)); } }),
+  req('GET Current Admin — logged-out token replayed', 'GET', '/api/admin/auth/me', {
+    cookie: 'hr_session={{secondAdminToken}}', status: 401, error: 'Your session has ended',
+    desc: 'Logout revokes the token itself (not only the cookie): the same token sent again is refused at once.',
+    test: () => { pm.environment.set('secondAdminToken', ''); },
+  }),
+  req('GET Current Admin — the main session is not affected', 'GET', '/api/admin/auth/me', { test: () => { pm.test('Still signed in', () => pm.expect(body.username).to.equal(env('adminUsername'))); } }),
   req('POST Logout', 'POST', '/api/admin/auth/logout', { test: () => { pm.test('ok = true', () => pm.expect(body.ok).to.equal(true)); } }),
   req('GET Current Admin — after logout', 'GET', '/api/admin/auth/me', { status: 401, error: 'Please log in.', desc: 'Logout clears the cookie, so the admin API refuses the next request.' }),
   req('POST Admin Login — again', 'POST', '/api/admin/auth/login', { json: { username: '{{adminUsername}}', password: '{{adminPassword}}' }, test: () => { pm.test('Logged in again', () => pm.expect(body.username).to.equal(env('adminUsername'))); } }),
@@ -489,6 +506,17 @@ const imports = folder('08 Question Import', 'Real multipart uploads of the file
       pm.test('Reason says Duplicate', () => body.rows.forEach((r) => pm.expect(r.errors.join(' ')).to.include('Duplicate')));
     },
   }),
+  preview('POST Import Preview — Excel 97-2003 (.xls)', 'mcq-bank-97.xls', '{{testTypeKey}}', {
+    desc: 'A real .xls file (BIFF8 / OLE, not a renamed .xlsx). Preview only: nothing is saved.',
+    test: () => {
+      pm.test('3 found, 3 valid, read as a table', () => { pm.expect(body.found).to.equal(3); pm.expect(body.valid).to.equal(3); pm.expect(body.format).to.equal('table (header row)'); });
+      pm.test('Questions, answers and categories read', () => {
+        pm.expect(body.rows.map((r) => r.question.question_text)).to.eql(['Which device prints on paper?', 'How many hours are in two days?', 'Which file type is a spreadsheet?']);
+        pm.expect(body.rows.map((r) => r.question.correct_answer)).to.eql(['B', 'C', 'B']);
+        pm.expect(body.rows.map((r) => r.question.category)).to.eql(['Office', 'Numbers', 'Office']);
+      });
+    },
+  }),
   preview('POST Import Preview — CSV with semicolons and quotes', 'mcq-semicolon.csv', '{{testTypeKey}}', {
     test: () => {
       pm.test('3 found, 3 valid', () => { pm.expect(body.found).to.equal(3); pm.expect(body.valid).to.equal(3); });
@@ -678,6 +706,28 @@ const links = folder('11 Assessment Links', 'Enable / disable / regenerate / del
   req('POST Regenerate Link — nonexistent', 'POST', '/api/admin/links/999999999/regenerate', { status: 404 }),
   req('DELETE Link — unused', 'DELETE', '/api/admin/links/{{spareLinkId}}', { test: () => { pm.test('ok = true', () => pm.expect(body.ok).to.equal(true)); } }),
   req('DELETE Link — already deleted', 'DELETE', '/api/admin/links/{{spareLinkId}}', { status: 404 }),
+  // An open link must never be left with an empty (or too small) later test.
+  req('GET Question Counts — the temporary MCQ type', 'GET', '/api/admin/questions/counts', {
+    test: () => { pm.test('Has active questions', () => pm.expect(body[env('testTypeKey')]).to.be.above(0)); set('guardNeed', String(body[env('testTypeKey')])); },
+  }),
+  req('POST Create Assessment — a link that needs every question of the temporary MCQ type', 'POST', '/api/admin/assessments', {
+    status: 201, json: '{ "title": "{{runTag}} GUARD LINK", "tests": ["{{testTypeKey}}"], "counts": { "{{testTypeKey}}": {{guardNeed}} }, "link_expiry_minutes": 60, "eligibility_mark": 0, "language": "en" }',
+    test: () => { set('guardLinkId', String(body.id)); },
+  }),
+  req('GET Questions — one active question of the temporary MCQ type', 'GET', '/api/admin/questions', {
+    q: { section: '{{testTypeKey}}', status: 'Active' },
+    test: () => { const q = body.questions[0]; pm.test('Found', () => pm.expect(q).to.exist); set('guardQuestionId', String(q.id)); set('guardQuestionJson', { ...q, status: 'Inactive' }); },
+  }),
+  req('PUT Question — make it Inactive while an open link needs it', 'PUT', '/api/admin/questions/{{guardQuestionId}}', {
+    json: '{{guardQuestionJson}}', status: 400, error: 'without enough active questions',
+    desc: 'Removal guard: HR cannot make a question Inactive when an open link (or a candidate between tests) would then not have enough questions. Only a temporary question of this run is used.',
+  }),
+  req('DELETE Question — while an open link needs it', 'DELETE', '/api/admin/questions/{{guardQuestionId}}', { status: 400, error: 'Disable those links, or add questions first.' }),
+  req('GET Questions — the question is still active', 'GET', '/api/admin/questions', {
+    q: { section: '{{testTypeKey}}', status: 'Active' },
+    test: () => { pm.test('Not removed, not deactivated', () => pm.expect(body.questions.map((q) => q.id)).to.include(Number(env('guardQuestionId')))); },
+  }),
+  req('DELETE Link — the guard link (unused)', 'DELETE', '/api/admin/links/{{guardLinkId}}', { test: () => { pm.test('ok = true', () => pm.expect(body.ok).to.equal(true)); } }),
 ]);
 
 // ================================================================================
@@ -773,16 +823,70 @@ const exam = folder('12 Public Exam', 'The candidate API. Each candidate has the
   req('POST Continue — again while running (no change)', 'POST', '/api/exam/{{linkToken}}/continue', { cand: 'A', test: () => { pm.test('Still the same running test', () => { pm.expect(body.state).to.equal('in_progress'); pm.expect(body.questions[0].id).to.equal(Number(env('essayQuestionA'))); }); } }),
   req('POST Submit — Candidate A, interview answer', 'POST', '/api/exam/{{linkToken}}/submit', {
     cand: 'A', json: '{ "answers": { "{{essayQuestionA}}": "I planned the work, asked for help and finished on time." } }',
-    test: () => { pm.test('Submitted; waiting for HR marking', () => { pm.expect(body.state).to.equal('submitted'); pm.expect(body.last_result.result).to.equal('Pending'); }); },
+    pre: () => { pm.environment.set('sessionUsedByA', pm.environment.get('candidateSessionA')); },
+    test: () => {
+      pm.test('Submitted; waiting for HR marking', () => { pm.expect(body.state).to.equal('submitted'); pm.expect(body.last_result.result).to.equal('Pending'); });
+      pm.test('The finished attempt released this browser: a new session cookie', () => pm.expect(env('candidateSessionA')).to.not.equal(env('sessionUsedByA')));
+    },
   }),
-  req('POST Submit — Candidate A again', 'POST', '/api/exam/{{linkToken}}/submit', { cand: 'A', json: { answers: {} }, status: 409, test: () => { pm.test('Refused: already submitted', () => pm.expect(body.state).to.equal('submitted')); } }),
+  req('POST Submit — Candidate A again', 'POST', '/api/exam/{{linkToken}}/submit', {
+    cand: 'A', json: { answers: {} }, status: 409,
+    desc: 'The browser now has a new session, so there is nothing to submit; A\'s finished attempt is not changed (checked in folder 15).',
+    test: () => { pm.test('Refused, and nothing of A is shown', () => { pm.expect(body.state).to.not.equal('in_progress'); pm.expect(body).to.not.have.property('candidate'); pm.expect(body).to.not.have.property('questions'); }); },
+  }),
   req('PUT Answer — after submitting', 'PUT', '/api/exam/{{linkToken}}/answer', { cand: 'A', json: '{ "question_id": {{essayQuestionA}}, "answer": "changed" }', status: 409 }),
+  // The SAME browser (A's cookie variable, one cookie jar) is used by the next two people in turn.
+  ...['SB2', 'SB3'].flatMap((who, i) => [
+    req(`GET Exam — the same browser, next person (${who}) opens the link`, 'GET', '/api/exam/{{linkToken}}', {
+      cand: 'A', test: () => { pm.test('Start form, nothing of the previous person', () => { pm.expect(body.state).to.equal('ready'); pm.expect(body).to.not.have.property('candidate'); pm.expect(body).to.not.have.property('questions'); }); },
+    }),
+    req(`POST Start — ${who} on the same browser`, 'POST', '/api/exam/{{linkToken}}/start', {
+      cand: 'A', json: { ...START(who), phone: '020 0000 02' + String(i + 1).padStart(2, '0') }, P: { who },
+      pre: () => { pm.environment.set('sameBrowserSession' + P.who, pm.environment.get('candidateSessionA')); },
+      test: () => {
+        pm.test('A NEW attempt for this person', () => { pm.expect(body.state).to.equal('in_progress'); pm.expect(body.candidate.name).to.equal(env('runTag') + ' ' + P.who); pm.expect(body.questions.length).to.equal(3); });
+        set('questions' + P.who, body.questions.map((q) => ({ id: q.id, options: q.options.map((o) => o.key) })));
+      },
+    }),
+    ...(i === 0 ? [
+      req('POST Start — someone else tries to take over SB2 (active)', 'POST', '/api/exam/{{linkToken}}/start', {
+        cand: 'A', json: { ...START('INTRUDER'), phone: '020 0000 0299' }, status: 409, error: 'assessment_in_progress',
+        desc: 'While an attempt is active in this browser, a Start with other details is refused; nothing of the owner is sent back and no record is created.',
+        test: () => { pm.test('Only the error: no candidate, questions, answers or result', () => pm.expect(Object.keys(body)).to.eql(['error'])); },
+      }),
+      req('GET Exam — SB2 refreshes and resumes', 'GET', '/api/exam/{{linkToken}}', {
+        cand: 'A', test: () => { pm.test('SB2\'s own attempt, same questions', () => { pm.expect(body.state).to.equal('in_progress'); pm.expect(body.candidate.name).to.equal(env('runTag') + ' SB2'); pm.expect(body.questions.map((q) => q.id)).to.eql(getJSON('questionsSB2').map((q) => q.id)); }); },
+      }),
+    ] : []),
+    req(`POST Submit — ${who}, first test`, 'POST', '/api/exam/{{linkToken}}/submit', {
+      cand: 'A', json: `{ "answers": {{answers${who}}} }`, P: { who },
+      pre: () => { const a = {}; getJSON('questions' + P.who).forEach((q) => { a[q.id] = q.options[0]; }); pm.variables.set('answers' + P.who, JSON.stringify(a)); },
+      test: () => { pm.test('Next test waiting', () => pm.expect(body.state).to.equal('next_test')); },
+    }),
+    req(`POST Continue — ${who}`, 'POST', '/api/exam/{{linkToken}}/continue', {
+      cand: 'A', P: { who }, test: () => { pm.test('Interview test running', () => pm.expect(body.state).to.equal('in_progress')); set('essayQuestion' + P.who, String(body.questions[0].id)); },
+    }),
+    req(`POST Submit — ${who}, interview answer`, 'POST', '/api/exam/{{linkToken}}/submit', {
+      cand: 'A', json: `{ "answers": { "{{essayQuestion${who}}}": "My own answer." } }`, P: { who },
+      test: () => { pm.test('Submitted; result shown at once; session released', () => { pm.expect(body.state).to.equal('submitted'); pm.expect(env('candidateSessionA')).to.not.equal(env('sameBrowserSession' + P.who)); }); },
+    }),
+  ]),
+  req('GET Link — A, SB2 and SB3: three attempts from one browser', 'GET', '/api/admin/links/{{linkId}}', {
+    test: () => {
+      const find = (who) => body.attempts.find((x) => x.candidate_name === env('runTag') + ' ' + who);
+      const list = ['A', 'SB2', 'SB3'].map(find);
+      pm.test('Three submitted attempts', () => list.forEach((a) => { pm.expect(a).to.exist; pm.expect(a.status).to.equal('SUBMITTED'); }));
+      pm.test('Different attempts and candidates', () => { pm.expect(new Set(list.map((a) => a.id)).size).to.equal(3); pm.expect(new Set(list.map((a) => a.candidate_id)).size).to.equal(3); });
+      pm.test('Three different browser sessions were used', () => pm.expect(new Set([env('sessionUsedByA'), env('sameBrowserSessionSB2'), env('sameBrowserSessionSB3')]).size).to.equal(3));
+      pm.test('The intruder was never recorded', () => pm.expect(body.attempts.some((x) => x.candidate_name === env('runTag') + ' INTRUDER')).to.equal(false));
+    },
+  }),
   req('GET Link — two independent attempts', 'GET', '/api/admin/links/{{linkId}}', {
     test: () => {
       const a = body.attempts.find((x) => x.candidate_name === env('runTag') + ' A');
       const b = body.attempts.find((x) => x.candidate_name === env('runTag') + ' BB');
       pm.test('A submitted, B in progress, separate candidates', () => { pm.expect(a.status).to.equal('SUBMITTED'); pm.expect(b.status).to.equal('IN_PROGRESS'); pm.expect(a.candidate_id).to.not.equal(b.candidate_id); });
-      set('assessmentId', String(a.id)); set('attemptB', String(b.id));
+      set('assessmentId', String(a.id)); set('attemptB', String(b.id)); set('candidateIdA', String(a.candidate_id));
     },
   }),
   req('GET Exam — A\'s session on another link', 'GET', '/api/exam/{{iqLinkToken}}', {
@@ -925,7 +1029,7 @@ const timer = folder('14 Timer & Expiry', 'A 1-minute test on a link that expire
 // ================================================================================
 // 15 Results & Reports
 // ================================================================================
-const FIELDS = ['Candidate Name', 'Phone Number', 'Graduate From', 'High School', 'College', 'University', 'School Name', 'Subject', 'GPA / Mark', 'Date and Time', 'IQ Test Score', 'Behavioral Assessment Score', 'Calculation Score', 'Essay Score', 'Pass / Not Pass Status'];
+const FIELDS = ['Candidate Name', 'Phone Number', 'Graduate From', 'High School', 'College', 'University', 'School Name', 'Subject', 'GPA / Mark', 'Date and Time', 'IQ Test Score', 'Behavioral Interview Test Score', 'Calculation Score', 'Essay Score', 'Pass / Not Pass Status'];
 const results = folder('15 Results & Reports', 'Results, the 15-field standard report, exports, the assessment review, essay marking and per-attempt actions. Only this run\'s candidates and attempts are changed.', [
   req('GET IQ Results', 'GET', '/api/admin/results/iq', {
     test: () => {
@@ -968,6 +1072,25 @@ const results = folder('15 Results & Reports', 'Results, the 15-field standard r
   req('PUT Essay Marks — above the maximum', 'PUT', '/api/admin/assessments/{{assessmentId}}/essay-marks', { json: '{ "marks": { "{{essayQuestionA}}": 1000 } }', status: 400, error: 'Essay marks must be between 0 and' }),
   req('PUT Essay Marks — Candidate A', 'PUT', '/api/admin/assessments/{{assessmentId}}/essay-marks', { json: '{ "marks": { "{{essayQuestionA}}": {{essayMax}} } }', test: () => { pm.test('Saved; attempt still submitted', () => pm.expect(body.status).to.equal('SUBMITTED')); } }),
   req('GET Assessment — interview now marked', 'GET', '/api/admin/assessments/{{assessmentId}}', { test: () => { pm.test('Interview test: full marks, Pass', () => { pm.expect(body.tests[1].points).to.equal(Number(env('essayMax'))); pm.expect(body.tests[1].result).to.equal('Pass'); }); } }),
+  req('GET Standard Report — Behavioral Interview Test column after HR marking', 'GET', '/api/admin/report/standard', {
+    desc: 'Field 12 is the Behavioral Interview Test: the attempt\'s interview-format test (here the temporary interview type, marked full marks by HR). A candidate without such a test shows "—", never another test\'s score.',
+    test: () => {
+      const row = (name) => body.rows.find((r) => r.values[0] === env('runTag') + ' ' + name);
+      pm.test('Field 12 is named "Behavioral Interview Test Score"', () => pm.expect(body.fields[11]).to.equal('Behavioral Interview Test Score'));
+      pm.test('Candidate A: 100.0% (the marked interview answer)', () => pm.expect(row('A').values[11]).to.equal('100.0%'));
+      pm.test('SB2 (not marked yet): Pending HR marking, never 0', () => pm.expect(row('SB2').values[11]).to.equal('Pending HR marking'));
+      pm.test('S1 (IQ only): no behavioural score', () => pm.expect(row('S1').values[11]).to.equal('—'));
+    },
+  }),
+  req('GET Dashboard — Behavioral Interview Test counters', 'GET', '/api/admin/dashboard', {
+    test: () => {
+      pm.test('Behavioral Interview Test passed / not passed / pending are counted', () => { ['behavioral_passed', 'behavioral_not_passed', 'behavioral_pending'].forEach((k) => pm.expect(body.summary[k], k).to.be.a('number')); });
+      pm.test('At least A passed, SB2 and SB3 pending', () => { pm.expect(body.summary.behavioral_passed).to.be.at.least(1); pm.expect(body.summary.behavioral_pending).to.be.at.least(2); });
+    },
+  }),
+  req('GET Export Candidate PDF — A (Behavioral Interview Test)', 'GET', '/api/admin/candidates/{{candidateIdA}}/export.pdf', { type: 'pdf', maxMs: 5000 }),
+  req('GET Export Candidate Word — A (Behavioral Interview Test)', 'GET', '/api/admin/candidates/{{candidateIdA}}/export.docx', { type: 'docx', maxMs: 5000 }),
+  req('GET Export Candidate Excel — A (Behavioral Interview Test)', 'GET', '/api/admin/candidates/{{candidateIdA}}/export.xlsx', { type: 'xlsx', maxMs: 5000 }),
   req('PUT Essay Marks — attempt not submitted', 'PUT', '/api/admin/assessments/{{attemptB}}/essay-marks', { json: { marks: {} }, status: 400, error: 'after the assessment is submitted' }),
   req('POST Disable Attempt — Candidate B', 'POST', '/api/admin/assessments/{{attemptB}}/disable', { test: () => { pm.test('Disabled', () => { pm.expect(!!body.enabled).to.equal(false); pm.expect(body.state).to.equal('disabled'); }); } }),
   req('GET Exam — Candidate B while disabled', 'GET', '/api/exam/{{linkToken}}', { cand: 'B', test: () => { pm.test('state = disabled', () => pm.expect(body.state).to.equal('disabled')); } }),
@@ -1079,11 +1202,18 @@ const internalLinks = folder('18 Internal Staff Assessments', 'Internal Staff as
   req('GET Internal Exam — disabled link', 'GET', '/api/internal-exam/{{internalSingleLinkToken}}', { staff: 'X', test: () => { pm.test('state = disabled', () => pm.expect(body.state).to.equal('disabled')); } }),
   req('POST Enable Internal Link', 'POST', '/api/admin/internal/links/{{internalSingleLinkId}}/enable', { test: () => { pm.test('Open', () => pm.expect(body.share_state).to.equal('open')); } }),
   req('POST Regenerate Internal Link — unused', 'POST', '/api/admin/internal/links/{{internalSingleLinkId}}/regenerate', {
-    test: () => { pm.test('New token', () => pm.expect(body.token).to.not.equal(env('internalSingleLinkToken'))); set('oldInternalToken', env('internalSingleLinkToken')); set('internalSingleLinkToken', body.token); },
+    test: () => {
+      pm.test('New token', () => pm.expect(body.token).to.not.equal(env('internalSingleLinkToken')));
+      pm.test('The expiry date HR chose is kept (not recalculated)', () => pm.expect(Date.parse(body.link_expires_at)).to.equal(Date.parse(env('internalExpiresAt'))));
+      set('oldInternalToken', env('internalSingleLinkToken')); set('internalSingleLinkToken', body.token);
+    },
   }),
   req('GET Internal Exam — old token after regenerate', 'GET', '/api/internal-exam/{{oldInternalToken}}', { noAuth: true, status: 404 }),
   req('POST Regenerate Internal Link — nonexistent', 'POST', '/api/admin/internal/links/999999999/regenerate', { status: 404 }),
   req('POST Create Internal Link — spare (to delete)', 'POST', '/api/admin/internal/links', { status: 201, json: '{ "title": "{{runTag}} STAFF SPARE", "tests": ["{{testTypeKey}}"], "counts": { "{{testTypeKey}}": 1 }, "link_expiry_minutes": 60 }', test: () => { set('internalSpareLinkId', String(body.id)); } }),
+  req('POST Regenerate Internal Link — a relative expiry starts again', 'POST', '/api/admin/internal/links/{{internalSpareLinkId}}/regenerate', {
+    test: () => { pm.test('Expires 60 minutes from now', () => pm.expect(Date.parse(body.link_expires_at) - Date.now()).to.be.within(55 * 60000, 61 * 60000)); },
+  }),
   req('DELETE Internal Link — unused', 'DELETE', '/api/admin/internal/links/{{internalSpareLinkId}}', { test: () => { pm.test('ok', () => pm.expect(body.ok).to.equal(true)); } }),
   req('DELETE Internal Link — already deleted', 'DELETE', '/api/admin/internal/links/{{internalSpareLinkId}}', { status: 404 }),
 ]);
@@ -1141,9 +1271,47 @@ const internalExam = folder('19 Internal Staff Exam', 'The public internal staff
   }),
   req('POST Continue — Staff A', 'POST', '/api/internal-exam/{{internalLinkToken}}/continue', { staff: 'A', test: () => { pm.test('Second test running', () => { pm.expect(body.state).to.equal('in_progress'); pm.expect(body.section).to.equal(env('testTypeKey')); pm.expect(body.questions.length).to.equal(3); }); } }),
   req('GET Internal Result — Staff A snapshot (second test)', 'GET', '/api/admin/internal/results/{{internalAssessmentId}}', { P: { var: 'internalAnswersA2' }, test: [snapshotAnswers] }),
-  req('POST Submit — Staff A, second test', 'POST', '/api/internal-exam/{{internalLinkToken}}/submit', { staff: 'A', json: '{ "answers": {{internalAnswersA2}} }', test: () => { pm.test('Submitted, Pass', () => { pm.expect(body.state).to.equal('submitted'); pm.expect(body.last_result.result).to.equal('Pass'); }); } }),
+  req('POST Submit — Staff A, second test', 'POST', '/api/internal-exam/{{internalLinkToken}}/submit', { staff: 'A', json: '{ "answers": {{internalAnswersA2}} }', pre: () => { pm.environment.set('staffSessionUsedByA', pm.environment.get('internalStaffSession')); }, test: () => { pm.test('Submitted, Pass', () => { pm.expect(body.state).to.equal('submitted'); pm.expect(body.last_result.result).to.equal('Pass'); }); } }),
   req('POST Submit — Staff A again', 'POST', '/api/internal-exam/{{internalLinkToken}}/submit', { staff: 'A', json: { answers: {} }, status: 409 }),
   req('GET Internal Exam Image — after submitting (not served)', 'GET', '/api/internal-exam/{{internalLinkToken}}/images/{{imageId}}', { staff: 'A', status: 404, desc: 'Pictures are only served to an employee while the test that contains them is running.' }),
+  // The SAME browser (Staff A's cookie variable) is then used by Staff E, then Staff G.
+  req('GET Internal Exam — the same browser after Staff A finished', 'GET', '/api/internal-exam/{{internalLinkToken}}', {
+    staff: 'A',
+    test: () => { pm.test('Start form, nothing of Staff A', () => { pm.expect(body.state).to.equal('ready'); pm.expect(body).to.not.have.property('staff'); pm.expect(body).to.not.have.property('questions'); }); },
+  }),
+  req('POST Start — Staff E on the same browser', 'POST', '/api/internal-exam/{{internalLinkToken}}/start', {
+    staff: 'A', json: staffStart('E'), pre: () => { pm.environment.set('staffSessionUsedByE', pm.environment.get('internalStaffSession')); },
+    test: () => { pm.test('A new attempt for Staff E', () => { pm.expect(body.state).to.equal('in_progress'); pm.expect(body.section).to.equal('IQ'); }); },
+  }),
+  req('POST Start — Staff F tries to take over E (active)', 'POST', '/api/internal-exam/{{internalLinkToken}}/start', {
+    staff: 'A', json: staffStart('F'), status: 409, error: 'assessment_in_progress',
+    test: () => { pm.test('Only the error, nothing of Staff E', () => pm.expect(Object.keys(body)).to.eql(['error'])); },
+  }),
+  req('GET Internal Link — find Staff E', 'GET', '/api/admin/internal/links/{{internalLinkId}}', {
+    test: () => {
+      const e = body.results.find((r) => r.staff && r.staff.employee_id === env('runStamp') + '-E');
+      pm.test('E has an own attempt and staff record; F was never recorded', () => {
+        pm.expect(e).to.exist; pm.expect(e.id).to.not.equal(Number(env('internalAssessmentId'))); pm.expect(e.staff.id).to.not.equal(Number(env('internalStaffId')));
+        pm.expect(body.results.some((r) => r.staff && r.staff.employee_id === env('runStamp') + '-F')).to.equal(false);
+      });
+      set('internalResultE', String(e.id));
+    },
+  }),
+  req('GET Internal Result — Staff E snapshot (IQ answers)', 'GET', '/api/admin/internal/results/{{internalResultE}}', { P: { var: 'internalAnswersE1' }, test: [snapshotAnswers] }),
+  req('POST Submit — Staff E, IQ', 'POST', '/api/internal-exam/{{internalLinkToken}}/submit', { staff: 'A', json: '{ "answers": {{internalAnswersE1}} }', test: () => { pm.test('Next test waiting', () => pm.expect(body.state).to.equal('next_test')); } }),
+  req('POST Continue — Staff E', 'POST', '/api/internal-exam/{{internalLinkToken}}/continue', { staff: 'A', test: () => { pm.test('Second test running', () => pm.expect(body.state).to.equal('in_progress')); } }),
+  req('GET Internal Result — Staff E snapshot (second test)', 'GET', '/api/admin/internal/results/{{internalResultE}}', { P: { var: 'internalAnswersE2' }, test: [snapshotAnswers] }),
+  req('POST Submit — Staff E, second test', 'POST', '/api/internal-exam/{{internalLinkToken}}/submit', {
+    staff: 'A', json: '{ "answers": {{internalAnswersE2}} }',
+    test: () => { pm.test('Submitted, Pass; session released', () => { pm.expect(body.state).to.equal('submitted'); pm.expect(body.last_result.result).to.equal('Pass'); pm.expect(env('internalStaffSession')).to.not.equal(env('staffSessionUsedByE')); }); },
+  }),
+  req('POST Start — Staff G on the same browser', 'POST', '/api/internal-exam/{{internalLinkToken}}/start', {
+    staff: 'A', json: staffStart('G'), pre: () => { pm.environment.set('staffSessionUsedByG', pm.environment.get('internalStaffSession')); },
+    test: () => {
+      pm.test('A third attempt starts', () => pm.expect(body.state).to.equal('in_progress'));
+      pm.test('Three different sessions on one browser', () => pm.expect(new Set([env('staffSessionUsedByA'), env('staffSessionUsedByE'), env('staffSessionUsedByG')]).size).to.equal(3));
+    },
+  }),
   req('GET Internal Exam — Staff C opens the single-use link', 'GET', '/api/internal-exam/{{internalSingleLinkToken}}', { staff: 'C', pre: () => { pm.environment.set('internalStaffSessionC', ''); }, test: () => { pm.test('ready', () => pm.expect(body.state).to.equal('ready')); } }),
   req('POST Start — Staff C', 'POST', '/api/internal-exam/{{internalSingleLinkToken}}/start', { staff: 'C', json: staffStart('C'), test: () => { pm.test('in_progress', () => pm.expect(body.state).to.equal('in_progress')); } }),
   req('GET Internal Exam — Staff D on the used single-use link', 'GET', '/api/internal-exam/{{internalSingleLinkToken}}', { staff: 'D', pre: () => { pm.environment.set('internalStaffSessionD', ''); }, test: () => { pm.test('state = used', () => pm.expect(body.state).to.equal('used')); } }),
@@ -1166,7 +1334,7 @@ const internalExam = folder('19 Internal Staff Exam', 'The public internal staff
 
 const internalResults = folder('20 Internal Staff Results', 'Results, detail, reports, exports and dashboard of the internal area only. Checks that recruitment data and screens are not affected.', [
   req('GET Internal Results', 'GET', '/api/admin/internal/results', {
-    P: { fields: ['Staff Name', 'Employee ID', 'Department', 'Position', 'Assessment', 'IQ Test Score', 'Behavioral Assessment Score', 'Calculation Score', 'Essay Score', 'Pass / Not Pass Status', 'Date and Time'] },
+    P: { fields: ['Staff Name', 'Employee ID', 'Department', 'Position', 'Assessment', 'IQ Test Score', 'Behavioral Interview Test Score', 'Calculation Score', 'Essay Score', 'Pass / Not Pass Status', 'Date and Time'] },
     test: () => {
       pm.test('The 11 result fields', () => pm.expect(body.fields).to.eql(P.fields));
       const a = body.results.find((r) => r.id === Number(env('internalAssessmentId')));
@@ -1190,18 +1358,31 @@ const internalResults = folder('20 Internal Staff Results', 'Results, detail, re
   req('GET Export Internal Result Word', 'GET', '/api/admin/internal/results/{{internalAssessmentId}}/export.docx', { type: 'docx', maxMs: 5000 }),
   req('GET Export Internal Result Excel', 'GET', '/api/admin/internal/results/{{internalAssessmentId}}/export.xlsx', { type: 'xlsx', maxMs: 5000 }),
   req('GET Export Internal Result — unknown format', 'GET', '/api/admin/internal/results/{{internalAssessmentId}}/export.txt', { status: 404 }),
-  req('GET Export Internal Staff Report (Excel)', 'GET', '/api/admin/internal/export/results.xlsx', { type: 'xlsx', maxMs: 8000 }),
+  req('GET Export Internal Staff Report (Excel)', 'GET', '/api/admin/internal/export/results.xlsx', { type: 'xlsx', maxMs: 8000, test: () => { set('internalExportSize', String(pm.response.stream.length)); } }),
+  req('GET Internal Results — search q (Employee ID)', 'GET', '/api/admin/internal/results', {
+    q: { q: '{{runStamp}}-E' },
+    test: () => { pm.test('Only Staff E', () => { pm.expect(body.results.length).to.equal(1); pm.expect(body.results[0].staff.employee_id).to.equal(env('runStamp') + '-E'); }); },
+  }),
+  req('GET Export Internal Staff Report — search q (Employee ID)', 'GET', '/api/admin/internal/export/results.xlsx', {
+    q: { q: '{{runStamp}}-E' }, type: 'xlsx', maxMs: 8000,
+    desc: 'The Excel export uses the same search as the results table. The workbook is compressed, so its content is checked by size: one row is smaller than all rows (content is checked cell by cell in the unit tests).',
+    test: () => { pm.test('Smaller than the unfiltered export (filtered rows only)', () => pm.expect(pm.response.stream.length).to.be.below(Number(env('internalExportSize')))); set('internalExportOneSize', String(pm.response.stream.length)); },
+  }),
+  req('GET Export Internal Staff Report — search q (no match)', 'GET', '/api/admin/internal/export/results.xlsx', {
+    q: { q: '{{runTag}} NO SUCH STAFF' }, type: 'xlsx', maxMs: 8000,
+    test: () => { pm.test('Header only: smaller than the one-row export', () => pm.expect(pm.response.stream.length).to.be.below(Number(env('internalExportOneSize')))); },
+  }),
   req('GET Staff Member — with the result', 'GET', '/api/admin/internal/staff/{{internalStaffId}}', { test: () => { pm.test('1 result, completed, PASS', () => { pm.expect(body.results.length).to.equal(1); pm.expect(body.staff.completed).to.equal(1); pm.expect(body.staff.last_result).to.equal('Pass'); }); } }),
   req('GET Internal Dashboard — after', 'GET', '/api/admin/internal/dashboard', {
-    desc: 'After this run: 2 more staff (A was created by HR; B and C by starting — D was refused), 3 more assessments (A completed, B and C in progress), 1 more PASS, 2 more active links.',
+    desc: 'After this run: 5 more staff (A was created by HR; B, C, E and G by starting — D and F were refused), 5 more assessments (A and E completed, B, C and G in progress), 2 more PASS, 1 more active link.',
     test: () => {
       const b = getJSON('internalBaseline');
       pm.test('Counters moved as expected', () => {
-        pm.expect(body.totalStaff - b.totalStaff).to.equal(3);
-        pm.expect(body.totalAssessments - b.totalAssessments).to.equal(3);
-        pm.expect(body.completed - b.completed).to.equal(1);
-        pm.expect(body.inProgress - b.inProgress).to.equal(2);
-        pm.expect(body.passed - b.passed).to.equal(1);
+        pm.expect(body.totalStaff - b.totalStaff).to.equal(5);
+        pm.expect(body.totalAssessments - b.totalAssessments).to.equal(5);
+        pm.expect(body.completed - b.completed).to.equal(2);
+        pm.expect(body.inProgress - b.inProgress).to.equal(3);
+        pm.expect(body.passed - b.passed).to.equal(2);
         pm.expect(body.activeLinks - b.activeLinks).to.equal(1);
       });
       pm.test('Recent results include Staff A', () => pm.expect(body.recentResults.map((r) => r.id)).to.include(Number(env('internalAssessmentId'))));
@@ -1351,7 +1532,9 @@ const collection = {
 const walk = (items) => items.forEach((it) => { if (it.item) walk(it.item); else for (const ev of it.event) ev.script.exec = ev.script.exec.map((l) => l.replace("eval(pm.environment.get('libUsable'));", LIB_USABLE)); });
 walk(collection.item);
 
-const VARS = ['runTag', 'candidateId', 'questionId', 'pictureQuestionId', 'imageId', 'categoryId', 'category2Id', 'testTypeKey', 'interviewTypeKey', 'calcTypeKey', 'throwawayTypeKey',
+const VARS = ['runTag', 'secondAdminToken', 'guardNeed', 'guardLinkId', 'guardQuestionId', 'guardQuestionJson', 'candidateIdA', 'sessionUsedByA', 'sameBrowserSessionSB2', 'sameBrowserSessionSB3',
+  'questionsSB2', 'questionsSB3', 'answersSB2', 'answersSB3', 'essayQuestionSB2', 'essayQuestionSB3', 'staffSessionUsedByA', 'staffSessionUsedByE', 'staffSessionUsedByG', 'internalResultE',
+  'internalAnswersE1', 'internalAnswersE2', 'internalExportSize', 'internalExportOneSize', 'candidateId', 'questionId', 'pictureQuestionId', 'imageId', 'categoryId', 'category2Id', 'testTypeKey', 'interviewTypeKey', 'calcTypeKey', 'throwawayTypeKey',
   'assessmentId', 'attemptB', 'linkId', 'linkToken', 'candidateToken', 'iqLinkId', 'iqLinkToken', 'spareLinkId', 'spareLinkToken', 'oldSpareToken', 'timerLinkId', 'timerLinkToken',
   'candidateSessionA', 'candidateSessionB', 'candidateSessionC', 'candidateSessionD', 'candidateSessionX', 'candidateSessionS1', 'candidateSessionS2', 'candidateSessionS3',
   'questionsA', 'questionsB', 'questionsC', 'remainingA', 'essayQuestionA', 'essayMax', 'iqCount', 'iqBankSize', 'mcqActiveCount', 'translator',

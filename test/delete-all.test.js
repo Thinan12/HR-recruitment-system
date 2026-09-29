@@ -67,6 +67,16 @@ test('the question bank lists every area with its total, active / inactive and I
   assert.equal(r.iq_levels['Very Difficult'], 4);
 });
 
+test('an open link that still needs the area blocks Delete All (the next test would be empty)', async () => {
+  const r = await deleteAll('IQ');
+  assert.equal(r.status, 400);
+  assert.equal(r.data.success, false);
+  assert.match(r.data.message, /without enough active questions for 1 open assessment link/);
+  assert.equal(count('IQ'), 14, 'nothing deleted');
+  // HR closes the link; the finished attempt keeps its history.
+  db.prepare('UPDATE assessment_links SET enabled = 0').run();
+});
+
 test('a failure part-way rolls back: nothing is half deleted', async () => {
   const last = db.prepare("SELECT MAX(id) AS id FROM questions WHERE section = 'IQ'").get().id;
   db.exec(`CREATE TRIGGER block_one BEFORE DELETE ON questions WHEN old.id = ${last} BEGIN SELECT RAISE(ABORT, 'blocked'); END`);

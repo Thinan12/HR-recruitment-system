@@ -265,6 +265,10 @@ function dashboard() {
       total: people.length,
       iq_passed: withResult('IQ', 'Pass'), iq_not_passed: withResult('IQ', 'Not Pass'),
       general_passed: withResult('GENERAL', 'Pass'), general_not_passed: withResult('GENERAL', 'Not Pass'),
+      // The Behavioral Interview Test: every behavioural / interview-format test.
+      behavioral_passed: people.filter((p) => (p.tests || []).some((t) => T.behavior(t.section) === 'interview' && t.result === 'Pass')).length,
+      behavioral_not_passed: people.filter((p) => (p.tests || []).some((t) => T.behavior(t.section) === 'interview' && t.result === 'Not Pass')).length,
+      behavioral_pending: people.filter((p) => (p.tests || []).some((t) => T.behavior(t.section) === 'interview' && t.state === 'PENDING HR MARKING')).length,
       calculation_passed: withResult('CALCULATION', 'Pass'), calculation_not_passed: withResult('CALCULATION', 'Not Pass'),
       essay_pending: people.filter((p) => testOf(p, 'ESSAY')?.state === 'PENDING HR MARKING').length,
       // Candidates per IQ classification (from their latest IQ test).
