@@ -5575,7 +5575,8 @@
                 "exec": [
                   "const env = (k) => pm.environment.get(k);",
                   "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
-                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "pm.variables.set('maxMs', 8000);"
                 ]
               }
             },

@@ -413,7 +413,7 @@ const questions = folder('07 Questions', 'Question bank CRUD on the temporary MC
     status: 400, pre: () => { if (env('translator') === 'true') { console.log('Skipped: a translation service is configured; this would translate the real bank.'); pm.execution.skipRequest(); } },
     notes: 'Skipped automatically when a translation service is configured (it would start translating the whole bank).',
   }),
-  req('GET Question Template (Excel)', 'GET', '/api/admin/questions/template.xlsx', { type: 'xlsx' }),
+  req('GET Question Template (Excel)', 'GET', '/api/admin/questions/template.xlsx', { type: 'xlsx', maxMs: 8000 }),
   req('POST Delete All Questions — invalid test area (safety check)', 'POST', '/api/admin/questions/delete-all', {
     json: { section: 'POSTMAN_NOT_A_TEST_AREA' }, status: 400, error: 'Please choose a test area.',
     desc: 'Checks the endpoint refuses an unknown test area. It is NEVER called with a real test area by this collection.',
