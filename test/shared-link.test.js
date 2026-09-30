@@ -109,7 +109,7 @@ test('the session cookie is HttpOnly, SameSite=Lax, scoped to this link, and hol
   assert.match(c, /HttpOnly/i);
   assert.match(c, /SameSite=Lax/i);
   assert.match(c, new RegExp(`Path=/api/exam/${link.token}`));
-  assert.ok(!/Test Candidate|020/.test(c));
+  assert.ok(!/Test Candidate|020 5555/.test(c)); // (the random secret itself may contain the digits 020)
 });
 
 test('refresh and close / reopen resume the same attempt: same questions, option order, answers and deadline', async () => {
@@ -313,5 +313,6 @@ test('HR sees ONE link with its candidates; results and exports are one row per 
   // Session steps are recorded without personal data.
   const logs = db.prepare("SELECT * FROM audit_log WHERE action IN ('SESSION_STARTED', 'STAGE_STARTED', 'STAGE_SUBMITTED', 'ASSESSMENT_COMPLETED', 'ASSESSMENT_STOPPED')").all();
   assert.ok(logs.length > 0);
-  assert.ok(logs.every((l) => !/HR|Candidate|020/.test(l.details)));
+  // (Names and the phone "020 5555 1234"; a bare "020" would also match times in the logged deadlines.)
+  assert.ok(logs.every((l) => !/HR|Candidate|020 5555/.test(l.details)), logs.map((l) => l.details).find((d) => /HR|Candidate|020 5555/.test(d)));
 });
