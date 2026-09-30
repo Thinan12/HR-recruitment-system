@@ -884,9 +884,13 @@ function questionBankCard(totals, active, inactive, iqLevels, reload, data = {})
           sec === 'IQ' ? ' · ' + IQ_LEVELS.map((n) => `L${n}: ${iqLevels?.[Object.keys(LEVEL_MARK)[n - 1]] ?? 0}`).join(' / ') : '')),
       h('div', { class: 'row' },
         h('button', { type: 'button', class: 'secondary small', onclick: upload }, 'Upload'),
+        total === 0 ? h('button', { type: 'button', class: 'secondary small', disabled: true }, 'Export')
+          : h('a', { class: 'button secondary small', href: `/api/admin/questions/export.xlsx?section=${encodeURIComponent(sec)}`, title: `Download every ${TYPE_LABEL[sec]} question (Excel)` }, 'Export'),
         h('button', { type: 'button', class: 'danger small', disabled: total === 0, onclick: () => confirmDeleteAll(sec, total, reload) }, 'Delete All Questions')));
   });
   return h('div', {}, h('div', { class: 'row between' }, h('h2', {}, 'Question Bank'), translateBox(data, reload)), rows,
+    h('p', { class: 'muted small' }, 'Export downloads that test’s questions as Excel (active and inactive, with correct answers and Lao text; the same columns as the upload template, so the file can be edited and uploaded again). ',
+      h('a', { href: '/api/admin/questions/export.xlsx?section=all' }, 'Export all tests'), ' (one sheet per test). The file contains correct answers: keep it within HR.'),
     h('p', { class: 'muted small' }, 'Delete All Questions clears only that test area (active and inactive). Candidates\' past assessments keep their own copy of every question, so their answers, scores and reports do not change.'));
 }
 

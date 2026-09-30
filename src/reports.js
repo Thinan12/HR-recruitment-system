@@ -492,4 +492,33 @@ function questionTemplateXlsx() {
   return XLSX.write(book, { type: 'buffer', bookType: 'xlsx' });
 }
 
-module.exports = { IQ_CLASSIFICATION, getIQClassification, testResults, percentLevel, finalAssessment, stageView, iqResult, lalcoIqScore, iqCategory, allCandidateSummaries, candidateSummary, dashboard, candidatePdf, candidateDocx, candidatesXlsx, questionTemplateXlsx };
+// The question bank of one or more tests as Excel, one sheet per test. The
+// columns are the import template's (plus Lao, status and picture columns), so
+// an exported file can be edited and uploaded again. Correct answers and HR
+// guidance are included: this file is for HR only (admin login).
+const EXPORT_HEADER = ['Question', 'Type', 'Category', 'Difficulty', 'Option A', 'Option B', 'Option C', 'Option D', 'Option E', 'Correct Answer', 'Marks',
+  'Status', 'Question (Lao)', 'Option A (Lao)', 'Option B (Lao)', 'Option C (Lao)', 'Option D (Lao)', 'Option E (Lao)', 'Lao status', 'Picture', 'ID'];
+function questionBankXlsx(sections, status) {
+  const book = XLSX.utils.book_new();
+  const used = new Set();
+  for (const section of sections) {
+    const where = status === 'Active' || status === 'Inactive' ? ' AND status = ?' : '';
+    const qs = db.prepare(`SELECT * FROM questions WHERE section = ?${where} ORDER BY id`).all(section, ...(where ? [status] : []));
+    const typeName = T.name(section);
+    const rows = qs.map((q) => [q.question_text, typeName, q.category || '', q.difficulty || '', q.option_a || '', q.option_b || '', q.option_c || '', q.option_d || '', q.option_e || '',
+      q.correct_answer || '', q.marks, q.status, q.question_text_lo || '', q.option_a_lo || '', q.option_b_lo || '', q.option_c_lo || '', q.option_d_lo || '', q.option_e_lo || '',
+      q.lo_status || '', [q.image_id, q.option_a_image, q.option_b_image, q.option_c_image, q.option_d_image, q.option_e_image].some(Boolean) ? 'Yes (not in this file)' : '', q.id]);
+    const sheet = XLSX.utils.aoa_to_sheet([EXPORT_HEADER, ...rows]);
+    sheet['!cols'] = EXPORT_HEADER.map((h, i) => ({ wch: i === 0 || i === 12 ? 50 : i === 9 ? 30 : /Option/.test(h) ? 18 : 12 }));
+    if (rows.length) sheet['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rows.length, c: EXPORT_HEADER.length - 1 } }) };
+    // Sheet names: at most 31 characters, none of : \ / ? * [ ], unique.
+    let base = typeName.replace(/[:\\/?*[\]]/g, ' ').trim().slice(0, 31) || section.slice(0, 31);
+    let sheetName = base;
+    for (let n = 2; used.has(sheetName.toLowerCase()); n++) sheetName = base.slice(0, 31 - String(n).length - 1) + ' ' + n;
+    used.add(sheetName.toLowerCase());
+    XLSX.utils.book_append_sheet(book, sheet, sheetName);
+  }
+  return XLSX.write(book, { type: 'buffer', bookType: 'xlsx' });
+}
+
+module.exports = { IQ_CLASSIFICATION, getIQClassification, testResults, percentLevel, finalAssessment, stageView, iqResult, lalcoIqScore, iqCategory, allCandidateSummaries, candidateSummary, dashboard, candidatePdf, candidateDocx, candidatesXlsx, questionTemplateXlsx, questionBankXlsx };

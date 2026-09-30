@@ -67,6 +67,8 @@
   "GET /api/admin/no-such-endpoint",
   "GET /api/admin/questions",
   "GET /api/admin/questions/counts",
+  "GET /api/admin/questions/export.xlsx",
+  "GET /api/admin/questions/export.xlsx?section=IQ",
   "GET /api/admin/questions/template.xlsx",
   "GET /api/admin/questions/translate-status",
   "GET /api/admin/report/standard",

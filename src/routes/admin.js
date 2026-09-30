@@ -378,6 +378,21 @@ router.get('/questions/template.xlsx', (req, res) => {
   sendFile(res, reports.questionTemplateXlsx(), 'LALCO_Question_Template.xlsx', XLSX_TYPE);
 });
 
+// Export the question bank: ?section=<test type key> for one test, or
+// section=all for every test (one sheet each); ?status=Active / Inactive, default both.
+router.get('/questions/export.xlsx', (req, res) => {
+  const all = String(req.query.section || '').toLowerCase() === 'all';
+  const one = T.get(req.query.section);
+  if (!all && !one) return bad(res, 'Please choose a test type to export.');
+  const sections = all ? T.list().map((t) => t.key) : [one.key];
+  const status = ['Active', 'Inactive'].includes(req.query.status) ? req.query.status : null;
+  const label = all ? 'All_Tests' : fileName(one.name);
+  sendFile(res, reports.questionBankXlsx(sections, status), `LALCO_Questions_${label}${status ? '_' + status : ''}_${new Date().toISOString().slice(0, 10)}.xlsx`, XLSX_TYPE);
+  // The file holds correct answers: who exported what is recorded.
+  db.prepare("INSERT INTO audit_log (action, admin, details, created_at) VALUES ('QUESTIONS_EXPORTED', ?, ?, ?)")
+    .run(req.admin.username, JSON.stringify({ test_type: all ? 'ALL' : one.key, status: status || 'all' }), new Date().toISOString());
+});
+
 // The same question uploaded twice would let one candidate see it twice.
 function existingQuestionKeys() {
   return new Set(db.prepare('SELECT * FROM questions').all().map(A.questionKey));

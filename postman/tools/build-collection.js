@@ -414,6 +414,17 @@ const questions = folder('07 Questions', 'Question bank CRUD on the temporary MC
     notes: 'Skipped automatically when a translation service is configured (it would start translating the whole bank).',
   }),
   req('GET Question Template (Excel)', 'GET', '/api/admin/questions/template.xlsx', { type: 'xlsx', maxMs: 8000 }),
+  req('GET Export Questions — the temporary MCQ type (Excel)', 'GET', '/api/admin/questions/export.xlsx', {
+    q: { section: '{{testTypeKey}}' }, type: 'xlsx', maxMs: 8000,
+    desc: 'The question bank of one test as Excel (template columns, so it can be uploaded again). Only this run\'s temporary type is exported: the file contains correct answers.',
+    test: () => { pm.test('File named after the test type', () => pm.expect(pm.response.headers.get('Content-Disposition') || '').to.match(/LALCO_Questions_POSTMAN_TEST_.+\.xlsx/)); },
+  }),
+  req('GET Export Questions — Active only', 'GET', '/api/admin/questions/export.xlsx', { q: { section: '{{testTypeKey}}', status: 'Active' }, type: 'xlsx', maxMs: 8000 }),
+  req('GET Export Questions — all tests (one sheet each)', 'GET', '/api/admin/questions/export.xlsx', {
+    q: { section: 'all' }, type: 'xlsx', maxMs: 10000, only: 'LOCAL',
+    notes: 'LOCAL only: on production this file would hold the real question bank with its answers, and run reports can keep response bodies.',
+  }),
+  req('GET Export Questions — unknown test type', 'GET', '/api/admin/questions/export.xlsx', { q: { section: 'POSTMAN_NO_SUCH_TYPE' }, status: 400, error: 'Please choose a test type to export.' }),
   req('POST Delete All Questions — invalid test area (safety check)', 'POST', '/api/admin/questions/delete-all', {
     json: { section: 'POSTMAN_NOT_A_TEST_AREA' }, status: 400, error: 'Please choose a test area.',
     desc: 'Checks the endpoint refuses an unknown test area. It is NEVER called with a real test area by this collection.',
@@ -1414,6 +1425,7 @@ const security = folder('21 Security / Negative Tests', 'Admin endpoints without
   unauth('GET Export Candidate PDF', 'GET', '/api/admin/candidates/{{iqCandidateS1}}/export.pdf'),
   unauth('GET Export All Candidates', 'GET', '/api/admin/export/candidates.xlsx'),
   unauth('GET Standard Report', 'GET', '/api/admin/report/standard'),
+  unauth('GET Export Questions', 'GET', '/api/admin/questions/export.xlsx?section=IQ'),
   unauth('PUT Settings', 'PUT', '/api/admin/settings', { json: { default_time_minutes: 1, default_link_expiry_minutes: 1, default_language: 'en' } }),
   unauth('POST Create Question', 'POST', '/api/admin/questions', { json: { section: 'GENERAL', question_text: 'x', option_a: 'a', option_b: 'b', correct_answer: 'A' } }),
   unauth('POST Import Preview', 'POST', '/api/admin/questions/import/preview', { form: [{ key: 'section', value: 'GENERAL' }, file('mcq-inline-answers.txt')] }),
