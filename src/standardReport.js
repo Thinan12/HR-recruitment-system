@@ -37,6 +37,9 @@ function score(t, finished) {
   return finished(t);
 }
 const STATUS = { Pass: 'PASS', 'Not Pass': 'NOT PASS', Pending: 'PENDING' };
+// The report's overall status IS the Company Eligibility (reports.finalAssessment):
+// every test passed AND the final score reaches the link's saved eligibility mark.
+const ELIGIBILITY_STATUS = { Eligible: 'PASS', 'Not Eligible': 'NOT PASS', Pending: 'PENDING' };
 
 // Phone numbers compared by their digits (+856 20 ... = 020 ...).
 const phoneKey = (p) => {
@@ -58,7 +61,7 @@ function row(c) {
     score(general, (t) => t.percent_text || NONE),
     score(calc, (t) => t.percent_text || NONE),
     score(essay, (t) => t.score_text || NONE),
-    (c.tests || []).length ? STATUS[c.assessment_result] || 'PENDING' : NONE,
+    (c.tests || []).length ? ELIGIBILITY_STATUS[c.eligibility] || 'PENDING' : NONE,
   ];
   const pct = (t) => (t && t.status === 'SUBMITTED' && t.result !== 'Pending' && t.percent != null ? t.percent / 100 : null);
   return { candidate_id: c.id, values, numbers: { 11: pct(general), 12: pct(calc) } };

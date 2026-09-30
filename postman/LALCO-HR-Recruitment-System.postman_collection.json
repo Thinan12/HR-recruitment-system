@@ -14944,7 +14944,8 @@
                   "pm.test('One row per candidate, 15 values each', () => body.rows.forEach((r) => pm.expect(r.values.length).to.equal(15)));",
                   "pm.test('S1: IQ Test Score = LALCO IQ Score / 150, PASS', () => { pm.expect(row('iqCandidateS1').values[10]).to.equal(getJSON('iqExpectedS1').lalco + ' / 150'); pm.expect(row('iqCandidateS1').values[14]).to.equal('PASS'); });",
                   "pm.test('S2: NOT PASS', () => pm.expect(row('iqCandidateS2').values[14]).to.equal('NOT PASS'));",
-                  "pm.test('Duplicate phone flags are booleans', () => body.rows.forEach((r) => pm.expect(r.duplicate_phone).to.be.a('boolean')));"
+                  "pm.test('Duplicate phone flags are booleans', () => body.rows.forEach((r) => pm.expect(r.duplicate_phone).to.be.a('boolean')));",
+                  "set('reportStatuses', Object.fromEntries(body.rows.map((r) => [r.candidate_id, r.values[14]])));"
                 ]
               }
             }
@@ -14965,6 +14966,58 @@
               ]
             },
             "description": "**Purpose:** GET Standard Report\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          }
+        },
+        {
+          "name": "GET Candidates — report status = Company Eligibility for every candidate",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "const report = getJSON('reportStatuses');",
+                  "const expected = { Eligible: 'PASS', 'Not Eligible': 'NOT PASS', Pending: 'PENDING' };",
+                  "const wrong = body.filter((c) => (c.tests || []).length && report[c.id] !== (expected[c.eligibility] || 'PENDING')).map((c) => `${c.id}: report ${report[c.id]} / eligibility ${c.eligibility}`);",
+                  "pm.test('Every candidate: PASS = Eligible, NOT PASS = Not Eligible, PENDING = Pending', () => pm.expect(wrong).to.eql([]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/candidates",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "candidates"
+              ]
+            },
+            "description": "**Purpose:** One source of truth: the report's Pass / Not Pass Status is the Company Eligibility (every test passed AND the final score reaches the link's saved eligibility mark). Read only; checks every candidate, real ones included.\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
           }
         },
         {

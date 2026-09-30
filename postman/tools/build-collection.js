@@ -1050,6 +1050,16 @@ const results = folder('15 Results & Reports', 'Results, the 15-field standard r
       pm.test('S1: IQ Test Score = LALCO IQ Score / 150, PASS', () => { pm.expect(row('iqCandidateS1').values[10]).to.equal(getJSON('iqExpectedS1').lalco + ' / 150'); pm.expect(row('iqCandidateS1').values[14]).to.equal('PASS'); });
       pm.test('S2: NOT PASS', () => pm.expect(row('iqCandidateS2').values[14]).to.equal('NOT PASS'));
       pm.test('Duplicate phone flags are booleans', () => body.rows.forEach((r) => pm.expect(r.duplicate_phone).to.be.a('boolean')));
+      set('reportStatuses', Object.fromEntries(body.rows.map((r) => [r.candidate_id, r.values[14]])));
+    },
+  }),
+  req('GET Candidates — report status = Company Eligibility for every candidate', 'GET', '/api/admin/candidates', {
+    desc: 'One source of truth: the report\'s Pass / Not Pass Status is the Company Eligibility (every test passed AND the final score reaches the link\'s saved eligibility mark). Read only; checks every candidate, real ones included.',
+    test: () => {
+      const report = getJSON('reportStatuses');
+      const expected = { Eligible: 'PASS', 'Not Eligible': 'NOT PASS', Pending: 'PENDING' };
+      const wrong = body.filter((c) => (c.tests || []).length && report[c.id] !== (expected[c.eligibility] || 'PENDING')).map((c) => `${c.id}: report ${report[c.id]} / eligibility ${c.eligibility}`);
+      pm.test('Every candidate: PASS = Eligible, NOT PASS = Not Eligible, PENDING = Pending', () => pm.expect(wrong).to.eql([]));
     },
   }),
   req('GET Export All Candidates (standard Excel)', 'GET', '/api/admin/export/candidates.xlsx', { type: 'xlsx', maxMs: 8000 }),
@@ -1532,7 +1542,7 @@ const collection = {
 const walk = (items) => items.forEach((it) => { if (it.item) walk(it.item); else for (const ev of it.event) ev.script.exec = ev.script.exec.map((l) => l.replace("eval(pm.environment.get('libUsable'));", LIB_USABLE)); });
 walk(collection.item);
 
-const VARS = ['runTag', 'secondAdminToken', 'guardNeed', 'guardLinkId', 'guardQuestionId', 'guardQuestionJson', 'candidateIdA', 'sessionUsedByA', 'sameBrowserSessionSB2', 'sameBrowserSessionSB3',
+const VARS = ['runTag', 'reportStatuses', 'secondAdminToken', 'guardNeed', 'guardLinkId', 'guardQuestionId', 'guardQuestionJson', 'candidateIdA', 'sessionUsedByA', 'sameBrowserSessionSB2', 'sameBrowserSessionSB3',
   'questionsSB2', 'questionsSB3', 'answersSB2', 'answersSB3', 'essayQuestionSB2', 'essayQuestionSB3', 'staffSessionUsedByA', 'staffSessionUsedByE', 'staffSessionUsedByG', 'internalResultE',
   'internalAnswersE1', 'internalAnswersE2', 'internalExportSize', 'internalExportOneSize', 'candidateId', 'questionId', 'pictureQuestionId', 'imageId', 'categoryId', 'category2Id', 'testTypeKey', 'interviewTypeKey', 'calcTypeKey', 'throwawayTypeKey',
   'assessmentId', 'attemptB', 'linkId', 'linkToken', 'candidateToken', 'iqLinkId', 'iqLinkToken', 'spareLinkId', 'spareLinkToken', 'oldSpareToken', 'timerLinkId', 'timerLinkToken',
