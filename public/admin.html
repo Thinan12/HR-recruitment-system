@@ -5,11 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LALCO HR</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <meta name="color-scheme" content="light dark">
+  <script src="/static/theme.js"></script>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
   <div id="login" class="login-wrap hidden">
+    <div class="theme-float" data-theme-slot></div>
     <form id="login-form" class="card login">
+      <div class="login-logo">HR</div>
       <h1>LALCO HR</h1>
       <p class="muted center">Administrator login</p>
       <div id="login-error" class="message error hidden"></div>
@@ -40,7 +44,7 @@
         <a href="#/result-viewers" data-page="result-viewers">Result Viewers</a>
         <a href="#/settings" data-page="settings">Settings</a>
       </nav>
-      <div class="user"><span id="whoami"></span><button id="logout" class="small" type="button">Logout</button></div>
+      <div class="user"><span data-theme-slot></span><span id="whoami"></span><button id="logout" class="small" type="button">Logout</button></div>
     </header>
     <div id="readonly-banner" class="readonly-banner hidden">View-only account: you can see every candidate, exam, result and report, and download exports. Changes are not possible.</div>
     <main id="view"></main>
