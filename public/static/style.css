@@ -312,3 +312,7 @@ a.stat:hover { border-color: #9fbad6; }
   .results-page .results-card { border: 1px solid #999; box-shadow: none; break-inside: avoid; }
   .results-page .badge { border: 1px solid currentColor; }
 }
+
+/* ---- view-only HR users (role viewer): the server refuses changes; the page hides the obvious controls ---- */
+.readonly-banner { background: var(--pending-bg); color: var(--pending); padding: 8px 24px; font-size: 14px; border-bottom: 1px solid #f0dca8; }
+body.read-only .danger, body.read-only #upload-card, body.read-only .write-only, body.read-only #nav a[data-page="result-viewers"] { display: none !important; }

@@ -66,7 +66,7 @@ walk(collection.item, '');
 // 6. route coverage
 const routes = [];
 // exam.js is mounted twice: recruitment (/api/exam) and internal staff (/api/internal-exam).
-for (const [file, prefix] of [['src/app.js', ''], ['src/routes/admin.js', '/api/admin'], ['src/routes/internal.js', '/api/admin/internal'], ['src/routes/exam.js', '/api/exam'], ['src/routes/exam.js', '/api/internal-exam'], ['src/routes/results.js', '/api/results'], ['src/routes/resultViewersAdmin.js', '/api/admin/result-viewers']]) {
+for (const [file, prefix] of [['src/app.js', ''], ['src/routes/admin.js', '/api/admin'], ['src/routes/internal.js', '/api/admin/internal'], ['src/routes/exam.js', '/api/exam'], ['src/routes/exam.js', '/api/internal-exam'], ['src/routes/results.js', '/api/results'], ['src/routes/resultViewersAdmin.js', '/api/admin/result-viewers'], ['src/routes/hrUsers.js', '/api/admin/users']]) {
   const src = fs.readFileSync(path.join(REPO, file), 'utf8');
   for (const m of src.matchAll(/(?:router|app)\.(get|post|put|patch|delete)\(\s*'([^']+)'/g)) {
     if (file === 'src/app.js' && !m[2].startsWith('/api')) continue; // pages, not API

@@ -26312,9 +26312,1071 @@
       ]
     },
     {
+      "name": "23 HR Users (view only)",
+      "description": "A View only HR user logs in on the normal HR login, can read every candidate, exam, result, report and export, and every change is refused by the server (403). This folder creates a temporary \"postman-test-…\" view-only user, checks reads and refused writes with its own session (cookie jar off), then deletes it.",
+      "item": [
+        {
+          "name": "POST Add HR User — password too short",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Error message says: at least 8 characters', () => pm.expect(String((body && (body.error || body.message)) || '')).to.include(\"at least 8 characters\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users"
+              ]
+            },
+            "description": "**Purpose:** POST Add HR User — password too short\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** JSON body\n\n**Expected:** HTTP 400, JSON — error contains “at least 8 characters”",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"username\": \"postman-test-hr-{{runStamp}}\", \"password\": \"short\", \"role\": \"viewer\" }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST Add HR User — view only",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('View only, active, no password returned', () => { pm.expect(body.role).to.equal('viewer'); pm.expect(body.active).to.equal(true); pm.expect(JSON.stringify(body)).to.not.include('postman-hr-viewer-1'); }); set('hrViewerId', String(body.id)); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users"
+              ]
+            },
+            "description": "**Purpose:** POST Add HR User — view only\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** JSON body\n\n**Expected:** HTTP 201, JSON",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"username\": \"postman-test-hr-{{runStamp}}\", \"password\": \"postman-hr-viewer-1\", \"role\": \"viewer\" }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET HR Users",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Ours listed, no hashes', () => { pm.expect(body.map((u) => u.id)).to.include(Number(env('hrViewerId'))); pm.expect(JSON.stringify(body)).to.not.match(/\\$2[aby]\\$/); }); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users"
+              ]
+            },
+            "description": "**Purpose:** GET HR Users\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          }
+        },
+        {
+          "name": "POST Admin Login — the view-only user",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "const c = pm.response.headers.all().find((h) => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('hr_session='));",
+                  "if (c) pm.environment.set('hrViewerSession', c.value.split(';')[0].slice('hr_session='.length));",
+                  "pm.test('Role viewer', () => pm.expect(body.role).to.equal('viewer')); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "**Purpose:** POST Admin Login — the view-only user\n\n**Authentication:** None — sent without any cookie on purpose\n\n**Input:** JSON body\n\n**Expected:** HTTP 200, JSON",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"username\": \"postman-test-hr-{{runStamp}}\", \"password\": \"postman-hr-viewer-1\" }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "GET Candidates — as the view-only user",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Can read every candidate', () => pm.expect(body).to.be.an('array')); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "hr_session={{hrViewerSession}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/candidates",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "candidates"
+              ]
+            },
+            "description": "**Purpose:** GET Candidates — as the view-only user\n\n**Authentication:** Explicit cookie: `hr_session={{hrViewerSession}}` (cookie jar off)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "GET Assessment Review — as the view-only user",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Exam details: questions with the candidate\\'s answers', () => pm.expect(body.questions.length).to.be.above(0)); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "hr_session={{hrViewerSession}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/assessments/{{assessmentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "assessments",
+                "{{assessmentId}}"
+              ]
+            },
+            "description": "**Purpose:** GET Assessment Review — as the view-only user\n\n**Authentication:** Explicit cookie: `hr_session={{hrViewerSession}}` (cookie jar off)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "GET Export All Candidates — as the view-only user",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "pm.variables.set('maxMs', 8000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'));",
+                  "pm.test('File is not empty', () => pm.expect(pm.response.stream ? pm.response.stream.length : pm.response.responseSize).to.be.above(0));",
+                  "pm.test('File starts like a real XLSX', () => pm.expect(pm.response.stream.slice(0, 2).toString('latin1')).to.equal(\"PK\"));",
+                  "pm.test('Sent as a download with a .xlsx file name', () => pm.expect(pm.response.headers.get('Content-Disposition') || '').to.match(/attachment; filename=\".+\\.xlsx\"/));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "hr_session={{hrViewerSession}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/export/candidates.xlsx",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "export",
+                "candidates.xlsx"
+              ]
+            },
+            "description": "**Purpose:** GET Export All Candidates — as the view-only user\n\n**Authentication:** Explicit cookie: `hr_session={{hrViewerSession}}` (cookie jar off)\n\n**Input:** none\n\n**Expected:** HTTP 200, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "POST Create Candidate — refused for the view-only user",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Error message says: view-only', () => pm.expect(String((body && (body.error || body.message)) || '')).to.include(\"view-only\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "hr_session={{hrViewerSession}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/candidates",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "candidates"
+              ]
+            },
+            "description": "**Purpose:** POST Create Candidate — refused for the view-only user\n\n**Authentication:** Explicit cookie: `hr_session={{hrViewerSession}}` (cookie jar off)\n\n**Input:** JSON body\n\n**Expected:** HTTP 403, JSON — error contains “view-only”",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{runTag}} SHOULD NOT EXIST\",\n  \"phone\": \"020 0000 0000\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "PUT Essay Marks — refused for the view-only user",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Error message says: view-only', () => pm.expect(String((body && (body.error || body.message)) || '')).to.include(\"view-only\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "hr_session={{hrViewerSession}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/assessments/{{assessmentId}}/essay-marks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "assessments",
+                "{{assessmentId}}",
+                "essay-marks"
+              ]
+            },
+            "description": "**Purpose:** PUT Essay Marks — refused for the view-only user\n\n**Authentication:** Explicit cookie: `hr_session={{hrViewerSession}}` (cookie jar off)\n\n**Input:** JSON body\n\n**Expected:** HTTP 403, JSON — error contains “view-only”",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"marks\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "DELETE Candidate — refused for the view-only user",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Error message says: view-only', () => pm.expect(String((body && (body.error || body.message)) || '')).to.include(\"view-only\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "hr_session={{hrViewerSession}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/candidates/{{candidateIdA}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "candidates",
+                "{{candidateIdA}}"
+              ]
+            },
+            "description": "**Purpose:** DELETE Candidate — refused for the view-only user\n\n**Authentication:** Explicit cookie: `hr_session={{hrViewerSession}}` (cookie jar off)\n\n**Input:** none\n\n**Expected:** HTTP 403, JSON — error contains “view-only”"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "GET HR Users — refused for the view-only user",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Error message says: view-only', () => pm.expect(String((body && (body.error || body.message)) || '')).to.include(\"view-only\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "hr_session={{hrViewerSession}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users"
+              ]
+            },
+            "description": "**Purpose:** GET HR Users — refused for the view-only user\n\n**Authentication:** Explicit cookie: `hr_session={{hrViewerSession}}` (cookie jar off)\n\n**Input:** none\n\n**Expected:** HTTP 403, JSON — error contains “view-only”"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "POST Disable HR User",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Disabled', () => pm.expect(body.active).to.equal(false)); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users/{{hrViewerId}}/disable",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                "{{hrViewerId}}",
+                "disable"
+              ]
+            },
+            "description": "**Purpose:** POST Disable HR User\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          }
+        },
+        {
+          "name": "GET Candidates — the disabled user's session has ended",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "hr_session={{hrViewerSession}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/candidates",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "candidates"
+              ]
+            },
+            "description": "**Purpose:** GET Candidates — the disabled user's session has ended\n\n**Authentication:** Explicit cookie: `hr_session={{hrViewerSession}}` (cookie jar off)\n\n**Input:** none\n\n**Expected:** HTTP 401, JSON"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "POST Enable HR User",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Active', () => pm.expect(body.active).to.equal(true)); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users/{{hrViewerId}}/enable",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                "{{hrViewerId}}",
+                "enable"
+              ]
+            },
+            "description": "**Purpose:** POST Enable HR User\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          }
+        },
+        {
+          "name": "POST Reset HR User Password",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.environment.set('hrViewerSession', ''); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users/{{hrViewerId}}/password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                "{{hrViewerId}}",
+                "password"
+              ]
+            },
+            "description": "**Purpose:** POST Reset HR User Password\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** JSON body\n\n**Expected:** HTTP 200, JSON",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"password\": \"postman-hr-viewer-2\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "DELETE HR User",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('ok', () => pm.expect(body.ok).to.equal(true)); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users/{{hrViewerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                "{{hrViewerId}}"
+              ]
+            },
+            "description": "**Purpose:** DELETE HR User\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          }
+        },
+        {
+          "name": "DELETE HR User — already deleted",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users/{{hrViewerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                "{{hrViewerId}}"
+              ]
+            },
+            "description": "**Purpose:** DELETE HR User — already deleted\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 404, JSON"
+          }
+        }
+      ]
+    },
+    {
       "name": "99 Cleanup",
       "description": "Removes ONLY temporary data: candidates, links, questions, categories and test types whose names start with \"POSTMAN TEST\" (the prefix of every name this collection creates, including leftovers of an interrupted earlier run). Order matters: candidates (and their attempts) → links → questions → categories → test types. Real data is never deleted.",
       "item": [
+        {
+          "name": "DELETE Temporary HR Users",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "const P = {\"what\":\"HR users\"};",
+                  "pm.variables.set('maxMs', 30000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "const P = {\"what\":\"HR users\"};",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "const mine = body.filter((u) => /^postman-test-/i.test(u.username)).map((u) => ({ url: '/api/admin/users/' + u.id, label: u.username }));",
+                  "let left = mine.length;",
+                  "let ok = 0;",
+                  "const finish = () => pm.test(`Deleted ${ok} of ${mine.length} temporary ${P.what}`, () => pm.expect(ok).to.equal(mine.length));",
+                  "if (!left) finish();",
+                  "mine.forEach((m) => pm.sendRequest({ url: env('baseUrl') + m.url, method: 'DELETE' }, (e, r) => {",
+                  "  if (!e && r.code === 200 && (P.what !== 'categories' || r.json().deleted)) ok++; else console.log('Not deleted:', m.label, e || r.text());",
+                  "  if (--left === 0) finish();",
+                  "}));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users"
+              ]
+            },
+            "description": "**Purpose:** View-only HR users named \"postman-test-…\" (left by an interrupted run).\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          }
+        },
         {
           "name": "DELETE Temporary Result Viewer accounts",
           "event": [

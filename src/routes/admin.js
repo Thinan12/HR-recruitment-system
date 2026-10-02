@@ -19,7 +19,11 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 router.post('/auth/login', auth.login);
 router.post('/auth/logout', auth.logout);
 router.use(auth.requireAdmin);
-router.get('/auth/me', (req, res) => res.json({ username: req.admin.username }));
+// View-only HR users may read everything below and change nothing (server side).
+router.use(auth.viewOnlyGuard);
+router.get('/auth/me', (req, res) => res.json({ username: req.admin.username, role: req.admin.role || 'admin' }));
+// HR users (view-only logins, more admins): full admins only.
+router.use('/users', require('./hrUsers'));
 router.post('/auth/password', auth.changePassword);
 
 // Internal Office Staff (its own records, links, results and reports).

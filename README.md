@@ -137,6 +137,14 @@ A separate area for **existing employees**, next to Recruitment (menu: *Internal
 - **Results / Reports:** Staff Name, Employee ID, Department, Position, Assessment, IQ Test Score (LALCO / 150), Behavioral Interview Test Score (the interview-format test), Calculation, Essay, Pass / Not Pass / Pending, Date and Time. Click a result for the full review (answers, essay marking). Reports add a per-department summary and an Excel report of the filtered results; each result has its own PDF / Word / Excel. Internal results never appear in Recruitment screens or reports, and the reverse.
 - **Separation (server side):** every link and attempt has `business_area` = `RECRUITMENT` or `INTERNAL_STAFF`. Recruitment routes and `/api/exam` only find recruitment links and attempts; `/api/admin/internal/…` and `/api/internal-exam` only internal ones (the other area's ids and tokens give 404). A session cookie belongs to one link, so a candidate's session opens nothing on an internal link and the reverse.
 
+### HR users (view-only logins)
+
+Full admins add HR users in **Settings → HR users**: username, password (8+ characters, bcrypt hash, never shown again) and access: **View only** or **Full admin**.
+
+- **View only** users log in on the normal HR page. They see a "View-only account" banner and can open every candidate, exam (questions, the candidate's answers, scores), result, report and Internal Office Staff page, and download every PDF / Word / Excel export.
+- **What they can't do:** add, edit, delete, mark, create links, import or change settings. The **server refuses** every such request (403), whatever the page shows; the page also makes forms read-only and hides change buttons. They cannot see or manage HR users or Result Viewer accounts. They can change their own password and log out.
+- **Account controls:** Disable (open sessions end at once), Enable, Reset password and Delete, each written to the audit log. You cannot disable or delete yourself, nor the last active full admin. Existing accounts are full admins (`role` defaults to `admin`).
+
 ### Result Viewer accounts
 
 A separate, **read-only** login for ONE person (a candidate or a staff member) to see their own results at **`/results`**. It is not an HR account.

@@ -267,8 +267,36 @@ $('logout').addEventListener('click', async () => {
   showLogin();
 });
 
+// The signed-in HR user: role 'admin' (full) or 'viewer' (view only).
+let ME = { username: '', role: 'admin' };
+const isViewer = () => ME.role === 'viewer';
+
+// View-only: lock HR's edit forms and hide change buttons on every page (also
+// on content added later, e.g. dialogs). The server refuses changes anyway;
+// search and filter boxes stay usable.
+const CHANGE_BUTTON = /^(save|create|add|new|edit|delete|remove|disable|enable|regenerate|import|upload|read file|mark|update|reset|deactivate|reactivate|activate|translate|set|apply to|move|rename|duplicate|start new)/i;
+function lockForViewer(root) {
+  if (!isViewer()) return;
+  for (const b of root.querySelectorAll('button, a.button')) {
+    if (CHANGE_BUTTON.test(b.textContent.trim()) && !b.closest('.topbar')) b.classList.add('write-only');
+  }
+  for (const f of root.querySelectorAll('form')) {
+    if (f.id === 'login-form') continue;
+    const submit = f.querySelector('button[type=submit]');
+    if (!submit || !CHANGE_BUTTON.test(submit.textContent.trim())) continue; // a search / filter form stays usable
+    for (const el of f.elements) { if (el.tagName === 'BUTTON') continue; el.readOnly = true; if (el.tagName === 'SELECT' || el.type === 'checkbox' || el.type === 'radio' || el.type === 'file') el.disabled = true; }
+  }
+}
+const viewerObserver = new MutationObserver((list) => { for (const m of list) for (const n of m.addedNodes) if (n.nodeType === 1) lockForViewer(n.parentElement || n); });
+
 function startApp(me) {
-  $('whoami').textContent = me.username;
+  ME = { username: me.username, role: me.role || 'admin' };
+  $('whoami').textContent = me.username + (isViewer() ? ' (view only)' : '');
+  // View-only: the server refuses every change; the page also hides the obvious change controls.
+  document.body.classList.toggle('read-only', isViewer());
+  $('readonly-banner').classList.toggle('hidden', !isViewer());
+  viewerObserver.disconnect();
+  if (isViewer()) viewerObserver.observe(document.body, { childList: true, subtree: true });
   $('login').classList.add('hidden');
   $('app').classList.remove('hidden');
   route();
@@ -1712,7 +1740,7 @@ async function renderSettings() {
     h('h2', { class: 'wide section-gap' }, 'Pass marks'),
     ...[['pass_iq', 'IQ Test pass (%)'], ['pass_general', 'General Test pass (%)'], ['pass_calculation', 'Calculation Test pass (%)'], ['pass_essay', 'Essay Test pass (%)'],
       ['final_eligibility', 'Final company eligibility (%)']].map(([name, label]) => field(label, h('input', { name, type: 'number', min: 0, max: 100, step: 'any', value: s[name] }))),
-    h('div', { class: 'wide' }, h('button', { type: 'submit' }, 'Save settings')));
+    h('div', { class: 'wide' }, h('button', { type: 'submit', class: 'write-only' }, 'Save settings')));
   const card = h('div', { class: 'card' }, h('h2', {}, 'Assessment defaults'), form,
     h('p', { class: 'muted small' }, `Current link expiry default: ${fmtMinutes(s.default_link_expiry_minutes)}. A test is passed when its percentage reaches its pass mark. A candidate is ELIGIBLE when every test in the link is passed and the final score (the average of the tests) reaches the final eligibility mark. These are the defaults for new assessment links (they can be changed on each new link); links already created keep their own marks, so saving never changes an existing result.`));
   form.addEventListener('submit', async (e) => {
@@ -1734,5 +1762,44 @@ async function renderSettings() {
     try { await api('POST', '/auth/password', formValues(pw)); pw.reset(); flash(pwCard, 'Password changed.', 'ok'); } catch (ex) { flash(pwCard, ex.message); }
   });
 
-  view().replaceChildren(h('h1', {}, 'Settings'), card, pwCard);
+  view().replaceChildren(h('h1', {}, 'Settings'), card, pwCard, ...(isViewer() ? [] : [await hrUsersCard()]));
+}
+
+// HR users (full admins only): view-only logins that can see every candidate,
+// exam and report but change nothing, or more full admins.
+async function hrUsersCard() {
+  const users = await api('GET', '/users');
+  const card = h('div', { class: 'card', id: 'hr-users' });
+  const reload = async () => card.replaceWith(await hrUsersCard());
+  const form = h('form', { class: 'grid', id: 'hr-user-form' },
+    field('Username', h('input', { name: 'username', required: true, minlength: 3, maxlength: 50, autocomplete: 'off' })),
+    field('Password (8+ characters)', h('input', { name: 'password', type: 'password', required: true, minlength: 8, autocomplete: 'new-password' })),
+    field('Access', select('role', [['viewer', 'View only (see everything, change nothing)'], ['admin', 'Full admin']], 'viewer')),
+    h('div', { class: 'wide' }, h('button', { type: 'submit' }, 'Add HR user')));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const v = formValues(form);
+    try { await api('POST', '/users', v); flash(card, `User "${v.username}" added.`, 'ok'); setTimeout(reload, 900); } catch (ex) { flash(card, ex.message); }
+  });
+  const act = async (fn) => { try { await fn(); reload(); } catch (ex) { flash(card, ex.message); } };
+  const resetPassword = (u) => {
+    const input = h('input', { type: 'password', minlength: 8, autocomplete: 'new-password' });
+    const box = h('div', {}, h('p', { class: 'muted small' }, `A new password for "${u.username}". Their open sessions end.`), field('New password (8+ characters)', input));
+    const close = modal('Reset password', h('div', {}, box, h('button', { type: 'button', onclick: async () => {
+      try { await api('POST', `/users/${u.id}/password`, { password: input.value }); close(); flash(card, `Password of "${u.username}" changed.`, 'ok'); } catch (ex) { flash(box, ex.message); }
+    } }, 'Save new password')));
+  };
+  const rows = users.map((u) => h('tr', {},
+    h('td', {}, h('strong', {}, u.username), u.username === ME.username ? h('span', { class: 'muted small' }, ' (you)') : null),
+    h('td', {}, h('span', { class: 'badge ' + (u.role === 'viewer' ? 'neutral' : 'pass') }, u.role_label)),
+    h('td', {}, h('span', { class: 'badge ' + (u.active ? 'pass' : 'neutral') }, u.active ? 'Active' : 'Disabled')),
+    h('td', { class: 'small' }, fmtDateTime(u.last_login_at)),
+    h('td', {}, u.username === ME.username ? null : h('div', { class: 'row' },
+      h('button', { type: 'button', class: 'secondary small', onclick: () => act(() => api('POST', `/users/${u.id}/${u.active ? 'disable' : 'enable'}`)) }, u.active ? 'Disable' : 'Enable'),
+      h('button', { type: 'button', class: 'secondary small', onclick: () => resetPassword(u) }, 'Reset password'),
+      h('button', { type: 'button', class: 'danger small', onclick: () => { if (confirm(`Delete the HR user "${u.username}"?`)) act(() => api('DELETE', `/users/${u.id}`)); } }, 'Delete')))));
+  card.append(h('h2', {}, 'HR users'),
+    h('p', { class: 'muted small' }, 'A View only user logs in on this same page and can open every candidate, exam (questions, answers, scores), result, report and export, but cannot add, edit, delete, mark or change any setting — the server refuses it. Give them the password yourself: it is not shown again.'),
+    form, h('div', { class: 'table-wrap section-gap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Username', 'Access', 'Status', 'Last login', ''].map((x) => h('th', {}, x)))), h('tbody', {}, rows))));
+  return card;
 }

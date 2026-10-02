@@ -272,6 +272,10 @@ db.exec('CREATE INDEX IF NOT EXISTS idx_assessments_staff ON assessments(staff_i
 // Admin sessions: a signed-out token is refused until it would have expired
 // anyway (jti), and a password change ends every other session (token_version).
 addMissingColumns('admins', [['token_version', 'INTEGER NOT NULL DEFAULT 0']]);
+// HR users: role 'admin' (full access; every existing account) or 'viewer'
+// (view-only: every HR page and export, no change of any kind). A disabled
+// user cannot log in.
+addMissingColumns('admins', [['role', "TEXT NOT NULL DEFAULT 'admin'"], ['active', 'INTEGER NOT NULL DEFAULT 1'], ['last_login_at', 'TEXT'], ['created_by', "TEXT NOT NULL DEFAULT ''"]]);
 db.exec('CREATE TABLE IF NOT EXISTS revoked_tokens (jti TEXT PRIMARY KEY, expires_at INTEGER NOT NULL)');
 
 // Result Viewer accounts: a separate, read-only login for ONE person (a

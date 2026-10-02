@@ -1472,6 +1472,40 @@ const deleteAll = () => {
 const sweep = (name, listPath, what, pick, desc) => req(name, 'GET', listPath, { desc, maxMs: 30000, P: { what }, test: [pick, deleteAll] });
 
 // ================================================================================
+// 23 HR Users (view-only HR logins)
+// ================================================================================
+const keepHrViewerCookie = () => {
+  const c = pm.response.headers.all().find((h) => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('hr_session='));
+  if (c) pm.environment.set('hrViewerSession', c.value.split(';')[0].slice('hr_session='.length));
+};
+const HRV = 'hr_session={{hrViewerSession}}';
+const hrUsersFolder = folder('23 HR Users (view only)', 'A View only HR user logs in on the normal HR login, can read every candidate, exam, result, report and export, and every change is refused by the server (403). This folder creates a temporary "postman-test-…" view-only user, checks reads and refused writes with its own session (cookie jar off), then deletes it.', [
+  req('POST Add HR User — password too short', 'POST', '/api/admin/users', { json: '{ "username": "postman-test-hr-{{runStamp}}", "password": "short", "role": "viewer" }', status: 400, error: 'at least 8 characters' }),
+  req('POST Add HR User — view only', 'POST', '/api/admin/users', {
+    json: '{ "username": "postman-test-hr-{{runStamp}}", "password": "postman-hr-viewer-1", "role": "viewer" }', status: 201,
+    test: () => { pm.test('View only, active, no password returned', () => { pm.expect(body.role).to.equal('viewer'); pm.expect(body.active).to.equal(true); pm.expect(JSON.stringify(body)).to.not.include('postman-hr-viewer-1'); }); set('hrViewerId', String(body.id)); },
+  }),
+  req('GET HR Users', 'GET', '/api/admin/users', { test: () => { pm.test('Ours listed, no hashes', () => { pm.expect(body.map((u) => u.id)).to.include(Number(env('hrViewerId'))); pm.expect(JSON.stringify(body)).to.not.match(/\$2[aby]\$/); }); } }),
+  req('POST Admin Login — the view-only user', 'POST', '/api/admin/auth/login', {
+    noAuth: true, json: '{ "username": "postman-test-hr-{{runStamp}}", "password": "postman-hr-viewer-1" }',
+    test: [keepHrViewerCookie, () => { pm.test('Role viewer', () => pm.expect(body.role).to.equal('viewer')); }],
+  }),
+  req('GET Candidates — as the view-only user', 'GET', '/api/admin/candidates', { cookie: HRV, test: () => { pm.test('Can read every candidate', () => pm.expect(body).to.be.an('array')); } }),
+  req('GET Assessment Review — as the view-only user', 'GET', '/api/admin/assessments/{{assessmentId}}', { cookie: HRV, test: () => { pm.test('Exam details: questions with the candidate\'s answers', () => pm.expect(body.questions.length).to.be.above(0)); } }),
+  req('GET Export All Candidates — as the view-only user', 'GET', '/api/admin/export/candidates.xlsx', { cookie: HRV, type: 'xlsx', maxMs: 8000 }),
+  req('POST Create Candidate — refused for the view-only user', 'POST', '/api/admin/candidates', { cookie: HRV, json: { name: '{{runTag}} SHOULD NOT EXIST', phone: '020 0000 0000' }, status: 403, error: 'view-only' }),
+  req('PUT Essay Marks — refused for the view-only user', 'PUT', '/api/admin/assessments/{{assessmentId}}/essay-marks', { cookie: HRV, json: { marks: {} }, status: 403, error: 'view-only' }),
+  req('DELETE Candidate — refused for the view-only user', 'DELETE', '/api/admin/candidates/{{candidateIdA}}', { cookie: HRV, status: 403, error: 'view-only' }),
+  req('GET HR Users — refused for the view-only user', 'GET', '/api/admin/users', { cookie: HRV, status: 403, error: 'view-only' }),
+  req('POST Disable HR User', 'POST', '/api/admin/users/{{hrViewerId}}/disable', { test: () => { pm.test('Disabled', () => pm.expect(body.active).to.equal(false)); } }),
+  req('GET Candidates — the disabled user\'s session has ended', 'GET', '/api/admin/candidates', { cookie: HRV, status: 401 }),
+  req('POST Enable HR User', 'POST', '/api/admin/users/{{hrViewerId}}/enable', { test: () => { pm.test('Active', () => pm.expect(body.active).to.equal(true)); } }),
+  req('POST Reset HR User Password', 'POST', '/api/admin/users/{{hrViewerId}}/password', { json: { password: 'postman-hr-viewer-2' }, test: () => { pm.environment.set('hrViewerSession', ''); } }),
+  req('DELETE HR User', 'DELETE', '/api/admin/users/{{hrViewerId}}', { test: () => { pm.test('ok', () => pm.expect(body.ok).to.equal(true)); } }),
+  req('DELETE HR User — already deleted', 'DELETE', '/api/admin/users/{{hrViewerId}}', { status: 404 }),
+]);
+
+// ================================================================================
 // 22 Result Viewer (a separate read-only login for one person's own results)
 // ================================================================================
 const keepViewerCookie = () => {
@@ -1545,6 +1579,9 @@ const viewerFolder = folder('22 Result Viewer', 'A Result Viewer account is a se
   req('GET Candidate A — results kept after deleting the login', 'GET', '/api/admin/candidates/{{candidateIdA}}', { test: () => { pm.test('A\'s assessment is still there', () => pm.expect(body.candidate.tests.length).to.be.above(0)); } }),
 ]);
 const cleanup = folder('99 Cleanup', 'Removes ONLY temporary data: candidates, links, questions, categories and test types whose names start with "POSTMAN TEST" (the prefix of every name this collection creates, including leftovers of an interrupted earlier run). Order matters: candidates (and their attempts) → links → questions → categories → test types. Real data is never deleted.', [
+  sweep('DELETE Temporary HR Users', '/api/admin/users', 'HR users', () => {
+    const mine = body.filter((u) => /^postman-test-/i.test(u.username)).map((u) => ({ url: '/api/admin/users/' + u.id, label: u.username }));
+  }, 'View-only HR users named "postman-test-…" (left by an interrupted run).'),
   sweep('DELETE Temporary Result Viewer accounts', '/api/admin/result-viewers', 'result viewer accounts', () => {
     const mine = body.filter((a) => /^postman-test-/i.test(a.username)).map((a) => ({ url: '/api/admin/result-viewers/' + a.id, label: a.username }));
   }, 'Result Viewer logins named "postman-test-…" (left by an interrupted run). Only the login is deleted.'),
@@ -1624,14 +1661,14 @@ const collection = {
       }
     }) } },
   ],
-  item: [health, authFolder, dashboard, candidates, testTypes, cats, questions, imports, imagesFolder, assessments, links, exam, iq, timer, results, settings, internalStaff, internalLinks, internalExam, internalResults, security, viewerFolder, cleanup],
+  item: [health, authFolder, dashboard, candidates, testTypes, cats, questions, imports, imagesFolder, assessments, links, exam, iq, timer, results, settings, internalStaff, internalLinks, internalExam, internalResults, security, viewerFolder, hrUsersFolder, cleanup],
 };
 
 // Import tests use the collection-provided helper (eval of libUsable); replace the placeholder.
 const walk = (items) => items.forEach((it) => { if (it.item) walk(it.item); else for (const ev of it.event) ev.script.exec = ev.script.exec.map((l) => l.replace("eval(pm.environment.get('libUsable'));", LIB_USABLE)); });
 walk(collection.item);
 
-const VARS = ['runTag', 'viewerExpectedStatus', 'viewerId', 'viewerSession', 'reportStatuses', 'secondAdminToken', 'guardNeed', 'guardLinkId', 'guardQuestionId', 'guardQuestionJson', 'candidateIdA', 'sessionUsedByA', 'sameBrowserSessionSB2', 'sameBrowserSessionSB3',
+const VARS = ['runTag', 'hrViewerId', 'hrViewerSession', 'viewerExpectedStatus', 'viewerId', 'viewerSession', 'reportStatuses', 'secondAdminToken', 'guardNeed', 'guardLinkId', 'guardQuestionId', 'guardQuestionJson', 'candidateIdA', 'sessionUsedByA', 'sameBrowserSessionSB2', 'sameBrowserSessionSB3',
   'questionsSB2', 'questionsSB3', 'answersSB2', 'answersSB3', 'essayQuestionSB2', 'essayQuestionSB3', 'staffSessionUsedByA', 'staffSessionUsedByE', 'staffSessionUsedByG', 'internalResultE',
   'internalAnswersE1', 'internalAnswersE2', 'internalExportSize', 'internalExportOneSize', 'candidateId', 'questionId', 'pictureQuestionId', 'imageId', 'categoryId', 'category2Id', 'testTypeKey', 'interviewTypeKey', 'calcTypeKey', 'throwawayTypeKey',
   'assessmentId', 'attemptB', 'linkId', 'linkToken', 'candidateToken', 'iqLinkId', 'iqLinkToken', 'spareLinkId', 'spareLinkToken', 'oldSpareToken', 'timerLinkId', 'timerLinkToken',

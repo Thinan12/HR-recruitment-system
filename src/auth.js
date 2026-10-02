@@ -75,9 +75,11 @@ function login(req, res) {
     recordFailure(ip);
     return res.status(401).json({ error: 'Incorrect username or password.' });
   }
+  if (admin.active === 0) return res.status(403).json({ error: 'This account has been disabled. Please contact the HR administrator.' });
   failures.delete(ip);
+  db.prepare('UPDATE admins SET last_login_at = ? WHERE id = ?').run(now(), admin.id);
   setSessionCookie(res, issueToken(admin));
-  res.json({ username: admin.username });
+  res.json({ username: admin.username, role: admin.role || 'admin' });
 }
 
 // Each token has its own id (jti), and carries the admin's token_version.
@@ -106,8 +108,9 @@ function requireAdmin(req, res, next) {
   if (!token) return res.status(401).json({ error: 'Please log in.' });
   try {
     const payload = jwt.verify(token, JWT_SECRET);
-    const admin = db.prepare('SELECT id, username, token_version FROM admins WHERE id = ?').get(payload.sub);
+    const admin = db.prepare('SELECT id, username, token_version, role, active FROM admins WHERE id = ?').get(payload.sub);
     if (!admin) return res.status(401).json({ error: 'Please log in.' });
+    if (admin.active === 0) return res.status(401).json({ error: 'Your session has ended. Please log in again.' });
     // Signed out, or issued before the last password change: refused.
     if ((payload.tv || 0) !== (admin.token_version || 0)) return res.status(401).json({ error: 'Your session has ended. Please log in again.' });
     if (payload.jti && db.prepare('SELECT 1 FROM revoked_tokens WHERE jti = ?').get(payload.jti)) return res.status(401).json({ error: 'Your session has ended. Please log in again.' });
@@ -116,6 +119,27 @@ function requireAdmin(req, res, next) {
   } catch {
     return res.status(401).json({ error: 'Your session has ended. Please log in again.' });
   }
+}
+
+// View-only HR users (role 'viewer'): every page and export may be READ; any
+// change is refused here, on the server, whatever the page shows. They may
+// only log out and change their own password.
+const VIEWER_MAY_POST = new Set(['/auth/password']);
+function viewOnlyGuard(req, res, next) {
+  if (req.admin.role !== 'viewer') return next();
+  if (req.method === 'GET' || req.method === 'HEAD') {
+    // HR user and Result Viewer account management is for full admins only.
+    if (/^\/(users|result-viewers)(\/|$)/.test(req.path)) return res.status(403).json({ error: 'This account is view-only.' });
+    return next();
+  }
+  if (req.method === 'POST' && VIEWER_MAY_POST.has(req.path)) return next();
+  return res.status(403).json({ error: 'This account is view-only. Changes are not allowed.' });
+}
+
+// Full admins only (HR user management).
+function requireFullAdmin(req, res, next) {
+  if (req.admin.role === 'viewer') return res.status(403).json({ error: 'This account is view-only.' });
+  next();
 }
 
 function changePassword(req, res) {
@@ -140,6 +164,6 @@ const revokeToken = (jti, exp) => {
 };
 const isRevoked = (jti) => !!(jti && db.prepare('SELECT 1 FROM revoked_tokens WHERE jti = ?').get(jti));
 
-module.exports = { ensureFirstAdmin, login, logout, requireAdmin, changePassword,
+module.exports = { ensureFirstAdmin, login, logout, requireAdmin, changePassword, viewOnlyGuard, requireFullAdmin, issueToken,
   // shared with other logins (same failed-login limit per IP, same cookie reading and revocation)
   readCookie, tooManyFailures, recordFailure, clearFailures: (ip) => failures.delete(ip), scopedSecret, revokeToken, isRevoked, IS_PRODUCTION, SESSION_HOURS };
