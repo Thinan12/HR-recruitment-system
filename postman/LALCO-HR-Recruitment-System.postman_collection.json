@@ -27310,6 +27310,706 @@
             },
             "description": "**Purpose:** DELETE HR User — already deleted\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 404, JSON"
           }
+        },
+        {
+          "name": "GET Candidates Dashboard — full admin",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Candidates with their test results; dashboard fields only', () => {",
+                  "  pm.expect(body.candidates).to.be.an('array'); pm.expect(body.iq_classification).to.be.an('array');",
+                  "  body.candidates.forEach((c) => pm.expect(c).to.have.all.keys('id', 'name', 'phone', 'tests', 'final_percent_text', 'final_level', 'eligibility', 'eligibility_note', 'final_result'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/candidates-dashboard",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "candidates-dashboard"
+              ]
+            },
+            "description": "**Purpose:** GET Candidates Dashboard — full admin\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          }
+        },
+        {
+          "name": "POST Add HR User — Candidates dashboard only (HR_DASHBOARD_ONLY)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Role dashboard', () => { pm.expect(body.role).to.equal('dashboard'); pm.expect(body.role_label).to.equal('Candidates dashboard only'); }); set('hrDashId', String(body.id)); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users"
+              ]
+            },
+            "description": "**Purpose:** POST Add HR User — Candidates dashboard only (HR_DASHBOARD_ONLY)\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** JSON body\n\n**Expected:** HTTP 201, JSON",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"username\": \"postman-test-dash-{{runStamp}}\", \"password\": \"postman-dash-1\", \"role\": \"HR_DASHBOARD_ONLY\" }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST Admin Login — the dashboard-only user",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "const c = pm.response.headers.all().find((h) => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('hr_session=')); if (c) pm.environment.set('hrDashSession', c.value.split(';')[0].slice('hr_session='.length)); ",
+                  "pm.test('Role dashboard', () => pm.expect(body.role).to.equal('dashboard')); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "**Purpose:** POST Admin Login — the dashboard-only user\n\n**Authentication:** None — sent without any cookie on purpose\n\n**Input:** JSON body\n\n**Expected:** HTTP 200, JSON",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"username\": \"postman-test-dash-{{runStamp}}\", \"password\": \"postman-dash-1\" }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "GET Candidates Dashboard — as the dashboard-only user",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Candidate A is listed with test results', () => { const a = body.candidates.find((c) => c.id === Number(env('candidateIdA'))); pm.expect(a).to.exist; pm.expect(a.tests.length).to.be.above(0); }); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "hr_session={{hrDashSession}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/candidates-dashboard",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "candidates-dashboard"
+              ]
+            },
+            "description": "**Purpose:** GET Candidates Dashboard — as the dashboard-only user\n\n**Authentication:** Explicit cookie: `hr_session={{hrDashSession}}` (cookie jar off)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "GET Export All Candidates — as the dashboard-only user",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "pm.variables.set('maxMs', 8000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'));",
+                  "pm.test('File is not empty', () => pm.expect(pm.response.stream ? pm.response.stream.length : pm.response.responseSize).to.be.above(0));",
+                  "pm.test('File starts like a real XLSX', () => pm.expect(pm.response.stream.slice(0, 2).toString('latin1')).to.equal(\"PK\"));",
+                  "pm.test('Sent as a download with a .xlsx file name', () => pm.expect(pm.response.headers.get('Content-Disposition') || '').to.match(/attachment; filename=\".+\\.xlsx\"/));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "hr_session={{hrDashSession}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/export/candidates.xlsx",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "export",
+                "candidates.xlsx"
+              ]
+            },
+            "description": "**Purpose:** GET Export All Candidates — as the dashboard-only user\n\n**Authentication:** Explicit cookie: `hr_session={{hrDashSession}}` (cookie jar off)\n\n**Input:** none\n\n**Expected:** HTTP 200, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "GET Detailed Excel — as the dashboard-only user",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "pm.variables.set('maxMs', 8000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'));",
+                  "pm.test('File is not empty', () => pm.expect(pm.response.stream ? pm.response.stream.length : pm.response.responseSize).to.be.above(0));",
+                  "pm.test('File starts like a real XLSX', () => pm.expect(pm.response.stream.slice(0, 2).toString('latin1')).to.equal(\"PK\"));",
+                  "pm.test('Sent as a download with a .xlsx file name', () => pm.expect(pm.response.headers.get('Content-Disposition') || '').to.match(/attachment; filename=\".+\\.xlsx\"/));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "hr_session={{hrDashSession}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/export/candidates.xlsx?detail=full",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "export",
+                "candidates.xlsx"
+              ],
+              "query": [
+                {
+                  "key": "detail",
+                  "value": "full"
+                }
+              ]
+            },
+            "description": "**Purpose:** GET Detailed Excel — as the dashboard-only user\n\n**Authentication:** Explicit cookie: `hr_session={{hrDashSession}}` (cookie jar off)\n\n**Input:** query: detail\n\n**Expected:** HTTP 200, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "GET Candidate Profile — not available to the dashboard-only user",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Error message says: Not found.', () => pm.expect(String((body && (body.error || body.message)) || '')).to.include(\"Not found.\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "hr_session={{hrDashSession}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/candidates/{{candidateIdA}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "candidates",
+                "{{candidateIdA}}"
+              ]
+            },
+            "description": "**Purpose:** GET Candidate Profile — not available to the dashboard-only user\n\n**Authentication:** Explicit cookie: `hr_session={{hrDashSession}}` (cookie jar off)\n\n**Input:** none\n\n**Expected:** HTTP 404, JSON — error contains “Not found.”"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "GET Main Dashboard — not available to the dashboard-only user",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Error message says: Not found.', () => pm.expect(String((body && (body.error || body.message)) || '')).to.include(\"Not found.\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "hr_session={{hrDashSession}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/dashboard",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "dashboard"
+              ]
+            },
+            "description": "**Purpose:** GET Main Dashboard — not available to the dashboard-only user\n\n**Authentication:** Explicit cookie: `hr_session={{hrDashSession}}` (cookie jar off)\n\n**Input:** none\n\n**Expected:** HTTP 404, JSON — error contains “Not found.”"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "GET Questions — not available to the dashboard-only user",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Error message says: Not found.', () => pm.expect(String((body && (body.error || body.message)) || '')).to.include(\"Not found.\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "hr_session={{hrDashSession}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/questions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "questions"
+              ]
+            },
+            "description": "**Purpose:** GET Questions — not available to the dashboard-only user\n\n**Authentication:** Explicit cookie: `hr_session={{hrDashSession}}` (cookie jar off)\n\n**Input:** none\n\n**Expected:** HTTP 404, JSON — error contains “Not found.”"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "GET Internal Staff — not available to the dashboard-only user",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Error message says: Not found.', () => pm.expect(String((body && (body.error || body.message)) || '')).to.include(\"Not found.\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "hr_session={{hrDashSession}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/internal/staff",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "internal",
+                "staff"
+              ]
+            },
+            "description": "**Purpose:** GET Internal Staff — not available to the dashboard-only user\n\n**Authentication:** Explicit cookie: `hr_session={{hrDashSession}}` (cookie jar off)\n\n**Input:** none\n\n**Expected:** HTTP 404, JSON — error contains “Not found.”"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "DELETE Candidate — not available to the dashboard-only user",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('Error message says: Not found.', () => pm.expect(String((body && (body.error || body.message)) || '')).to.include(\"Not found.\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "hr_session={{hrDashSession}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/candidates/{{candidateIdA}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "candidates",
+                "{{candidateIdA}}"
+              ]
+            },
+            "description": "**Purpose:** DELETE Candidate — not available to the dashboard-only user\n\n**Authentication:** Explicit cookie: `hr_session={{hrDashSession}}` (cookie jar off)\n\n**Input:** none\n\n**Expected:** HTTP 404, JSON — error contains “Not found.”"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "DELETE HR User — the dashboard-only user",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const env = (k) => pm.environment.get(k);",
+                  "const set = (k, v) => pm.environment.set(k, typeof v === 'string' ? v : JSON.stringify(v));",
+                  "const getJSON = (k) => { try { return JSON.parse(pm.environment.get(k)); } catch (e) { return null; } };",
+                  "let body = null;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is application/json', () => pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json'));",
+                  "pm.test('Body is valid JSON', () => pm.expect(body, 'response body is not JSON').to.not.equal(null));",
+                  "pm.test('ok', () => pm.expect(body.ok).to.equal(true)); pm.environment.set('hrDashSession', ''); "
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users/{{hrDashId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                "{{hrDashId}}"
+              ]
+            },
+            "description": "**Purpose:** DELETE HR User — the dashboard-only user\n\n**Authentication:** Admin session cookie `hr_session` (set by POST Admin Login, kept by the cookie jar)\n\n**Input:** none\n\n**Expected:** HTTP 200, JSON"
+          }
         }
       ]
     },

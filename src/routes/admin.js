@@ -24,6 +24,19 @@ router.use(auth.viewOnlyGuard);
 router.get('/auth/me', (req, res) => res.json({ username: req.admin.username, role: req.admin.role || 'admin' }));
 // HR users (view-only logins, more admins): full admins only.
 router.use('/users', require('./hrUsers'));
+
+// The candidate results table of the Dashboard (the "Candidates dashboard"):
+// only the fields that table and its filter show, from the same candidate
+// summaries as the Dashboard (no other HR notes). Used by every role; the only
+// data a Candidates-dashboard-only user can read.
+router.get('/candidates-dashboard', (req, res) => {
+  const pickTest = (t) => ({ section: t.section, name: t.name, score_text: t.score_text, lalco_iq_score: t.lalco_iq_score, percent: t.percent, level: t.level, state: t.state, result: t.result });
+  res.json({
+    iq_classification: reports.IQ_CLASSIFICATION,
+    candidates: reports.allCandidateSummaries().map((c) => ({ id: c.id, name: c.name, phone: c.phone, tests: (c.tests || []).map(pickTest),
+      final_percent_text: c.final_percent_text, final_level: c.final_level, eligibility: c.eligibility, eligibility_note: c.eligibility_note, final_result: c.final_result })),
+  });
+});
 router.post('/auth/password', auth.changePassword);
 
 // Internal Office Staff (its own records, links, results and reports).

@@ -145,6 +145,11 @@ Full admins add HR users in **Settings → HR users**: username, password (8+ ch
 - **What they can't do:** add, edit, delete, mark, create links, import or change settings. The **server refuses** every such request (403), whatever the page shows; the page also makes forms read-only and hides change buttons. They cannot see or manage HR users or Result Viewer accounts. They can change their own password and log out.
 - **Account controls:** Disable (open sessions end at once), Enable, Reset password and Delete, each written to the audit log. You cannot disable or delete yourself, nor the last active full admin. Existing accounts are full admins (`role` defaults to `admin`).
 
+**Candidates dashboard only** (`HR_DASHBOARD_ONLY`, stored as role `dashboard`) is the most limited HR login. After login it goes straight to the **Candidates dashboard**: the Dashboard's own candidate results table, with per test Score, LALCO IQ, %, Level / IQ Classification and Result, then Final %, Final Level, Company Eligibility and HR Final Result. It has the filter, a name / phone search, and **Export all (Excel)** and **Detailed Excel** buttons. The menu shows only *Candidates* and *Logout*. Rows do not open profiles, and any other address shows the same page.
+
+- **Server allowlist:** the account may use only `GET /api/admin/auth/me`, `/test-types` (column names), `/candidates-dashboard` (only the fields that table shows, from the same candidate summaries as the Dashboard) and `/export/candidates.xlsx` (with `?detail=full`), plus logout.
+- **Everything else is refused:** every other request, read or write (profiles, questions, assessments, links, reports, internal staff, settings, users, password change), answers a plain `404 Not found.`
+
 ### Result Viewer accounts
 
 A separate, **read-only** login for ONE person (a candidate or a staff member) to see their own results at **`/results`**. It is not an HR account.

@@ -1,6 +1,7 @@
 // HR users (mounted at /api/admin/users; full admins only). Adds view-only HR
-// logins (role 'viewer': see every candidate, exam and report, change nothing)
-// or more full admins. Passwords are bcrypt hashes and are never shown again.
+// logins (role 'viewer': see every candidate, exam and report, change nothing),
+// Candidates-dashboard-only logins (role 'dashboard', HR_DASHBOARD_ONLY: only
+// the candidate results table and its two Excel exports), or more full admins. Passwords are bcrypt hashes and are never shown again.
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const { db, now } = require('../db');
@@ -11,7 +12,9 @@ router.use(auth.requireFullAdmin);
 
 const bad = (res, message) => res.status(400).json({ error: message });
 const notFound = (res) => res.status(404).json({ error: 'Not found.' });
-const ROLES = { viewer: 'View only', admin: 'Full admin' };
+const ROLES = { viewer: 'View only', dashboard: 'Candidates dashboard only', admin: 'Full admin' };
+// Role names accepted from the page or the API (HR_DASHBOARD_ONLY = 'dashboard').
+const roleOf = (r) => ({ admin: 'admin', viewer: 'viewer', dashboard: 'dashboard', HR_DASHBOARD_ONLY: 'dashboard' }[String(r || '')] || 'viewer');
 const audit = (action, admin, details) => db.prepare('INSERT INTO audit_log (action, admin, details, created_at) VALUES (?, ?, ?, ?)').run(action, admin, JSON.stringify(details), now());
 const view = (a) => ({ id: a.id, username: a.username, role: a.role || 'admin', role_label: ROLES[a.role || 'admin'], active: a.active !== 0,
   created_at: a.created_at, created_by: a.created_by || '', last_login_at: a.last_login_at || null });
@@ -23,7 +26,7 @@ router.get('/', (req, res) => res.json(db.prepare('SELECT * FROM admins ORDER BY
 
 router.post('/', (req, res) => {
   const username = String(req.body?.username || '').trim();
-  const role = req.body?.role === 'admin' ? 'admin' : 'viewer';
+  const role = roleOf(req.body?.role);
   if (!/^[A-Za-z0-9._@-]{3,50}$/.test(username)) return bad(res, 'Username: 3-50 characters, letters, numbers and . _ @ - only.');
   const pwError = checkPassword(req.body?.password);
   if (pwError) return bad(res, pwError);

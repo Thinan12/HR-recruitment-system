@@ -316,3 +316,6 @@ a.stat:hover { border-color: #9fbad6; }
 /* ---- view-only HR users (role viewer): the server refuses changes; the page hides the obvious controls ---- */
 .readonly-banner { background: var(--pending-bg); color: var(--pending); padding: 8px 24px; font-size: 14px; border-bottom: 1px solid #f0dca8; }
 body.read-only .danger, body.read-only #upload-card, body.read-only .write-only, body.read-only #nav a[data-page="result-viewers"] { display: none !important; }
+
+/* ---- Candidates-dashboard-only HR users (HR_DASHBOARD_ONLY): only "Candidates" and Logout ---- */
+body.dashboard-only #nav > *:not(a[data-page="candidates"]) { display: none !important; }

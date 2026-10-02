@@ -1503,6 +1503,36 @@ const hrUsersFolder = folder('23 HR Users (view only)', 'A View only HR user log
   req('POST Reset HR User Password', 'POST', '/api/admin/users/{{hrViewerId}}/password', { json: { password: 'postman-hr-viewer-2' }, test: () => { pm.environment.set('hrViewerSession', ''); } }),
   req('DELETE HR User', 'DELETE', '/api/admin/users/{{hrViewerId}}', { test: () => { pm.test('ok', () => pm.expect(body.ok).to.equal(true)); } }),
   req('DELETE HR User — already deleted', 'DELETE', '/api/admin/users/{{hrViewerId}}', { status: 404 }),
+  // HR_DASHBOARD_ONLY: only the candidate results table and its two Excel exports.
+  req('GET Candidates Dashboard — full admin', 'GET', '/api/admin/candidates-dashboard', {
+    test: () => {
+      pm.test('Candidates with their test results; dashboard fields only', () => {
+        pm.expect(body.candidates).to.be.an('array'); pm.expect(body.iq_classification).to.be.an('array');
+        body.candidates.forEach((c) => pm.expect(c).to.have.all.keys('id', 'name', 'phone', 'tests', 'final_percent_text', 'final_level', 'eligibility', 'eligibility_note', 'final_result'));
+      });
+    },
+  }),
+  req('POST Add HR User — Candidates dashboard only (HR_DASHBOARD_ONLY)', 'POST', '/api/admin/users', {
+    json: '{ "username": "postman-test-dash-{{runStamp}}", "password": "postman-dash-1", "role": "HR_DASHBOARD_ONLY" }', status: 201,
+    test: () => { pm.test('Role dashboard', () => { pm.expect(body.role).to.equal('dashboard'); pm.expect(body.role_label).to.equal('Candidates dashboard only'); }); set('hrDashId', String(body.id)); },
+  }),
+  req('POST Admin Login — the dashboard-only user', 'POST', '/api/admin/auth/login', {
+    noAuth: true, json: '{ "username": "postman-test-dash-{{runStamp}}", "password": "postman-dash-1" }',
+    test: [() => { const c = pm.response.headers.all().find((h) => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('hr_session=')); if (c) pm.environment.set('hrDashSession', c.value.split(';')[0].slice('hr_session='.length)); },
+      () => { pm.test('Role dashboard', () => pm.expect(body.role).to.equal('dashboard')); }],
+  }),
+  req('GET Candidates Dashboard — as the dashboard-only user', 'GET', '/api/admin/candidates-dashboard', {
+    cookie: 'hr_session={{hrDashSession}}',
+    test: () => { pm.test('Candidate A is listed with test results', () => { const a = body.candidates.find((c) => c.id === Number(env('candidateIdA'))); pm.expect(a).to.exist; pm.expect(a.tests.length).to.be.above(0); }); },
+  }),
+  req('GET Export All Candidates — as the dashboard-only user', 'GET', '/api/admin/export/candidates.xlsx', { cookie: 'hr_session={{hrDashSession}}', type: 'xlsx', maxMs: 8000 }),
+  req('GET Detailed Excel — as the dashboard-only user', 'GET', '/api/admin/export/candidates.xlsx', { cookie: 'hr_session={{hrDashSession}}', q: { detail: 'full' }, type: 'xlsx', maxMs: 8000 }),
+  req('GET Candidate Profile — not available to the dashboard-only user', 'GET', '/api/admin/candidates/{{candidateIdA}}', { cookie: 'hr_session={{hrDashSession}}', status: 404, error: 'Not found.' }),
+  req('GET Main Dashboard — not available to the dashboard-only user', 'GET', '/api/admin/dashboard', { cookie: 'hr_session={{hrDashSession}}', status: 404, error: 'Not found.' }),
+  req('GET Questions — not available to the dashboard-only user', 'GET', '/api/admin/questions', { cookie: 'hr_session={{hrDashSession}}', status: 404, error: 'Not found.' }),
+  req('GET Internal Staff — not available to the dashboard-only user', 'GET', '/api/admin/internal/staff', { cookie: 'hr_session={{hrDashSession}}', status: 404, error: 'Not found.' }),
+  req('DELETE Candidate — not available to the dashboard-only user', 'DELETE', '/api/admin/candidates/{{candidateIdA}}', { cookie: 'hr_session={{hrDashSession}}', status: 404, error: 'Not found.' }),
+  req('DELETE HR User — the dashboard-only user', 'DELETE', '/api/admin/users/{{hrDashId}}', { test: () => { pm.test('ok', () => pm.expect(body.ok).to.equal(true)); pm.environment.set('hrDashSession', ''); } }),
 ]);
 
 // ================================================================================
@@ -1668,7 +1698,7 @@ const collection = {
 const walk = (items) => items.forEach((it) => { if (it.item) walk(it.item); else for (const ev of it.event) ev.script.exec = ev.script.exec.map((l) => l.replace("eval(pm.environment.get('libUsable'));", LIB_USABLE)); });
 walk(collection.item);
 
-const VARS = ['runTag', 'hrViewerId', 'hrViewerSession', 'viewerExpectedStatus', 'viewerId', 'viewerSession', 'reportStatuses', 'secondAdminToken', 'guardNeed', 'guardLinkId', 'guardQuestionId', 'guardQuestionJson', 'candidateIdA', 'sessionUsedByA', 'sameBrowserSessionSB2', 'sameBrowserSessionSB3',
+const VARS = ['runTag', 'hrDashId', 'hrDashSession', 'hrViewerId', 'hrViewerSession', 'viewerExpectedStatus', 'viewerId', 'viewerSession', 'reportStatuses', 'secondAdminToken', 'guardNeed', 'guardLinkId', 'guardQuestionId', 'guardQuestionJson', 'candidateIdA', 'sessionUsedByA', 'sameBrowserSessionSB2', 'sameBrowserSessionSB3',
   'questionsSB2', 'questionsSB3', 'answersSB2', 'answersSB3', 'essayQuestionSB2', 'essayQuestionSB3', 'staffSessionUsedByA', 'staffSessionUsedByE', 'staffSessionUsedByG', 'internalResultE',
   'internalAnswersE1', 'internalAnswersE2', 'internalExportSize', 'internalExportOneSize', 'candidateId', 'questionId', 'pictureQuestionId', 'imageId', 'categoryId', 'category2Id', 'testTypeKey', 'interviewTypeKey', 'calcTypeKey', 'throwawayTypeKey',
   'assessmentId', 'attemptB', 'linkId', 'linkToken', 'candidateToken', 'iqLinkId', 'iqLinkToken', 'spareLinkId', 'spareLinkToken', 'oldSpareToken', 'timerLinkId', 'timerLinkToken',

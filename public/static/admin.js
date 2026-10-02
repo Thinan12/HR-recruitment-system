@@ -270,6 +270,8 @@ $('logout').addEventListener('click', async () => {
 // The signed-in HR user: role 'admin' (full) or 'viewer' (view only).
 let ME = { username: '', role: 'admin' };
 const isViewer = () => ME.role === 'viewer';
+// Candidates-dashboard-only HR users (HR_DASHBOARD_ONLY): only the candidate results table.
+const isDashboardOnly = () => ME.role === 'dashboard';
 
 // View-only: lock HR's edit forms and hide change buttons on every page (also
 // on content added later, e.g. dialogs). The server refuses changes anyway;
@@ -291,7 +293,9 @@ const viewerObserver = new MutationObserver((list) => { for (const m of list) fo
 
 function startApp(me) {
   ME = { username: me.username, role: me.role || 'admin' };
-  $('whoami').textContent = me.username + (isViewer() ? ' (view only)' : '');
+  $('whoami').textContent = me.username + (isViewer() ? ' (view only)' : isDashboardOnly() ? ' (candidates dashboard)' : '');
+  document.body.classList.toggle('dashboard-only', isDashboardOnly());
+  if (isDashboardOnly() && location.hash !== '#/candidates') location.hash = '#/candidates';
   // View-only: the server refuses every change; the page also hides the obvious change controls.
   document.body.classList.toggle('read-only', isViewer());
   $('readonly-banner').classList.toggle('hidden', !isViewer());
@@ -317,6 +321,14 @@ const ROUTES = {
 };
 
 async function route() {
+  // A Candidates-dashboard-only user has one page, whatever the address says.
+  if (isDashboardOnly()) {
+    document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.page === 'candidates'));
+    loading();
+    await loadTestTypes();
+    try { await renderCandidatesDashboard(); } catch (e) { view().replaceChildren(message(e.message)); }
+    return;
+  }
   const [, page = 'dashboard', id, sub] = location.hash.split('/');
   const render = ROUTES[page] || ROUTES.dashboard;
   // Internal Office Staff pages: #/internal/<section>/<id>.
@@ -413,12 +425,42 @@ function candidateResultsTable(list) {
         h('th', { class: 'group', colspan: 3 }, 'Final Assessment'), h('th', { rowspan: 2, class: 'group-start' }, 'HR Final Result')),
       h('tr', {}, TESTS.flatMap((sec) => cols(sec).map((t, i) => h('th', { class: i === 0 ? 'group-start' : null }, t))),
         h('th', { class: 'group-start' }, 'Final %'), h('th', {}, 'Final Level'), h('th', {}, 'Company Eligibility'))),
-    h('tbody', {}, list.map((c) => h('tr', { class: 'clickable', onclick: () => { location.hash = '#/candidates/' + c.id; } },
+    h('tbody', {}, list.map((c) => h('tr', isDashboardOnly() ? {} : { class: 'clickable', onclick: () => { location.hash = '#/candidates/' + c.id; } },
       h('td', {}, h('strong', {}, c.name)),
       TESTS.flatMap((sec) => cells(c, sec)),
       h('td', { class: 'group-start' }, c.final_percent_text || '-'), h('td', {}, fmt(c.final_level)),
       h('td', { title: c.eligibility_note || '' }, eligibilityBadge(c.eligibility)),
       h('td', { class: 'group-start' }, resultBadge(c.final_result || 'Pending')))))));
+}
+
+// The Candidates dashboard for HR_DASHBOARD_ONLY users: the Dashboard's own
+// candidate results table, filter and Excel buttons, nothing else (read only).
+async function renderCandidatesDashboard() {
+  const d = await api('GET', '/candidates-dashboard');
+  IQ_CLASSES = d.iq_classification || [];
+  const filters = dashboardFilters();
+  const filter = select('dashboard_filter', filters.map(([k, label]) => [k, label]), dashboardFilter);
+  filter.classList.add('inline-input');
+  const search = h('input', { placeholder: 'Search name or phone', class: 'inline-input', type: 'search', id: 'candidate-search' });
+  const tableBox = h('div');
+  const count = h('span', { class: 'muted small', id: 'candidate-count' });
+  const draw = () => {
+    const f = (filters.find(([k]) => k === dashboardFilter) || filters[0])[2];
+    const q = search.value.trim().toLowerCase();
+    const digits = q.replace(/\D/g, '');
+    const list = d.candidates.filter(f).filter((c) => !q || String(c.name).toLowerCase().includes(q) || (digits && String(c.phone || '').replace(/\D/g, '').includes(digits)));
+    count.textContent = `${list.length} of ${d.candidates.length} candidates`;
+    tableBox.replaceChildren(candidateResultsTable(list));
+  };
+  filter.addEventListener('change', () => { dashboardFilter = filter.value; draw(); });
+  search.addEventListener('input', draw);
+  view().replaceChildren(
+    h('div', { class: 'card' },
+      h('div', { class: 'row between' }, h('h2', {}, 'Candidates'),
+        h('div', { class: 'row' }, search, filter, count, downloadLink('/export/candidates.xlsx', 'Export all (Excel)'), downloadLink('/export/candidates.xlsx?detail=full', 'Detailed Excel'))),
+      tableBox,
+      h('p', { class: 'muted small' }, 'Each column group is one test of the candidate’s latest assessment link. Behavioral Interview Test / Calculation / Essay level: 90%+ Exceptional, 80%+ Very High, 70%+ High, 60%+ Average, 50%+ Low, below 50% Very Low. IQ Classification comes from the LALCO IQ Score. Result uses each test’s pass mark. Final % = the average of the included tests; Company Eligibility = every test passed and Final % reaches the eligibility mark. HR Final Result is HR’s own decision.')));
+  draw();
 }
 
 async function renderDashboard() {
@@ -1774,7 +1816,7 @@ async function hrUsersCard() {
   const form = h('form', { class: 'grid', id: 'hr-user-form' },
     field('Username', h('input', { name: 'username', required: true, minlength: 3, maxlength: 50, autocomplete: 'off' })),
     field('Password (8+ characters)', h('input', { name: 'password', type: 'password', required: true, minlength: 8, autocomplete: 'new-password' })),
-    field('Access', select('role', [['viewer', 'View only (see everything, change nothing)'], ['admin', 'Full admin']], 'viewer')),
+    field('Access', select('role', [['viewer', 'View only (see everything, change nothing)'], ['dashboard', 'Candidates dashboard only (results table + Excel)'], ['admin', 'Full admin']], 'viewer')),
     h('div', { class: 'wide' }, h('button', { type: 'submit' }, 'Add HR user')));
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1791,7 +1833,7 @@ async function hrUsersCard() {
   };
   const rows = users.map((u) => h('tr', {},
     h('td', {}, h('strong', {}, u.username), u.username === ME.username ? h('span', { class: 'muted small' }, ' (you)') : null),
-    h('td', {}, h('span', { class: 'badge ' + (u.role === 'viewer' ? 'neutral' : 'pass') }, u.role_label)),
+    h('td', {}, h('span', { class: 'badge ' + (u.role === 'admin' ? 'pass' : 'neutral') }, u.role_label)),
     h('td', {}, h('span', { class: 'badge ' + (u.active ? 'pass' : 'neutral') }, u.active ? 'Active' : 'Disabled')),
     h('td', { class: 'small' }, fmtDateTime(u.last_login_at)),
     h('td', {}, u.username === ME.username ? null : h('div', { class: 'row' },

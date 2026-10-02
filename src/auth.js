@@ -125,7 +125,22 @@ function requireAdmin(req, res, next) {
 // change is refused here, on the server, whatever the page shows. They may
 // only log out and change their own password.
 const VIEWER_MAY_POST = new Set(['/auth/password']);
+// Candidates-dashboard-only HR users (role 'dashboard', HR_DASHBOARD_ONLY): an
+// explicit allowlist. Everything else answers a plain 404 (nothing about what
+// exists). Logout is allowed before this (it needs no session).
+const DASHBOARD_ALLOWED = [
+  ['GET', /^\/auth\/me$/], // who is logged in (the page needs the role)
+  ['GET', /^\/test-types$/], // the test names used as column headings
+  ['GET', /^\/candidates-dashboard$/], // the results table data (dashboard fields only)
+  ['GET', /^\/export\/candidates\.xlsx$/], // "Export all (Excel)" and "Detailed Excel" (?detail=full)
+];
+function dashboardOnlyGuard(req, res, next) {
+  if (DASHBOARD_ALLOWED.some(([m, re]) => (req.method === m || (m === 'GET' && req.method === 'HEAD')) && re.test(req.path))) return next();
+  return res.status(404).json({ error: 'Not found.' });
+}
+
 function viewOnlyGuard(req, res, next) {
+  if (req.admin.role === 'dashboard') return dashboardOnlyGuard(req, res, next);
   if (req.admin.role !== 'viewer') return next();
   if (req.method === 'GET' || req.method === 'HEAD') {
     // HR user and Result Viewer account management is for full admins only.
@@ -138,6 +153,7 @@ function viewOnlyGuard(req, res, next) {
 
 // Full admins only (HR user management).
 function requireFullAdmin(req, res, next) {
+  if (req.admin.role === 'dashboard') return res.status(404).json({ error: 'Not found.' });
   if (req.admin.role === 'viewer') return res.status(403).json({ error: 'This account is view-only.' });
   next();
 }
