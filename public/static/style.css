@@ -280,3 +280,35 @@ a.stat:hover { border-color: #9fbad6; }
 .nav a { padding: 8px 9px; font-size: 14.5px; white-space: nowrap; }
 .nav-group { padding-left: 8px; margin-left: 2px; }
 .link-box .internal-banner { align-self: center; white-space: nowrap; }
+
+/* ---- Result Viewer (/results): own results, print, phone layout ---- */
+.results-main { max-width: 860px; margin: 0 auto; padding: 16px; }
+.results-login { max-width: 420px; margin: 40px auto; }
+.results-login button[type=submit] { width: 100%; margin-top: 8px; }
+.results-head h1 { margin-bottom: 12px; }
+.results-card { margin-bottom: 16px; }
+.results-identity { margin-bottom: 14px; }
+.results-table { width: 100%; border-collapse: collapse; }
+.results-table th, .results-table td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.results-table th { font-size: 13px; color: var(--muted); font-weight: 600; }
+.results-overall { display: flex; align-items: center; gap: 10px; margin-top: 16px; font-weight: 700; font-size: 17px; }
+.badge.big { font-size: 15px; padding: 4px 16px; }
+.results-actions { gap: 10px; flex-wrap: wrap; margin: 8px 0 24px; }
+.print-brand { display: none; }
+@media (max-width: 640px) {
+  .results-main { padding: 10px; }
+  .results-table thead { display: none; }
+  .results-table, .results-table tbody, .results-table tr, .results-table td { display: block; width: 100%; }
+  .results-table tr { border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: 10px; padding: 6px 10px; }
+  .results-table td { border: 0; padding: 4px 0; display: flex; justify-content: space-between; gap: 12px; }
+  .results-table td::before { content: attr(data-label); color: var(--muted); font-size: 13px; flex: none; }
+  .results-table td > * { text-align: right; min-width: 0; overflow-wrap: anywhere; }
+  .results-actions > * { flex: 1 1 100%; text-align: center; }
+}
+@media print {
+  .results-page .results-actions, .results-page #lang-switch { display: none !important; }
+  .results-page .print-brand { display: block; font-size: 22px; font-weight: 700; color: var(--primary); margin-bottom: 4px; }
+  .results-page .results-main { max-width: none; padding: 0; }
+  .results-page .results-card { border: 1px solid #999; box-shadow: none; break-inside: avoid; }
+  .results-page .badge { border: 1px solid currentColor; }
+}

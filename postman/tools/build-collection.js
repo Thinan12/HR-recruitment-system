@@ -1470,7 +1470,84 @@ const deleteAll = () => {
   }));
 };
 const sweep = (name, listPath, what, pick, desc) => req(name, 'GET', listPath, { desc, maxMs: 30000, P: { what }, test: [pick, deleteAll] });
+
+// ================================================================================
+// 22 Result Viewer (a separate read-only login for one person's own results)
+// ================================================================================
+const keepViewerCookie = () => {
+  // The Result Viewer session cookie (the cookie jar is off for these requests).
+  for (const h of pm.response.headers.all()) {
+    const m = h.key.toLowerCase() === 'set-cookie' && /lalco_result_session=([^;]+)/.exec(h.value);
+    if (m) pm.environment.set('viewerSession', m[1]);
+  }
+};
+const VIEWER = 'lalco_result_session={{viewerSession}}';
+const viewerFolder = folder('22 Result Viewer', 'A Result Viewer account is a separate, read-only login (/results) for ONE person. This folder creates a temporary account "postman-test-…" for this run\'s Candidate A, logs in (own cookie lalco_result_session, sent explicitly), reads and exports A\'s own results, and checks that the account can never reach the admin API or another person. The account is deleted at the end (and swept in 99 Cleanup).', [
+  req('POST Create Result Viewer — missing person', 'POST', '/api/admin/result-viewers', { json: '{ "username": "postman-test-{{runStamp}}", "password": "postman-viewer-1" }', status: 400, error: 'Choose the candidate or the staff member' }),
+  req('POST Create Result Viewer — password too short', 'POST', '/api/admin/result-viewers', { json: '{ "username": "postman-test-{{runStamp}}", "password": "short", "candidate_id": {{candidateIdA}} }', status: 400, error: 'at least 8 characters' }),
+  req('POST Create Result Viewer — for Candidate A', 'POST', '/api/admin/result-viewers', {
+    json: '{ "username": "postman-test-{{runStamp}}", "password": "postman-viewer-1", "candidate_id": {{candidateIdA}} }', status: 201,
+    test: () => {
+      pm.test('Linked to Candidate A, active; no password or hash returned', () => {
+        pm.expect(body.person_type).to.equal('candidate'); pm.expect(body.person_id).to.equal(Number(env('candidateIdA'))); pm.expect(body.active).to.equal(true);
+        pm.expect(JSON.stringify(body)).to.not.include('postman-viewer-1'); pm.expect(body).to.not.have.property('password_hash');
+      });
+      set('viewerId', String(body.id));
+    },
+  }),
+  req('POST Create Result Viewer — same username again', 'POST', '/api/admin/result-viewers', { json: '{ "username": "POSTMAN-TEST-{{runStamp}}", "password": "postman-viewer-1", "candidate_id": {{candidateIdA}} }', status: 400, error: 'already used' }),
+  req('GET Result Viewers', 'GET', '/api/admin/result-viewers', { test: () => { pm.test('Ours listed; no hashes', () => { pm.expect(body.map((a) => a.id)).to.include(Number(env('viewerId'))); pm.expect(JSON.stringify(body)).to.not.match(/\$2[aby]\$/); }); } }),
+  req('POST Result Viewer Login — wrong password', 'POST', '/api/results/auth/login', { noAuth: true, json: '{ "username": "postman-test-{{runStamp}}", "password": "wrong-password" }', status: 401, error: 'Incorrect username or password.' }),
+  req('POST Result Viewer Login', 'POST', '/api/results/auth/login', {
+    noAuth: true, json: '{ "username": "postman-test-{{runStamp}}", "password": "postman-viewer-1" }',
+    test: [keepViewerCookie, () => {
+      pm.test('Only the username comes back (no results, no person data)', () => pm.expect(body).to.eql({ username: 'postman-test-' + env('runStamp') }));
+      const c = pm.response.headers.all().find((h) => h.key.toLowerCase() === 'set-cookie');
+      pm.test('Own cookie: HttpOnly, SameSite=Strict, only for /api/results', () => { pm.expect(c.value).to.match(/^lalco_result_session=/); pm.expect(c.value).to.match(/HttpOnly/i); pm.expect(c.value).to.match(/SameSite=Strict/i); pm.expect(c.value).to.include('Path=/api/results'); });
+    }],
+  }),
+  req('GET Standard Report — Candidate A\'s status now', 'GET', '/api/admin/report/standard', {
+    test: () => { const row = body.rows.find((r) => r.candidate_id === Number(env('candidateIdA'))); pm.test('A is in the report', () => pm.expect(row).to.exist); set('viewerExpectedStatus', row.values[14]); },
+  }),
+  req('GET My Results', 'GET', '/api/results/me', {
+    cookie: VIEWER,
+    test: () => {
+      pm.test('Candidate A only', () => { pm.expect(body.candidateName).to.equal(env('runTag') + ' A'); pm.expect(body.assessments.length).to.equal(1); });
+      pm.test('Overall result = the status HR\'s report shows', () => pm.expect(body.overallStatus).to.equal(env('viewerExpectedStatus')));
+      pm.test('The tests of A\'s assessment with the existing scores (interview marked full marks by HR)', () => {
+        const interview = body.tests.find((t) => t.testType === env('interviewTypeKey'));
+        pm.expect(interview.status).to.equal('PASS'); pm.expect(interview.percentage).to.equal(100);
+        body.tests.forEach((t) => pm.expect(['PASS', 'NOT PASS', 'PENDING', 'NOT TAKEN']).to.include(t.status));
+      });
+      pm.test('No questions, answers or HR-only fields', () => { const s = JSON.stringify(body); ['question', 'answer', 'correct', 'pass_mark', 'review_required', 'eligibility_note'].forEach((k) => pm.expect(s).to.not.include(k)); });
+    },
+  }),
+  req('GET My Results — another candidate\'s id in the URL is ignored', 'GET', '/api/results/me', {
+    cookie: VIEWER, q: { candidateId: '{{iqCandidateS1}}', assessmentId: '{{iqAttemptS1}}' },
+    test: () => { pm.test('Still Candidate A, never S1', () => { pm.expect(body.candidateName).to.equal(env('runTag') + ' A'); pm.expect(JSON.stringify(body)).to.not.include(env('runTag') + ' S1'); }); },
+  }),
+  req('GET Another Person\'s Result by path', 'GET', '/api/results/candidates/{{iqCandidateS1}}', { cookie: VIEWER, status: 404 }),
+  req('GET Export My Results (Excel)', 'GET', '/api/results/me/export.xlsx', { cookie: VIEWER, type: 'xlsx', maxMs: 8000 }),
+  req('PUT My Results — refused (read only)', 'PUT', '/api/results/me', { cookie: VIEWER, json: { overallStatus: 'PASS' }, status: 404 }),
+  req('GET Admin API with the Result Viewer token as the admin cookie', 'GET', '/api/admin/candidates', { cookie: 'hr_session={{viewerSession}}', status: 401, desc: 'A Result Viewer token is signed with its own key: it never opens the admin API.' }),
+  req('DELETE Admin API with the Result Viewer session', 'DELETE', '/api/admin/candidates/{{iqCandidateS1}}', { cookie: VIEWER, status: 401 }),
+  req('POST Disable Result Viewer', 'POST', '/api/admin/result-viewers/{{viewerId}}/disable', { test: () => { pm.test('Disabled', () => pm.expect(body.active).to.equal(false)); } }),
+  req('GET My Results — after the account is disabled', 'GET', '/api/results/me', { cookie: VIEWER, status: 401, desc: 'Disabling ends the open session at once.' }),
+  req('POST Result Viewer Login — disabled account', 'POST', '/api/results/auth/login', { noAuth: true, json: '{ "username": "postman-test-{{runStamp}}", "password": "postman-viewer-1" }', status: 403, error: 'disabled' }),
+  req('POST Enable Result Viewer', 'POST', '/api/admin/result-viewers/{{viewerId}}/enable', { test: () => { pm.test('Active', () => pm.expect(body.active).to.equal(true)); } }),
+  req('POST Reset Result Viewer Password — too short', 'POST', '/api/admin/result-viewers/{{viewerId}}/password', { json: { password: 'short' }, status: 400, error: 'at least 8 characters' }),
+  req('POST Reset Result Viewer Password', 'POST', '/api/admin/result-viewers/{{viewerId}}/password', { json: { password: 'postman-viewer-2' }, test: () => { pm.test('Account returned, no password', () => pm.expect(JSON.stringify(body)).to.not.include('postman-viewer-2')); } }),
+  req('POST Result Viewer Login — new password', 'POST', '/api/results/auth/login', { noAuth: true, json: '{ "username": "postman-test-{{runStamp}}", "password": "postman-viewer-2" }', test: [keepViewerCookie] }),
+  req('POST Result Viewer Logout', 'POST', '/api/results/auth/logout', { cookie: VIEWER, test: () => { pm.test('ok', () => pm.expect(body.ok).to.equal(true)); } }),
+  req('GET My Results — logged-out token replayed', 'GET', '/api/results/me', { cookie: VIEWER, status: 401, test: () => { pm.environment.set('viewerSession', ''); } }),
+  req('DELETE Result Viewer (the login only)', 'DELETE', '/api/admin/result-viewers/{{viewerId}}', { test: () => { pm.test('ok', () => pm.expect(body.ok).to.equal(true)); } }),
+  req('DELETE Result Viewer — already deleted', 'DELETE', '/api/admin/result-viewers/{{viewerId}}', { status: 404 }),
+  req('GET Candidate A — results kept after deleting the login', 'GET', '/api/admin/candidates/{{candidateIdA}}', { test: () => { pm.test('A\'s assessment is still there', () => pm.expect(body.candidate.tests.length).to.be.above(0)); } }),
+]);
 const cleanup = folder('99 Cleanup', 'Removes ONLY temporary data: candidates, links, questions, categories and test types whose names start with "POSTMAN TEST" (the prefix of every name this collection creates, including leftovers of an interrupted earlier run). Order matters: candidates (and their attempts) → links → questions → categories → test types. Real data is never deleted.', [
+  sweep('DELETE Temporary Result Viewer accounts', '/api/admin/result-viewers', 'result viewer accounts', () => {
+    const mine = body.filter((a) => /^postman-test-/i.test(a.username)).map((a) => ({ url: '/api/admin/result-viewers/' + a.id, label: a.username }));
+  }, 'Result Viewer logins named "postman-test-…" (left by an interrupted run). Only the login is deleted.'),
   sweep('DELETE Temporary Candidates', '/api/admin/candidates', 'candidates', () => {
     const mine = body.filter((c) => String(c.name).startsWith('POSTMAN TEST ')).map((c) => ({ url: '/api/admin/candidates/' + c.id, label: c.name }));
   }, 'Candidates named "POSTMAN TEST …" and (by cascade) their attempts.'),
@@ -1547,14 +1624,14 @@ const collection = {
       }
     }) } },
   ],
-  item: [health, authFolder, dashboard, candidates, testTypes, cats, questions, imports, imagesFolder, assessments, links, exam, iq, timer, results, settings, internalStaff, internalLinks, internalExam, internalResults, security, cleanup],
+  item: [health, authFolder, dashboard, candidates, testTypes, cats, questions, imports, imagesFolder, assessments, links, exam, iq, timer, results, settings, internalStaff, internalLinks, internalExam, internalResults, security, viewerFolder, cleanup],
 };
 
 // Import tests use the collection-provided helper (eval of libUsable); replace the placeholder.
 const walk = (items) => items.forEach((it) => { if (it.item) walk(it.item); else for (const ev of it.event) ev.script.exec = ev.script.exec.map((l) => l.replace("eval(pm.environment.get('libUsable'));", LIB_USABLE)); });
 walk(collection.item);
 
-const VARS = ['runTag', 'reportStatuses', 'secondAdminToken', 'guardNeed', 'guardLinkId', 'guardQuestionId', 'guardQuestionJson', 'candidateIdA', 'sessionUsedByA', 'sameBrowserSessionSB2', 'sameBrowserSessionSB3',
+const VARS = ['runTag', 'viewerExpectedStatus', 'viewerId', 'viewerSession', 'reportStatuses', 'secondAdminToken', 'guardNeed', 'guardLinkId', 'guardQuestionId', 'guardQuestionJson', 'candidateIdA', 'sessionUsedByA', 'sameBrowserSessionSB2', 'sameBrowserSessionSB3',
   'questionsSB2', 'questionsSB3', 'answersSB2', 'answersSB3', 'essayQuestionSB2', 'essayQuestionSB3', 'staffSessionUsedByA', 'staffSessionUsedByE', 'staffSessionUsedByG', 'internalResultE',
   'internalAnswersE1', 'internalAnswersE2', 'internalExportSize', 'internalExportOneSize', 'candidateId', 'questionId', 'pictureQuestionId', 'imageId', 'categoryId', 'category2Id', 'testTypeKey', 'interviewTypeKey', 'calcTypeKey', 'throwawayTypeKey',
   'assessmentId', 'attemptB', 'linkId', 'linkToken', 'candidateToken', 'iqLinkId', 'iqLinkToken', 'spareLinkId', 'spareLinkToken', 'oldSpareToken', 'timerLinkId', 'timerLinkToken',

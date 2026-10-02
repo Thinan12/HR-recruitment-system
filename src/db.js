@@ -274,6 +274,24 @@ db.exec('CREATE INDEX IF NOT EXISTS idx_assessments_staff ON assessments(staff_i
 addMissingColumns('admins', [['token_version', 'INTEGER NOT NULL DEFAULT 0']]);
 db.exec('CREATE TABLE IF NOT EXISTS revoked_tokens (jti TEXT PRIMARY KEY, expires_at INTEGER NOT NULL)');
 
+// Result Viewer accounts: a separate, read-only login for ONE person (a
+// candidate or a staff member) to see their own results. Not an admin.
+// Deleting the person removes the account; the account never owns results.
+db.exec(`CREATE TABLE IF NOT EXISTS result_viewers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+  password_hash TEXT NOT NULL,
+  candidate_id INTEGER REFERENCES candidates(id) ON DELETE CASCADE,
+  staff_id INTEGER REFERENCES internal_staff(id) ON DELETE CASCADE,
+  active INTEGER NOT NULL DEFAULT 1,
+  token_version INTEGER NOT NULL DEFAULT 0,
+  created_by TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  last_login_at TEXT,
+  CHECK ((candidate_id IS NULL) <> (staff_id IS NULL))
+)`);
+
 const DEFAULT_SETTINGS = {
   default_time_minutes: '30',
   default_link_expiry_minutes: '1440',

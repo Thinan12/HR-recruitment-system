@@ -285,6 +285,7 @@ const ROUTES = {
   results: () => renderResults(),
   report: () => renderReport(),
   settings: () => renderSettings(),
+  'result-viewers': () => renderResultViewers(),
 };
 
 async function route() {
@@ -1641,6 +1642,66 @@ async function renderResults() {
 // ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Result Viewer accounts: a separate read-only login (/results) for ONE
+// candidate or staff member to see their own results. HR creates, disables,
+// resets the password, or deletes the login (never the person's results).
+// ---------------------------------------------------------------------------
+
+async function renderResultViewers() {
+  const [accounts, candidates, staffData] = await Promise.all([api('GET', '/result-viewers'), api('GET', '/candidates'), api('GET', '/internal/staff')]);
+  const reload = () => renderResultViewers();
+  const loginUrl = location.origin + '/results';
+
+  // New account.
+  const personSelect = (type) => (type === 'staff'
+    ? select('staff_id', [['', '— choose a staff member —'], ...staffData.staff.map((s) => [s.id, `${s.name} (${s.employee_id})`])], '')
+    : select('candidate_id', [['', '— choose a candidate —'], ...candidates.map((c) => [c.id, `${c.name}${c.phone ? ' (' + c.phone + ')' : ''}`])], ''));
+  const typeSelect = select('person_type', [['candidate', 'Recruitment candidate'], ['staff', 'Internal staff member']], 'candidate');
+  const personBox = h('div', { class: 'field' }, h('label', {}, 'Person'), personSelect('candidate'));
+  typeSelect.addEventListener('change', () => personBox.replaceChildren(h('label', {}, 'Person'), personSelect(typeSelect.value)));
+  const form = h('form', { class: 'grid', id: 'rv-form' },
+    field('Account for', typeSelect), personBox,
+    field('Username', h('input', { name: 'username', required: true, minlength: 3, maxlength: 50, autocomplete: 'off', pattern: '[A-Za-z0-9._@\\-]{3,50}' })),
+    field('Password (8+ characters)', h('input', { name: 'password', type: 'password', required: true, minlength: 8, autocomplete: 'new-password' })),
+    h('div', { class: 'wide' }, h('button', { type: 'submit' }, 'Create account')));
+  const formCard = h('div', { class: 'card' }, h('h2', {}, 'New Result Viewer account'),
+    h('p', { class: 'muted small' }, 'The person logs in at ', h('strong', {}, loginUrl), ' and sees only their own results (scores, PASS / NOT PASS, level), can print them and export them to Excel. They never see questions, answers, other people or any HR page. Give them the username and password yourself: the password is not shown again.'),
+    form);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const v = formValues(form);
+    const body = { username: v.username, password: v.password, ...(v.person_type === 'staff' ? { staff_id: v.staff_id } : { candidate_id: v.candidate_id }) };
+    try { await api('POST', '/result-viewers', body); form.reset(); flash(formCard, `Account "${v.username}" created.`, 'ok'); setTimeout(reload, 900); } catch (ex) { flash(formCard, ex.message); }
+  });
+
+  // Existing accounts.
+  const act = async (card, fn) => { try { await fn(); reload(); } catch (ex) { flash(card, ex.message); } };
+  const listCard = h('div', { class: 'card' });
+  const resetPassword = (a) => {
+    const input = h('input', { type: 'password', minlength: 8, autocomplete: 'new-password' });
+    const box = h('div', {}, h('p', { class: 'muted small' }, `A new password for "${a.username}". Their open sessions end.`), field('New password (8+ characters)', input));
+    const close = modal('Reset password', h('div', {}, box, h('button', { type: 'button', onclick: async () => {
+      try { await api('POST', `/result-viewers/${a.id}/password`, { password: input.value }); close(); flash(listCard, `Password of "${a.username}" changed.`, 'ok'); } catch (ex) { flash(box, ex.message); }
+    } }, 'Save new password')));
+  };
+  const rows = accounts.map((a) => h('tr', {},
+    h('td', {}, h('strong', {}, a.username)),
+    h('td', {}, a.person_name || '(deleted)', h('div', { class: 'muted small' }, (a.person_type === 'staff' ? 'Staff ' : 'Candidate ') + (a.person_ref || ''))),
+    h('td', {}, h('span', { class: 'badge ' + (a.active ? 'pass' : 'neutral') }, a.active ? 'Active' : 'Disabled')),
+    h('td', { class: 'small' }, fmtDateTime(a.last_login_at)),
+    h('td', { class: 'small' }, fmtDate(a.created_at), h('div', { class: 'muted small' }, a.created_by)),
+    h('td', {}, h('div', { class: 'row' },
+      h('button', { type: 'button', class: 'secondary small', onclick: () => act(listCard, () => api('POST', `/result-viewers/${a.id}/${a.active ? 'disable' : 'enable'}`)) }, a.active ? 'Disable' : 'Enable'),
+      h('button', { type: 'button', class: 'secondary small', onclick: () => resetPassword(a) }, 'Reset password'),
+      h('button', { type: 'button', class: 'danger small', onclick: () => { if (confirm(`Delete the login "${a.username}"? The person's results are kept.`)) act(listCard, () => api('DELETE', `/result-viewers/${a.id}`)); } }, 'Delete login')))));
+  listCard.append(h('h2', {}, `Accounts (${accounts.length})`),
+    accounts.length ? h('div', { class: 'table-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Username', 'Person', 'Status', 'Last login', 'Created', ''].map((x) => h('th', {}, x)))), h('tbody', {}, rows)))
+      : h('p', { class: 'muted' }, 'No Result Viewer accounts yet.'),
+    h('p', { class: 'muted small' }, 'Disable stops the login at once (open sessions end) and keeps the account; Delete login removes only the login. Neither changes the person\'s assessments or results.'));
+  view().replaceChildren(h('h1', {}, 'Result Viewers'), formCard, listCard);
+}
 
 async function renderSettings() {
   const s = await api('GET', '/settings');

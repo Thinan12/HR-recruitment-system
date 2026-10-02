@@ -40,6 +40,7 @@ const STATUS = { Pass: 'PASS', 'Not Pass': 'NOT PASS', Pending: 'PENDING' };
 // The report's overall status IS the Company Eligibility (reports.finalAssessment):
 // every test passed AND the final score reaches the link's saved eligibility mark.
 const ELIGIBILITY_STATUS = { Eligible: 'PASS', 'Not Eligible': 'NOT PASS', Pending: 'PENDING' };
+const eligibilityStatus = (eligibility) => ELIGIBILITY_STATUS[eligibility] || 'PENDING';
 
 // Phone numbers compared by their digits (+856 20 ... = 020 ...).
 const phoneKey = (p) => {
@@ -61,7 +62,7 @@ function row(c) {
     score(general, (t) => t.percent_text || NONE),
     score(calc, (t) => t.percent_text || NONE),
     score(essay, (t) => t.score_text || NONE),
-    (c.tests || []).length ? ELIGIBILITY_STATUS[c.eligibility] || 'PENDING' : NONE,
+    (c.tests || []).length ? eligibilityStatus(c.eligibility) : NONE,
   ];
   const pct = (t) => (t && t.status === 'SUBMITTED' && t.result !== 'Pending' && t.percent != null ? t.percent / 100 : null);
   return { candidate_id: c.id, values, numbers: { 11: pct(general), 12: pct(calc) } };
@@ -156,4 +157,4 @@ const xlsx = (candidates) => tableXlsx({ sheet: 'Candidates', fields: FIELDS, ro
 const pdf = (c) => recordPdf({ title: `Candidate report - ${c.name}`, subtitle: 'Candidate Report', fields: FIELDS, values: rows([c])[0].values, statusCol: 14 });
 const word = (c) => recordWord({ title: `Candidate report - ${c.name}`, subtitle: 'Candidate Report', fields: FIELDS, values: rows([c])[0].values, statusCol: 14 });
 
-module.exports = { FIELDS, rows, xlsx, pdf, word, phoneKey, tableXlsx, recordPdf, recordWord, score, stamp, testOf, behavioralOf, STATUS, NONE };
+module.exports = { FIELDS, rows, xlsx, pdf, word, phoneKey, tableXlsx, recordPdf, recordWord, score, stamp, testOf, behavioralOf, STATUS, NONE, eligibilityStatus };

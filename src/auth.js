@@ -130,4 +130,16 @@ function changePassword(req, res) {
   res.json({ ok: true });
 }
 
-module.exports = { ensureFirstAdmin, login, logout, requireAdmin, changePassword };
+// A signing key for another kind of login (e.g. Result Viewer accounts),
+// derived from the server secret: its tokens can never pass as admin tokens,
+// and admin tokens never pass there.
+const scopedSecret = (purpose) => crypto.createHmac('sha256', JWT_SECRET).update('lalco-scope:' + purpose).digest('hex');
+const revokeToken = (jti, exp) => {
+  db.prepare('INSERT OR IGNORE INTO revoked_tokens (jti, expires_at) VALUES (?, ?)').run(jti, exp);
+  db.prepare('DELETE FROM revoked_tokens WHERE expires_at < ?').run(Math.floor(Date.now() / 1000));
+};
+const isRevoked = (jti) => !!(jti && db.prepare('SELECT 1 FROM revoked_tokens WHERE jti = ?').get(jti));
+
+module.exports = { ensureFirstAdmin, login, logout, requireAdmin, changePassword,
+  // shared with other logins (same failed-login limit per IP, same cookie reading and revocation)
+  readCookie, tooManyFailures, recordFailure, clearFailures: (ip) => failures.delete(ip), scopedSecret, revokeToken, isRevoked, IS_PRODUCTION, SESSION_HOURS };

@@ -17,6 +17,9 @@ function behaviouralTest(tests) {
   return tests.find((t) => A.T.behavior(t.section) === 'interview') || null;
 }
 
+// Pass / Not Pass Status of one internal attempt (the Status column HR sees).
+const statusOf = (a) => (a.status === 'SUBMITTED' ? SR.STATUS[a.result] || 'PENDING' : a.status === 'IN_PROGRESS' ? 'IN PROGRESS' : 'NOT STARTED');
+
 // One attempt as a results row (values in FIELDS order) with its details.
 function resultRow(a) {
   const s = a.staff_id ? staff.byId(a.staff_id) : null;
@@ -26,7 +29,7 @@ function resultRow(a) {
   const text = (v) => (v == null || String(v).trim() === '' ? SR.NONE : String(v));
   const iq = byKey('IQ');
   const beh = behaviouralTest(r.tests);
-  const status = a.status === 'SUBMITTED' ? SR.STATUS[a.result] || 'PENDING' : a.status === 'IN_PROGRESS' ? 'IN PROGRESS' : 'NOT STARTED';
+  const status = statusOf(a);
   const values = [
     text(s && s.name), text(s && s.employee_id), text(s && s.department), text(s && s.position), text(link && link.title),
     SR.score(iq, (t) => (t.lalco_iq_score != null ? `${t.lalco_iq_score} / 150` : t.score_text || SR.NONE)),
@@ -97,4 +100,4 @@ const resultsXlsx = (rows) => SR.tableXlsx({ sheet: 'Internal Staff Results', fi
 const resultPdf = (row) => SR.recordPdf({ title: `Internal staff result - ${row.values[0]}`, subtitle: 'Internal Staff Assessment Result', fields: FIELDS, values: row.values, statusCol: STATUS_COL });
 const resultWord = (row) => SR.recordWord({ title: `Internal staff result - ${row.values[0]}`, subtitle: 'Internal Staff Assessment Result', fields: FIELDS, values: row.values, statusCol: STATUS_COL });
 
-module.exports = { FIELDS, resultRow, results, links, dashboard, attempt, resultsXlsx, resultPdf, resultWord };
+module.exports = { FIELDS, resultRow, results, links, dashboard, attempt, resultsXlsx, resultPdf, resultWord, statusOf };

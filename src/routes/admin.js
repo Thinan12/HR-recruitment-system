@@ -24,6 +24,8 @@ router.post('/auth/password', auth.changePassword);
 
 // Internal Office Staff (its own records, links, results and reports).
 router.use('/internal', require('./internal'));
+// Result Viewer accounts (read-only logins for one person's own results).
+router.use('/result-viewers', require('./resultViewersAdmin'));
 
 const bad = (res, message) => res.status(400).json({ error: message });
 const notFound = (res) => res.status(404).json({ error: 'Not found.' });
