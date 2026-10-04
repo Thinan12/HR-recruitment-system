@@ -792,10 +792,12 @@ function htmlTables(html) {
     [...t[0].matchAll(/<tr[\s\S]*?<\/tr>/g)].map((r) => [...r[0].matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/g)].map((c) => decode(c[1]))));
 }
 
+// The text layer of a PDF and its number of pages.
 async function pdfText(buffer) {
   const parser = new PDFParse({ data: new Uint8Array(buffer) });
   try {
-    return (await parser.getText({ pageJoiner: '' })).text;
+    const r = await parser.getText({ pageJoiner: '' });
+    return { text: r.text, pages: r.total || (r.pages || []).length || 1 };
   } finally {
     await parser.destroy();
   }
@@ -869,15 +871,30 @@ async function parseFile(buffer, originalName, defaultSection, opts = {}) {
       // The page layout (columns, bullets, table cells) and the plain text are both read.
       const candidates = [];
       try { const bullets = bulletQuestions(await pdfLines(buffer)); if (bullets) candidates.push(bulletRows(bullets, defaultSection)); } catch { /* layout not readable: text only */ }
-      const text = await pdfText(buffer);
+      const { text, pages } = await pdfText(buffer);
       info.text_chars = text.replace(/\s/g, '').length;
+      info.pages = pages;
       candidates.push(rowsFromText(text, defaultSection, { mapping }));
       rows = pickBest(candidates);
-      // Pages that are pictures have no text to read: OCR only then.
-      if (!usableCount(rows) && info.text_chars < 200) {
+      // Pages that are pictures (a scan, or a PDF made of page images) have little
+      // or no text: when the text gave no questions and there are fewer than about
+      // 150 characters per page, every page is read with OCR. Three readings of the
+      // OCR are tried (one question per page, numbered questions with answer
+      // cards, and the OCR text through the text readers) and the best one is kept.
+      if (!usableCount(rows) && info.text_chars < Math.max(200, pages * 150)) {
         try {
           const scanned = await readScannedPdf(buffer, defaultSection);
-          if (scanned.length) { rows = scanned; info.ocr = true; }
+          const label = (r, name) => r && Object.assign(r, { format: `scanned pages (OCR): ${r.format || name}` });
+          // The OCR text through the text readers: anything it finds is checked by HR.
+          const fromText = scanned.text ? rowsFromText(scanned.text, defaultSection, { mapping }) : null;
+          if (fromText) for (const r of fromText) r.review = [r.review, 'Read from a scanned page (OCR): check the wording, options and answer.'].filter(Boolean).join(' ');
+          // Readings are ranked by complete questions (2+ options, text or picture, and an answer),
+          // then by usable ones, so loose text never outranks a recognised layout.
+          const complete = (rs) => (rs || []).filter((r) => r.correct_answer && LETTER_LIST.filter((L) => r['option_' + L.toLowerCase()] || r[`option_${L.toLowerCase()}_image`]).length >= 2).length;
+          const readings = [label(scanned.booklet, 'one question per page'), label(scanned.numbered, 'numbered questions with answer cards'), label(fromText, 'text')].filter((r) => r && r.length);
+          readings.sort((a, b) => complete(b) - complete(a) || usableCount(b) - usableCount(a));
+          const best = readings[0];
+          if (best && (complete(best) || usableCount(best))) { rows = best; info.ocr = true; } else info.ocr_tried = true;
         } catch (e) {
           if (e.message === 'busy') throw new ImportError('Another scanned PDF is being read right now. Please try again in a minute.');
           throw e;
@@ -895,7 +912,7 @@ async function parseFile(buffer, originalName, defaultSection, opts = {}) {
   // Nothing that looks like a question at all, and no table to map: say what was found.
   if (rows.length === 0 && !rows.unmapped) {
     logImport(originalName, info, rows, []);
-    throw new ImportError(`${NO_STRUCTURE}\n\nDetected format: ${rows.format || 'no question structure found'}\nQuestions found: 0\n\nThe file was read, but no numbered, labelled, bulleted or table questions were found in it.`);
+    throw new ImportError(`${NO_STRUCTURE}\n\nDetected format: ${rows.format || 'no question structure found'}\nQuestions found: 0\n\nThe file was read, but no numbered, labelled, bulleted or table questions were found in it.${info.ocr_tried ? '\n\nIts pages are pictures (scanned): every page was read with OCR, but no question layout was recognised. If the scan is blurred or tilted, a clearer scan or the original Word / Excel file will import better.' : ''}`);
   }
   if (rows.length > MAX_ROWS) throw new ImportError(`This file has more than ${MAX_ROWS} questions. Please split it into smaller files.`);
   const checked = rows.map((raw, i) => {
@@ -921,7 +938,7 @@ function logImport(name, info, rows, checked) {
   const ok = (r) => r.errors.length === 0 || (r.question.type_name && r.errors.length === 1 && r.errors[0].startsWith('Test Type'));
   const count = (f) => checked.filter(f).length;
   const line = {
-    type: info.file_type, bytes: undefined, format: rows.format || '-', ocr: !!info.ocr, tables: info.tables, text_chars: info.text_chars,
+    type: info.file_type, bytes: undefined, format: rows.format || '-', ocr: !!info.ocr, ocr_tried: !!info.ocr_tried, pages: info.pages, tables: info.tables, text_chars: info.text_chars,
     sections: (rows.sections || []).length, found: checked.length, valid: count((r) => ok(r) && !r.review), review: count((r) => ok(r) && r.review),
     invalid: count((r) => !ok(r)), mcq: count((r) => r.question.option_a), open: count((r) => !r.question.option_a),
     answer_key: rows.keyCount || 0, categories: new Set(checked.map((r) => r.question.category).filter(Boolean)).size, unmapped_table: !!rows.unmapped,
