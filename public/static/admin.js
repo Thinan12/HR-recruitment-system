@@ -1119,12 +1119,16 @@ function showPreview(container, p, onDone, reread) {
   const typeBox = typeSelects.length ? h('div', { class: 'message error' }, h('strong', {}, 'Test types to decide before importing'), h('br'),
     typeSelects.map(({ d, el }) => h('div', { class: 'row small section-gap-sm' }, `Test Type "${d.name}" does not exist (${d.count} question${d.count === 1 ? '' : 's'}):`, el))) : null;
   // Category names from the file that are not in the list: create them, or use an existing one.
+  // New categories are created by default (nothing to click); HR may pick an existing one instead.
+  // Only an INACTIVE category needs a choice before importing.
   const decisionSelects = (p.category_decisions || []).map((d) => ({ d, el: h('select', { class: 'inline-input' },
-    h('option', { value: '' }, 'Choose…'), d.inactive ? null : h('option', { value: 'create' }, `Create category "${d.name}"`),
+    d.inactive ? h('option', { value: '' }, 'Choose…') : null, d.inactive ? null : h('option', { value: 'create', selected: true }, `Create category "${d.name}"`),
     (p.categories || []).filter((c) => c.section === d.section).map((c) => h('option', { value: 'use:' + c.id }, `Use existing: ${c.name}`))) }));
-  const createAll = decisionSelects.some(({ d }) => !d.inactive) ? h('button', { type: 'button', class: 'secondary small', onclick: () => decisionSelects.forEach(({ d, el }) => { if (!d.inactive) el.value = 'create'; }) }, 'Create all new categories') : null;
-  const decisionBox = decisionSelects.length ? h('div', { class: 'message error' }, h('strong', {}, 'Categories to decide before importing'), ' ', createAll, h('br'),
-    decisionSelects.map(({ d, el }) => h('div', { class: 'row small section-gap-sm' }, `Category "${d.name}" ${d.inactive ? 'is inactive' : 'does not exist'} for ${SECTION_LABEL[d.section]} (${d.count} question${d.count === 1 ? '' : 's'}):`, el))) : null;
+  const mustChoose = decisionSelects.some(({ d }) => d.inactive);
+  const decisionBox = decisionSelects.length ? h('div', { class: 'message ' + (mustChoose ? 'error' : 'ok') },
+    h('strong', {}, mustChoose ? 'Categories to decide before importing' : `New categories (${decisionSelects.length}) will be created when you import`),
+    mustChoose ? null : h('span', { class: 'small' }, ' — or choose an existing category for any of them below.'), h('br'),
+    decisionSelects.map(({ d, el }) => h('div', { class: 'row small section-gap-sm' }, `Category "${d.name}" ${d.inactive ? 'is inactive' : 'is new'} for ${SECTION_LABEL[d.section]} (${d.count} question${d.count === 1 ? '' : 's'}):`, el))) : null;
 
   // A table the importer could not recognise: HR says which column is what, and the file is read again.
   const mapBox = p.unmapped && p.unmapped.length && reread ? (() => {
